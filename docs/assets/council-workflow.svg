@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-labelledby="title desc">
+  <title id="title">Council orchestration workflow</title>
+  <desc id="desc">Five phase cards: plan, vote, build, review, adopt.</desc>
+  <rect width="1280" height="360" fill="#0b0e14"/>
+  <text x="48" y="54" font-family="Inter,Arial,sans-serif" font-size="30" font-weight="700" fill="#f8f8f2">Plan → Vote → Build → Review → Adopt</text>
+  <text x="48" y="88" font-family="Inter,Arial,sans-serif" font-size="17" fill="#b7bcc7">Run multiple coding agents as workers and reviewers, then adopt the winning diff.</text>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6272a4"/>
+    </marker>
+  </defs>
+
+  <g font-family="Inter,Arial,sans-serif">
+    <g transform="translate(48,136)">
+      <rect width="190" height="138" rx="10" fill="#111827" stroke="#8be9fd" stroke-width="2"/>
+      <text x="22" y="42" font-size="24" font-weight="700" fill="#8be9fd">1. Plan</text>
+      <text x="22" y="76" font-size="15" fill="#f8f8f2">Workers write</text>
+      <text x="22" y="98" font-size="15" fill="#f8f8f2">implementation plans</text>
+      <text x="22" y="120" font-size="14" fill="#9ca3af">plans/*.md</text>
+    </g>
+    <line x1="252" y1="205" x2="320" y2="205" stroke="#6272a4" stroke-width="3" marker-end="url(#arrow)"/>
+
+    <g transform="translate(334,136)">
+      <rect width="190" height="138" rx="10" fill="#111827" stroke="#bd93f9" stroke-width="2"/>
+      <text x="22" y="42" font-size="24" font-weight="700" fill="#bd93f9">2. Vote</text>
+      <text x="22" y="76" font-size="15" fill="#f8f8f2">Reviewers rank</text>
+      <text x="22" y="98" font-size="15" fill="#f8f8f2">anonymous plans</text>
+      <text x="22" y="120" font-size="14" fill="#9ca3af">Borda tally</text>
+    </g>
+    <line x1="538" y1="205" x2="606" y2="205" stroke="#6272a4" stroke-width="3" marker-end="url(#arrow)"/>
+
+    <g transform="translate(620,136)">
+      <rect width="190" height="138" rx="10" fill="#111827" stroke="#50fa7b" stroke-width="2"/>
+      <text x="22" y="42" font-size="24" font-weight="700" fill="#50fa7b">3. Build</text>
+      <text x="22" y="76" font-size="15" fill="#f8f8f2">Workers implement</text>
+      <text x="22" y="98" font-size="15" fill="#f8f8f2">in git worktrees</text>
+      <text x="22" y="120" font-size="14" fill="#9ca3af">isolated branches</text>
+    </g>
+    <line x1="824" y1="205" x2="892" y2="205" stroke="#6272a4" stroke-width="3" marker-end="url(#arrow)"/>
+
+    <g transform="translate(906,136)">
+      <rect width="190" height="138" rx="10" fill="#111827" stroke="#ffb86c" stroke-width="2"/>
+      <text x="22" y="42" font-size="24" font-weight="700" fill="#ffb86c">4. Review</text>
+      <text x="22" y="76" font-size="15" fill="#f8f8f2">Run checks, then</text>
+      <text x="22" y="98" font-size="15" fill="#f8f8f2">rank build diffs</text>
+      <text x="22" y="120" font-size="14" fill="#9ca3af">builds/*.diff</text>
+    </g>
+    <line x1="1110" y1="205" x2="1178" y2="205" stroke="#6272a4" stroke-width="3" marker-end="url(#arrow)"/>
+
+    <g transform="translate(1192,136)">
+      <rect width="52" height="138" rx="10" fill="#111827" stroke="#ff79c6" stroke-width="2"/>
+      <text x="16" y="42" font-size="24" font-weight="700" fill="#ff79c6">5</text>
+      <text x="16" y="78" font-size="16" fill="#f8f8f2">Adopt</text>
+      <text x="16" y="106" font-size="13" fill="#9ca3af">diff</text>
+    </g>
+  </g>
+</svg>

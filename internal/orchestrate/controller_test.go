@@ -1,0 +1,461 @@
+package orchestrate
+
+import (
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/umutarmut38/council/internal/agent"
+	"github.com/umutarmut38/council/internal/config"
+)
+
+func TestVotePromptsExcludeOwnPlan(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+
+	cfg := config.Config{
+		Agents: map[string]config.AgentConfig{
+			"a": {Enabled: true, Command: []string{"true"}},
+			"b": {Enabled: true, Command: []string{"true"}},
+			"c": {Enabled: true, Command: []string{"true"}},
+		},
+		Sessions: config.SessionConfig{RootDir: filepath.Join(root, ".council", "runs")},
+	}
+	cfg.Normalize()
+	ctrl, err := NewController(cfg, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.StartRun("do it"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a", "b", "c"} {
+		if err := os.WriteFile(ctrl.Run().PlanPath(name), []byte("plan by "+name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	prompts, err := ctrl.VotePrompts()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ownLetter := map[string]string{}
+	for _, r := range ctrl.refs {
+		ownLetter[r.Agent] = r.Letter
+	}
+	for _, voter := range []string{"a", "b", "c"} {
+		p := prompts[voter]
+		own := ctrl.Run().AnonPlanPath(ownLetter[voter])
+		if strings.Contains(p, own) {
+			t.Fatalf("%s's prompt references its own plan file %q", voter, own)
+		}
+		if got := strings.Count(p, "- Plan "); got != 2 {
+			t.Fatalf("%s should rank 2 other plans, prompt lists %d: %q", voter, got, p)
+		}
+	}
+}
+
+func TestControllerFiltersAgentsPerPhase(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+
+	cfg := config.Config{
+		Agents: map[string]config.AgentConfig{
+			"builder": {
+				Enabled: true,
+				Command: []string{"true"},
+			},
+			"planner": {
+				Enabled: true,
+				Command: []string{"true"},
+				Orchestration: config.OrchestrationConfig{
+					ExcludeBuild: true,
+				},
+			},
+			"skip": {
+				Enabled: true,
+				Command: []string{"true"},
+				Orchestration: config.OrchestrationConfig{
+					Exclude: true,
+				},
+			},
+		},
+		Sessions: config.SessionConfig{RootDir: filepath.Join(root, ".council", "runs")},
+	}
+	cfg.Normalize()
+
+	ctrl, err := NewController(cfg, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ctrl.Agents(); len(got) != 2 || got[0] != "builder" || got[1] != "planner" {
+		t.Fatalf("agents = %v", got)
+	}
+	if err := ctrl.StartRun("do it"); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := ctrl.AgentsForPhase(config.PhasePlan); len(got) != 2 || got[0] != "builder" || got[1] != "planner" {
+		t.Fatalf("plan agents = %v", got)
+	}
+	if got := ctrl.AgentsForPhase(config.PhaseBuild); len(got) != 1 || got[0] != "builder" {
+		t.Fatalf("build agents = %v", got)
+	}
+
+	store, err := ctrl.Store(config.PhasePlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompts := map[string]string{"builder": "builder prompt", "planner": "planner prompt"}
+	sessions := ctrl.PhaseSessions(config.PhasePlan, store, prompts)
+	if len(sessions) != 2 {
+		t.Fatalf("plan sessions = %+v", sessions)
+	}
+	for _, session := range sessions {
+		if session.Config.CWD != root {
+			t.Fatalf("%s plan cwd = %q, want repo root %q", session.Name, session.Config.CWD, root)
+		}
+	}
+	artifacts := ctrl.ArtifactPaths(config.PhasePlan)
+	if artifacts["builder"] != ctrl.Run().PlanPath("builder") {
+		t.Fatalf("builder artifact = %q, want %q", artifacts["builder"], ctrl.Run().PlanPath("builder"))
+	}
+}
+
+func TestControllerAppendsPromptForCommandPromptAgents(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+
+	cfg := config.Config{
+		Agents: map[string]config.AgentConfig{
+			"argv": {
+				Enabled: true,
+				Command: []string{"agent"},
+				Orchestration: config.OrchestrationConfig{
+					PlanCommand:         []string{"agent", "-p"},
+					PlanPromptInCommand: true,
+				},
+			},
+			"tty": {
+				Enabled: true,
+				Command: []string{"agent"},
+			},
+		},
+		Sessions: config.SessionConfig{RootDir: filepath.Join(root, ".council", "runs")},
+	}
+	cfg.Normalize()
+	ctrl, err := NewController(cfg, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.StartRun("do it"); err != nil {
+		t.Fatal(err)
+	}
+
+	prompts := map[string]string{"argv": "argv prompt", "tty": "tty prompt"}
+	store, err := ctrl.Store(config.PhasePlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := ctrl.PhaseSessions(config.PhasePlan, store, prompts)
+	byName := map[string]*agent.Session{}
+	for _, session := range sessions {
+		byName[session.Name] = session
+	}
+	if got, want := byName["argv"].Config.Command, []string{"agent", "-p", "argv prompt"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("argv command = %v, want %v", got, want)
+	}
+	if got, want := byName["tty"].Config.Command, []string{"agent"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("tty command = %v, want %v", got, want)
+	}
+	if interactive := ctrl.InteractivePrompts(config.PhasePlan, prompts); len(interactive) != 1 || interactive["tty"] != "tty prompt" {
+		t.Fatalf("interactive prompts = %v", interactive)
+	}
+}
+
+func chdir(t *testing.T, dir string) {
+	t.Helper()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(old)
+	})
+}
+
+func TestRunArtifactsAreAbsoluteUnderLaunchDir(t *testing.T) {
+	repo := initRepo(t)
+	// Launch council from a subdirectory of the repo (the "poc" scenario).
+	sub := filepath.Join(repo, "poc")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, sub)
+
+	cfg := config.Config{
+		Agents:   map[string]config.AgentConfig{"a": {Enabled: true, Command: []string{"true"}}},
+		Sessions: config.SessionConfig{RootDir: ".council/runs"}, // relative on purpose
+	}
+	cfg.Normalize()
+	ctrl, err := NewController(cfg, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.StartRun("do it"); err != nil {
+		t.Fatal(err)
+	}
+
+	planPath := ctrl.Run().PlanPath("a")
+	if !filepath.IsAbs(planPath) {
+		t.Fatalf("plan artifact path must be absolute, got %q", planPath)
+	}
+	if !strings.HasPrefix(planPath, sub) {
+		t.Fatalf("plan artifact %q should live under the launch dir %q, not the repo root", planPath, sub)
+	}
+
+	// Plan agents run in the launch dir, not the git root.
+	store, err := ctrl.Store(config.PhasePlan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range ctrl.PhaseSessions(config.PhasePlan, store, map[string]string{"a": "x"}) {
+		if s.Config.CWD != sub {
+			t.Fatalf("plan cwd = %q, want launch dir %q", s.Config.CWD, sub)
+		}
+	}
+}
+
+func TestScopeSelectsJudgesButCandidatesAreAllProduced(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+
+	cfg := config.Config{
+		Agents: map[string]config.AgentConfig{
+			"a": {Enabled: true, Command: []string{"true"}},
+			"b": {Enabled: true, Command: []string{"true"}},
+			"c": {Enabled: true, Command: []string{"true"}},
+		},
+		Sessions: config.SessionConfig{RootDir: filepath.Join(root, ".council", "runs")},
+	}
+	cfg.Normalize()
+	ctrl, err := NewController(cfg, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.StartRun("issue"); err != nil {
+		t.Fatal(err)
+	}
+
+	// a and b produced plans; c did not.
+	for _, name := range []string{"a", "b"} {
+		if err := os.WriteFile(ctrl.Run().PlanPath(name), []byte("plan "+name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Scope the vote to only c — c reviews a's and b's plans.
+	ctrl.SetScope([]string{"c"})
+	if got := ctrl.AgentsForPhase(config.PhaseVote); len(got) != 1 || got[0] != "c" {
+		t.Fatalf("vote participants = %v, want [c]", got)
+	}
+
+	prompts, err := ctrl.VotePrompts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := prompts["a"]; ok {
+		t.Fatal("a is out of scope and should get no vote prompt")
+	}
+	if got := strings.Count(prompts["c"], "- Plan "); got != 2 {
+		t.Fatalf("c should rank 2 produced plans (a,b), got %d: %q", got, prompts["c"])
+	}
+
+	// Scope nil restores all participants.
+	ctrl.SetScope(nil)
+	if got := ctrl.AgentsForPhase(config.PhasePlan); len(got) != 3 {
+		t.Fatalf("cleared scope plan participants = %v, want all 3", got)
+	}
+}
+
+func TestControllerRoutesByRole(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+
+	cfg := config.Config{
+		Agents: map[string]config.AgentConfig{
+			"worker1":  {Enabled: true, Command: []string{"true"}, Role: []string{config.RoleWorker}},
+			"reviewer": {Enabled: true, Command: []string{"true"}, Role: []string{config.RoleReviewer}},
+			"both":     {Enabled: true, Command: []string{"true"}}, // empty role -> both
+		},
+		Sessions: config.SessionConfig{RootDir: filepath.Join(root, ".council", "runs")},
+	}
+	cfg.Normalize()
+	ctrl, err := NewController(cfg, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Workers (worker1, both) plan and build; reviewers (reviewer, both) vote and review.
+	if got := ctrl.AgentsForPhase(config.PhasePlan); !reflect.DeepEqual(got, []string{"both", "worker1"}) {
+		t.Fatalf("plan agents = %v, want [both worker1]", got)
+	}
+	if got := ctrl.AgentsForPhase(config.PhaseBuild); !reflect.DeepEqual(got, []string{"both", "worker1"}) {
+		t.Fatalf("build agents = %v, want [both worker1]", got)
+	}
+	if got := ctrl.AgentsForPhase(config.PhaseVote); !reflect.DeepEqual(got, []string{"both", "reviewer"}) {
+		t.Fatalf("vote agents = %v, want [both reviewer]", got)
+	}
+	if got := ctrl.AgentsForPhase(config.PhaseReview); !reflect.DeepEqual(got, []string{"both", "reviewer"}) {
+		t.Fatalf("review agents = %v, want [both reviewer]", got)
+	}
+}
+
+func TestResumeTargetRestoresActivePlanAndOnlyPromptsMissingAgents(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+
+	cfg := config.Config{
+		Agents: map[string]config.AgentConfig{
+			"a": {Enabled: true, Command: []string{"true"}},
+			"b": {Enabled: true, Command: []string{"true"}},
+		},
+		Sessions: config.SessionConfig{RootDir: filepath.Join(root, ".council", "runs")},
+	}
+	cfg.Normalize()
+	ctrl, err := NewController(cfg, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.StartRun("do it"); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.SaveActivePhase(config.PhasePlan, []string{"a", "b"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ctrl.Run().PlanPath("a"), []byte("done"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	target, err := ctrl.ResumeTarget()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.Phase != config.PhasePlan {
+		t.Fatalf("phase = %q, want plan", target.Phase)
+	}
+	if _, ok := target.Prompts["a"]; ok {
+		t.Fatalf("completed agent should not be prompted again: %v", target.Prompts)
+	}
+	if target.Prompts["b"] == "" {
+		t.Fatalf("missing agent should receive a resume prompt: %v", target.Prompts)
+	}
+	if !reflect.DeepEqual(target.Participants, []string{"a", "b"}) {
+		t.Fatalf("participants = %v, want [a b]", target.Participants)
+	}
+}
+
+func TestVoteAssignmentsPersistAcrossResume(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+
+	cfg := config.Config{
+		Agents: map[string]config.AgentConfig{
+			"a": {Enabled: true, Command: []string{"true"}},
+			"b": {Enabled: true, Command: []string{"true"}},
+			"c": {Enabled: true, Command: []string{"true"}},
+		},
+		Sessions: config.SessionConfig{RootDir: filepath.Join(root, ".council", "runs")},
+	}
+	cfg.Normalize()
+	ctrl, err := NewController(cfg, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.StartRun("do it"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a", "b", "c"} {
+		if err := os.WriteFile(ctrl.Run().PlanPath(name), []byte("plan "+name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := ctrl.VotePrompts(); err != nil {
+		t.Fatal(err)
+	}
+	refs := append([]PlanRef(nil), ctrl.refs...)
+
+	resumed, err := NewController(cfg, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := resumed.UseRun(ctrl.Run().Stamp); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resumed.VotePrompts(); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(resumed.refs, refs) {
+		t.Fatalf("resumed refs = %+v, want %+v", resumed.refs, refs)
+	}
+}
+
+func TestResumeBuildDoesNotResetInterruptedWorktree(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+
+	cfg := config.Config{
+		Agents: map[string]config.AgentConfig{
+			"worker": {Enabled: true, Command: []string{"true"}, Role: []string{config.RoleWorker}},
+		},
+		Sessions: config.SessionConfig{RootDir: filepath.Join(root, ".council", "runs")},
+	}
+	cfg.Normalize()
+	ctrl, err := NewController(cfg, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.StartRun("do it"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ctrl.Run().PlanPath("worker"), []byte("plan"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ctrl.Run().ResultPath(), []byte(`{"winner_agent":"worker"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ctrl.BuildPrompt(); err != nil {
+		t.Fatal(err)
+	}
+	stray := filepath.Join(ctrl.worktrees["worker"], "half-done.txt")
+	if err := os.WriteFile(stray, []byte("keep me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.SaveActivePhase(config.PhaseBuild, []string{"worker"}, true); err != nil {
+		t.Fatal(err)
+	}
+
+	resumed, err := NewController(cfg, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := resumed.UseRun(ctrl.Run().Stamp); err != nil {
+		t.Fatal(err)
+	}
+	target, err := resumed.ResumeTarget()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.Phase != config.PhaseBuild || !target.SendPrompts || target.PendingBuild {
+		t.Fatalf("target = %+v, want active build with prompts sent", target)
+	}
+	if _, err := os.Stat(stray); err != nil {
+		t.Fatalf("resume reset or removed interrupted work: %v", err)
+	}
+}

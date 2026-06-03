@@ -1,0 +1,17 @@
+.DS_Store
+.env
+.env.*
+
+# council runtime data
+.council/
+.claude/
+poc/
+
+# Build outputs
+bin/
+dist/
+coverage.out
+
+# JavaScript examples
+node_modules/
+*.tsbuildinfo

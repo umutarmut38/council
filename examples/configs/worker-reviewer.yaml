@@ -1,0 +1,100 @@
+# Example local config for a repository that wants separate builders and judges.
+#
+# Copy to .council.yaml in a project, then adjust commands for the agent CLIs
+# installed on your machine.
+
+ui:
+  layout: paged-grid
+  page_rows: 2
+  page_cols: 4
+  group_by: category
+  initial_prompt_delay_ms: 8000
+
+review:
+  # Set this per repo, for example ["go", "test", "./..."] or ["npm", "test"].
+  check_command: []
+
+personality_categories:
+  constructive:
+    label: Constructive
+    order: 10
+  skeptical:
+    label: Skeptical
+    order: 20
+
+personalities:
+  optimist:
+    label: Optimist
+    category: constructive
+    color: "114"
+    order: 10
+    prompt_prefix: |
+      You see opportunity and move fast. Favor pragmatic, shippable solutions.
+  pragmatist:
+    label: Pragmatist
+    category: constructive
+    color: "81"
+    order: 20
+    prompt_prefix: |
+      Prefer the smallest maintainable change that fully solves the problem.
+  pessimist:
+    label: Pessimist
+    category: skeptical
+    color: "203"
+    order: 30
+    prompt_prefix: |
+      Look for risks, failure modes, edge cases, and missing tests.
+  critic:
+    label: Critic
+    category: skeptical
+    color: "212"
+    order: 40
+    prompt_prefix: |
+      Scrutinize for correctness, regressions, brittle assumptions, and unclear
+      interfaces.
+
+agents:
+  codex-worker:
+    enabled: true
+    command: ["codex"]
+    role: [worker]
+    personality: pragmatist
+    terminal:
+      renderer: screen
+      pty_size: pane
+      send_mode: paste
+      before_send_sequence: ctrl+u
+      submit_sequence: cr
+
+  claude-worker:
+    enabled: true
+    command: ["claude"]
+    role: [worker]
+    personality: optimist
+    terminal:
+      renderer: screen
+      pty_size: pane
+      submit_sequence: cr
+      submit_delay_ms: 250
+
+  copilot-reviewer:
+    enabled: true
+    command: ["gh", "copilot"]
+    role: [reviewer]
+    personality: critic
+    terminal:
+      renderer: screen
+      pty_size: pane
+      submit_sequence: cr
+      submit_delay_ms: 250
+
+  opencode-reviewer:
+    enabled: false
+    command: ["opencode", "--model", "github-copilot/claude-sonnet-4.6"]
+    role: [reviewer]
+    personality: pessimist
+    terminal:
+      renderer: screen
+      pty_size: pane
+      send_mode: type
+      submit_sequence: cr

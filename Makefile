@@ -1,0 +1,28 @@
+BINARY := council
+CMD := ./cmd/council
+VERSION ?= dev
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS := -s -w -X github.com/umutarmut38/council/internal/version.Version=$(VERSION) -X github.com/umutarmut38/council/internal/version.Commit=$(COMMIT) -X github.com/umutarmut38/council/internal/version.Date=$(DATE)
+
+.PHONY: test vet build release-snapshot clean
+
+test:
+	go test ./...
+
+vet:
+	go vet ./...
+
+build:
+	go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)
+
+release-snapshot:
+	GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o dist/$(BINARY)_darwin_amd64/$(BINARY) $(CMD)
+	GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o dist/$(BINARY)_darwin_arm64/$(BINARY) $(CMD)
+	GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o dist/$(BINARY)_linux_amd64/$(BINARY) $(CMD)
+	GOOS=linux GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o dist/$(BINARY)_linux_arm64/$(BINARY) $(CMD)
+	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o dist/$(BINARY)_windows_amd64/$(BINARY).exe $(CMD)
+	GOOS=windows GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o dist/$(BINARY)_windows_arm64/$(BINARY).exe $(CMD)
+
+clean:
+	rm -rf bin dist

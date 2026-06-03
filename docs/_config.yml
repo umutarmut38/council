@@ -1,0 +1,18 @@
+title: council
+description: Multi-agent terminal orchestration for AI coding CLIs.
+theme: minima
+markdown: kramdown
+plugins:
+  - jekyll-relative-links
+relative_links:
+  enabled: true
+  collections: true
+include:
+  - architecture.md
+  - commands.md
+  - configuration.md
+  - release.md
+  - requirements.md
+  - shortcuts.md
+  - troubleshooting.md
+  - workflows.md

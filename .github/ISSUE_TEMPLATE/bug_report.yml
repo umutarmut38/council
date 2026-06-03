@@ -1,0 +1,38 @@
+name: Bug Report
+description: Report something that is broken or surprising.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the behavior and what you expected instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: council version
+      placeholder: council version
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - WSL
+        - Other
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant config
+      description: Remove tokens, emails, and private paths before posting.
+      render: yaml
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or transcript snippets
+      render: text
