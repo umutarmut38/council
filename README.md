@@ -3,14 +3,14 @@
 > _I subscribed to all of them. Might as well make them earn it._
 
 At some point I had Claude Code, Codex, Copilot, Cursor, and a growing list of
-agent CLIs all authenticated on my machine — each with their own opinions, their
+agent CLIs all authenticated on my machine, each with their own opinions, their
 own strengths, and their own monthly invoice. I wasn't going to pick a favourite.
 I was going to make them **compete**.
 
 `council` is _not_ another SDK wrapper, API integration, or LLM framework. I
 didn't want to re-implement what these vendors already ship. They each have a
 perfectly good CLI with tool access, context handling, and capabilities I'd never
-replicate. So `council` just launches them — real PTY panes, real processes — and
+replicate. So `council` just launches them (real PTY panes, real processes) and
 orchestrates a structured **plan → vote → build → review → adopt** workflow on
 top. Your agents propose, judge each other's work, build the winner, and you
 adopt the diff. Maximum leverage, maximum token waste, zero regret.
@@ -25,7 +25,7 @@ disagreeing in a terminal multiplexer while you drink coffee.
 More seriously:
 
 - Ask several agents the same question and compare answers live.
-- Give agents roles — `worker` does the building, `reviewer` judges the code
+- Give agents roles: `worker` does the building, `reviewer` judges the code
   (and silently judges you for wasting all those tokens).
 - Give agents behavioral personalities: `pragmatist`, `critic`, `pessimist`,
   or whatever chaos you desire.
@@ -36,7 +36,7 @@ More seriously:
 
 ## Features
 
-- **Live PTY panes** — Claude Code, Codex, Cursor Agent, Copilot CLI, opencode,
+- **Live PTY panes**: Claude Code, Codex, Cursor Agent, Copilot CLI, opencode,
   or literally any command that takes text input. No API keys, no SDK bindings,
   just `spawn` and a dream.
 - **Broadcast composer** plus `@agent message` and `/send agent message`.
@@ -49,7 +49,7 @@ More seriously:
 - **File references** with `@path/to/file` expansion.
 - **Configurable terminal delivery** for tools that need paste mode, delayed
   Enter, fixed PTY sizes, or transcript rendering.
-- **Plan/vote/build/review/adopt orchestration** — a bureaucratic workflow for
+- **Plan/vote/build/review/adopt orchestration**: a bureaucratic workflow for
   your AI employees.
 - **Resume** from interrupted phases (agents crash; it's fine; so do I).
 - **Per-repo config overlays** with `.council.yaml`.
@@ -66,7 +66,7 @@ quirks, `council` takes the laziest-smart approach:
 3. **Let them vote** on each other's work (self-votes excluded, we're not
    savages).
 4. **Build** the winner in an isolated worktree.
-5. **Adopt** the diff when it passes review — or start over and burn more tokens.
+5. **Adopt** the diff when it passes review, or start over and burn more tokens.
 
 No API wrappers. No LLM SDKs. No RAG pipelines. Just PTYs, opinions, and
 someone else's inference bill.

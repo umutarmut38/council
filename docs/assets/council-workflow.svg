@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1430" height="360" viewBox="0 0 1430 360" role="img" aria-labelledby="title desc">
   <title id="title">Council orchestration workflow</title>
   <desc id="desc">Five phase cards: plan, vote, build, review, adopt.</desc>
-  <rect width="1280" height="360" fill="#0b0e14"/>
+  <rect width="1430" height="360" fill="#0b0e14"/>
   <text x="48" y="54" font-family="Inter,Arial,sans-serif" font-size="30" font-weight="700" fill="#f8f8f2">Plan → Vote → Build → Review → Adopt</text>
   <text x="48" y="88" font-family="Inter,Arial,sans-serif" font-size="17" fill="#b7bcc7">Run multiple coding agents as workers and reviewers, then adopt the winning diff.</text>
 
@@ -49,10 +49,11 @@
     <line x1="1110" y1="205" x2="1178" y2="205" stroke="#6272a4" stroke-width="3" marker-end="url(#arrow)"/>
 
     <g transform="translate(1192,136)">
-      <rect width="52" height="138" rx="10" fill="#111827" stroke="#ff79c6" stroke-width="2"/>
-      <text x="16" y="42" font-size="24" font-weight="700" fill="#ff79c6">5</text>
-      <text x="16" y="78" font-size="16" fill="#f8f8f2">Adopt</text>
-      <text x="16" y="106" font-size="13" fill="#9ca3af">diff</text>
+      <rect width="190" height="138" rx="10" fill="#111827" stroke="#ff79c6" stroke-width="2"/>
+      <text x="22" y="42" font-size="24" font-weight="700" fill="#ff79c6">5. Adopt</text>
+      <text x="22" y="76" font-size="15" fill="#f8f8f2">Apply the winning</text>
+      <text x="22" y="98" font-size="15" fill="#f8f8f2">diff to your tree</text>
+      <text x="22" y="120" font-size="14" fill="#9ca3af">uncommitted</text>
     </g>
   </g>
 </svg>
