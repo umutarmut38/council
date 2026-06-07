@@ -45,6 +45,21 @@ terminal:
   renderer: transcript
 ```
 
+## Windows-Specific Notes
+
+`council` hosts agents with the Windows ConPTY API, available on Windows 10 1809
+(build 17763) and newer.
+
+- Run inside **Windows Terminal** for the best rendering. The legacy
+  `conhost.exe` console window handles full-screen TUIs less gracefully; if
+  output looks garbled, switch terminals or try `renderer: transcript`.
+- npm-installed agent CLIs are usually `.cmd` shims (`claude.cmd`, `codex.cmd`).
+  These are launched through the command interpreter automatically. If
+  `council doctor` reports an agent as not found, confirm it resolves on `PATH`
+  (`where claude`).
+- If a child fails to start with `ConPty is not available`, your Windows build
+  predates 1809. Use WSL instead.
+
 ## Tool Asks to Trust a Worktree Folder
 
 Plan, vote, and review run in the launch directory. Build runs in per-agent git

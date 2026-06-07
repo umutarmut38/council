@@ -111,7 +111,7 @@ make build
 |---|---|
 | macOS arm64/amd64 | Primary target. |
 | Linux arm64/amd64 | Primary target. |
-| Windows arm64/amd64 | Release artifacts are built; PTY behavior is experimental. WSL is recommended if native terminals misbehave. |
+| Windows arm64/amd64 | Supported via native pseudo-terminals (ConPTY). Use Windows Terminal for best results; WSL still works if you prefer it. |
 
 See [Requirements](docs/requirements.md) for more detail.
 
@@ -303,8 +303,8 @@ See [SECURITY.md](SECURITY.md).
   will cope.
 - Agent CLIs differ in prompt submission behavior; some need terminal config
   tweaks (looking at you, Cursor).
-- Windows artifacts build, but native PTY behavior needs more real-world
-  validation before first-class support. WSL is your friend.
+- Windows runs on native pseudo-terminals (ConPTY); full-screen rendering can
+  still vary by console, so Windows Terminal is your friend (WSL works too).
 - Orchestration requires a git repository. (Where else would your agents fight?)
 - Your token bill is not my problem.
 

@@ -20,6 +20,20 @@ and file-backed orchestration state.
 Each agent process runs in a real PTY. Output is read in chunks, appended to raw
 logs, and fed into a lightweight terminal emulator for pane rendering.
 
+The PTY backend is platform-specific, selected at build time in
+`internal/agent`:
+
+- `pty_unix.go` uses `creack/pty` (the primary, best-tested path).
+- `pty_windows.go` uses the Windows pseudo console (ConPTY) API via
+  `UserExistsError/conpty`. Because a ConPTY output pipe never reaches EOF when
+  the child exits, the session reads and waits for the process concurrently and
+  tears the console down once the process is gone. npm-installed `.cmd`/`.bat`
+  agent shims are launched through the command interpreter.
+
+Both implementations satisfy a small internal `ptyConn` interface, so the rest
+of the session lifecycle (raw logging, resize, terminate, exit reporting) is
+platform-neutral.
+
 Prompt delivery is intentionally configurable:
 
 - `send_mode: type` sends raw text.

@@ -5,13 +5,9 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
-
-	"github.com/creack/pty"
 
 	"github.com/umutarmut38/council/internal/config"
 )
@@ -19,16 +15,36 @@ import (
 type OutputFunc func(name string, data []byte)
 type ExitFunc func(name string, exitCode *int, err error)
 
+// ptyConn is the platform-specific pseudo-terminal backing a Session. Unix
+// builds back it with creack/pty; Windows builds back it with the ConPTY API.
+type ptyConn interface {
+	Read(p []byte) (int, error)
+	Write(p []byte) (int, error)
+	Resize(cols, rows int) error
+	// Wait blocks until the child process exits and returns its exit code
+	// (nil when unknown) along with any wait error.
+	Wait() (*int, error)
+	// Interrupt makes a best-effort attempt to stop the child gracefully.
+	Interrupt()
+	// unblockRead releases a Read that will not end on its own once the child
+	// has exited. ConPTY needs this (its output pipe never reaches EOF); a Unix
+	// PTY master reaches EOF by itself, so its implementation is a no-op and the
+	// reader is allowed to drain fully before Close.
+	unblockRead()
+	// Close terminates the child and releases the pseudo-terminal. It is safe
+	// to call more than once.
+	Close() error
+}
+
 type Session struct {
 	Name       string
 	Config     config.AgentConfig
-	Cmd        *exec.Cmd
-	PTY        *os.File
 	RawLogPath string
 	StartError error
 	Done       bool
 	ExitCode   *int
 
+	conn        ptyConn
 	rawLog      *os.File
 	desiredCols int
 	desiredRows int
@@ -63,14 +79,31 @@ func (s *Session) Start(onOutput OutputFunc, onExit ExitFunc) error {
 		return err
 	}
 
-	cmd := exec.Command(s.Config.Command[0], s.Config.Command[1:]...)
-	cmd.Dir = cwd
-	cmd.Env = terminalEnv(s.Config)
+	cols, rows := s.startupSize()
 
+	conn, err := startPTY(s.Config, cwd, terminalEnv(s.Config), cols, rows)
+	if err != nil {
+		_ = rawLog.Close()
+		return err
+	}
+
+	s.mu.Lock()
+	s.conn = conn
+	s.rawLog = rawLog
+	s.mu.Unlock()
+
+	go s.run(onOutput, onExit)
+	return nil
+}
+
+// startupSize resolves the initial pseudo-terminal dimensions, honoring a fixed
+// PTY size when configured and falling back to sane defaults.
+func (s *Session) startupSize() (int, int) {
 	s.mu.Lock()
 	cols := s.desiredCols
 	rows := s.desiredRows
 	s.mu.Unlock()
+
 	if s.Config.Terminal.PTYSize == "fixed" {
 		cols = s.Config.Terminal.Cols
 		rows = s.Config.Terminal.Rows
@@ -81,21 +114,7 @@ func (s *Session) Start(onOutput OutputFunc, onExit ExitFunc) error {
 	if rows <= 0 {
 		rows = 40
 	}
-
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
-	if err != nil {
-		_ = rawLog.Close()
-		return err
-	}
-
-	s.mu.Lock()
-	s.Cmd = cmd
-	s.PTY = ptmx
-	s.rawLog = rawLog
-	s.mu.Unlock()
-
-	go s.readLoop(onOutput, onExit)
-	return nil
+	return cols, rows
 }
 
 func (s *Session) MarkStartError(err error) {
@@ -113,10 +132,10 @@ func (s *Session) WriteString(value string) error {
 	if s.Done {
 		return errors.New("agent has exited")
 	}
-	if s.PTY == nil {
+	if s.conn == nil {
 		return errors.New("agent pty is not available")
 	}
-	_, err := s.PTY.Write([]byte(value))
+	_, err := s.conn.Write([]byte(value))
 	return err
 }
 
@@ -129,76 +148,84 @@ func (s *Session) Resize(cols, rows int) error {
 		s.desiredCols = cols
 		s.desiredRows = rows
 	}
-	ptmx := s.PTY
+	conn := s.conn
 	done := s.Done
 	s.mu.Unlock()
 
-	if done || ptmx == nil || cols <= 0 || rows <= 0 || !resizeEnabled(s.Config) {
+	if done || conn == nil || cols <= 0 || rows <= 0 || !resizeEnabled(s.Config) {
 		return nil
 	}
-	return pty.Setsize(ptmx, &pty.Winsize{Rows: uint16(rows), Cols: uint16(cols)})
+	return conn.Resize(cols, rows)
 }
 
 func (s *Session) Terminate() error {
 	s.mu.Lock()
-	cmd := s.Cmd
-	ptmx := s.PTY
+	conn := s.conn
 	done := s.Done
 	s.mu.Unlock()
 
-	if done {
+	if done || conn == nil {
 		return nil
 	}
 
-	if cmd != nil && cmd.Process != nil {
-		_ = cmd.Process.Signal(os.Interrupt)
-		time.Sleep(120 * time.Millisecond)
-		_ = cmd.Process.Kill()
-	}
-	if ptmx != nil {
-		_ = ptmx.Close()
-	}
+	conn.Interrupt()
+	time.Sleep(120 * time.Millisecond)
+	_ = conn.Close()
 	return nil
 }
 
-func (s *Session) readLoop(onOutput OutputFunc, onExit ExitFunc) {
-	buf := make([]byte, 4096)
-	for {
-		n, readErr := s.PTY.Read(buf)
-		if n > 0 {
-			chunk := append([]byte(nil), buf[:n]...)
-			if s.rawLog != nil {
-				_, _ = s.rawLog.Write(chunk)
+// run drives the session lifecycle. The reader and the process waiter run
+// concurrently because a ConPTY output pipe does not reach EOF when the child
+// exits — the waiter has to release the reader once the process is gone.
+func (s *Session) run(onOutput OutputFunc, onExit ExitFunc) {
+	readDone := make(chan struct{})
+	procDone := make(chan struct{})
+
+	var (
+		exitCode    *int
+		waitErr     error
+		lastReadErr error
+	)
+
+	go func() {
+		defer close(readDone)
+		buf := make([]byte, 4096)
+		for {
+			n, err := s.conn.Read(buf)
+			if n > 0 {
+				chunk := append([]byte(nil), buf[:n]...)
+				if s.rawLog != nil {
+					_, _ = s.rawLog.Write(chunk)
+				}
+				if onOutput != nil {
+					onOutput(s.Name, chunk)
+				}
 			}
-			if onOutput != nil {
-				onOutput(s.Name, chunk)
+			if err != nil {
+				lastReadErr = err
+				return
 			}
 		}
-		if readErr != nil {
-			waitErr := s.wait()
-			exitCode := exitCodeFromError(waitErr)
-			finalErr := normalizeReadExitError(readErr, waitErr)
-			s.finish(exitCode)
-			if s.rawLog != nil {
-				_ = s.rawLog.Close()
-			}
-			if onExit != nil {
-				onExit(s.Name, exitCode, finalErr)
-			}
-			return
-		}
-	}
-}
+	}()
 
-func (s *Session) wait() error {
-	s.mu.Lock()
-	cmd := s.Cmd
-	s.mu.Unlock()
+	go func() {
+		defer close(procDone)
+		exitCode, waitErr = s.conn.Wait()
+		s.conn.unblockRead()
+	}()
 
-	if cmd == nil {
-		return nil
+	<-procDone
+	<-readDone
+
+	finalErr := normalizeReadExitError(lastReadErr, waitErr)
+	_ = s.conn.Close()
+	s.finish(exitCode)
+	if s.rawLog != nil {
+		_ = s.rawLog.Close()
 	}
-	return cmd.Wait()
+	if onExit != nil {
+		onExit(s.Name, exitCode, finalErr)
+	}
 }
 
 func (s *Session) finish(exitCode *int) {
@@ -209,25 +236,11 @@ func (s *Session) finish(exitCode *int) {
 	s.ExitCode = exitCode
 }
 
-func exitCodeFromError(err error) *int {
-	if err == nil {
-		code := 0
-		return &code
-	}
-
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		code := exitErr.ExitCode()
-		return &code
-	}
-	return nil
-}
-
 func normalizeReadExitError(readErr error, waitErr error) error {
 	if waitErr != nil {
 		return waitErr
 	}
-	if readErr == nil || errors.Is(readErr, io.EOF) || errors.Is(readErr, os.ErrClosed) || errors.Is(readErr, syscall.EIO) {
+	if readErr == nil || errors.Is(readErr, io.EOF) || errors.Is(readErr, os.ErrClosed) || isPTYClosed(readErr) {
 		return nil
 	}
 	return readErr

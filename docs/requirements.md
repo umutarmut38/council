@@ -6,11 +6,15 @@
 |---|---|---|
 | macOS arm64/amd64 | Primary | Best tested. Works well in Terminal.app, iTerm2, and modern VS Code terminals. |
 | Linux arm64/amd64 | Primary | Expected to work in modern terminal emulators with PTY support. |
-| Windows amd64/arm64 | Experimental | Binaries are built. Validate in Windows Terminal/PowerShell before relying on it for release-critical work. WSL is recommended if native PTY behavior is problematic. |
+| Windows amd64/arm64 | Supported | Native pseudo-terminals via the ConPTY API. Best in Windows Terminal; older consoles render less well. WSL remains a fine alternative. |
 
-`council` uses pseudo-terminals to host child agents. The Go package compiles
-for Windows, but full-screen terminal behavior varies more there than on Unix
-systems. The first release treats Windows as available but not yet first-class.
+`council` uses pseudo-terminals to host child agents. On Windows this is the
+ConPTY API, which requires Windows 10 1809 (build 17763) or newer — every
+supported release of Windows 10/11 qualifies. Agent CLIs installed as
+`.cmd`/`.bat` shims (the usual shape of npm-installed tools like `claude` or
+`codex`) are launched through the command interpreter automatically; no extra
+configuration is needed. Full-screen terminal behavior can still vary more than
+on Unix, so prefer a modern terminal such as Windows Terminal.
 
 ## Build Requirements
 
