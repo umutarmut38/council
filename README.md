@@ -73,6 +73,15 @@ someone else's inference bill.
 
 ## Install
 
+### Homebrew (macOS and Linux)
+
+```bash
+brew install umutarmut38/council/council
+```
+
+This taps `umutarmut38/homebrew-council` and installs a prebuilt binary. Upgrade
+later with `brew upgrade council`.
+
 ### From a release
 
 Download the archive for your platform from the GitHub Releases page, extract
