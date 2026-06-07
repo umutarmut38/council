@@ -30,7 +30,17 @@ func DetectRepoRoot(dir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("not a git repository: %w", err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return normalizeGitPath(strings.TrimSpace(string(out))), nil
+}
+
+// normalizeGitPath converts a path emitted by git (which always uses forward
+// slashes, even on Windows) into the host's native form so it compares equal to
+// paths built with filepath. On Unix this is a no-op.
+func normalizeGitPath(p string) string {
+	if p == "" {
+		return p
+	}
+	return filepath.Clean(filepath.FromSlash(p))
 }
 
 func NewManager(repoRoot, stamp string) *Manager {
@@ -135,7 +145,7 @@ func (m *Manager) List() ([]Worktree, error) {
 		switch {
 		case strings.HasPrefix(line, "worktree "):
 			flush()
-			cur.Path = strings.TrimPrefix(line, "worktree ")
+			cur.Path = normalizeGitPath(strings.TrimPrefix(line, "worktree "))
 		case strings.HasPrefix(line, "branch "):
 			cur.Branch = strings.TrimPrefix(strings.TrimPrefix(line, "branch "), "refs/heads/")
 		}
