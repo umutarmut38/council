@@ -36,6 +36,26 @@ Pushing a `v*` tag runs `.github/workflows/release.yml`, which:
 - uploads archives and checksums
 - publishes a GitHub Release
 
+## Homebrew Tap
+
+Formulae live in the `umutarmut38/homebrew-council` tap, so users can:
+
+```bash
+brew install umutarmut38/council/council
+```
+
+On every `v*` release, the release workflow regenerates `Formula/council.rb`
+from `packaging/homebrew/render_formula.sh` (using the release checksums) and
+pushes it to the tap. This step needs a repository secret named
+`HOMEBREW_TAP_TOKEN` — a token with `contents: write` on the tap repo. Without
+it the step logs a skip and the release still succeeds; bump the formula
+manually in that case:
+
+```bash
+gh release download vX.Y.Z --pattern checksums.txt
+bash packaging/homebrew/render_formula.sh vX.Y.Z checksums.txt > Formula/council.rb
+```
+
 ## Local Snapshot Build
 
 ```bash

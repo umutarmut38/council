@@ -80,3 +80,33 @@ jobs:
             dist/*.tar.gz
             dist/*.zip
             dist/checksums.txt
+
+      - name: Update Homebrew tap
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${HOMEBREW_TAP_TOKEN:-}" ]; then
+            echo "HOMEBREW_TAP_TOKEN not set; skipping Homebrew tap update."
+            exit 0
+          fi
+
+          tap_repo="umutarmut38/homebrew-council"
+          work="$(mktemp -d)"
+          git clone --depth 1 "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/${tap_repo}.git" "$work"
+
+          mkdir -p "$work/Formula"
+          bash packaging/homebrew/render_formula.sh "$VERSION" dist/checksums.txt > "$work/Formula/council.rb"
+
+          cd "$work"
+          if git diff --quiet; then
+            echo "Formula already up to date."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/council.rb
+          git commit -m "council ${VERSION}"
+          git push origin HEAD
