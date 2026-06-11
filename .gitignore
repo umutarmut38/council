@@ -7,6 +7,9 @@
 .claude/
 poc/
 
+# Internal planning notes — not part of the public release
+PLAN-*.md
+
 # Build outputs
 bin/
 dist/
