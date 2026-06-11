@@ -310,35 +310,6 @@ func (m Model) paneBadge(view *agentView) string {
 	}
 }
 
-// approvalPatterns are conservative fingerprints of CLI approval prompts.
-// Detection is a hint, not a guarantee — /attention toggles it manually.
-var approvalPatterns = []string{
-	"[y/n]", "[y/N]", "[Y/n]", "(y/n)", "(y/N)",
-	"do you want to", "would you like to",
-	"allow this", "allow command", "allow execution",
-	"approve this", "needs your approval", "waiting for approval",
-	"grant access", "trust this", "do you trust",
-	"press enter to confirm",
-}
-
-// detectAttention flags a pane when its newest output looks like an approval
-// prompt. It never un-flags; clearing happens on user interaction.
-func detectAttention(view *agentView, chunk string) {
-	if view.Attention || view.Session.Done {
-		return
-	}
-	text := strings.ToLower(cleanTranscriptOutput(chunk))
-	for _, pattern := range approvalPatterns {
-		if strings.Contains(text, strings.ToLower(pattern)) {
-			view.Attention = true
-			return
-		}
-	}
-}
-
-// clearAttention resets the needs-input flag after the user engages the pane.
-func (v *agentView) clearAttention() { v.Attention = false }
-
 // paneColor resolves an agent's display color: the agent's own color first,
 // then its personality's color, else "" (default chrome).
 func (m Model) paneColor(name string) string {

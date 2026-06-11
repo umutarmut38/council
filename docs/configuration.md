@@ -128,6 +128,7 @@ prompt is typed into the TUI or appended as an argv argument.
 |---|---|---|
 | `layout` | `grid` | Pane layout. |
 | `adaptive_grid` | `true` | Size the grid to the visible panes: 1 pane fills the screen, 2 sit side by side at full height, 3-4 use a 2x2. Larger rosters page with `page_rows` x `page_cols`. Adjusting rows/cols in `/settings` locks the layout for that session; set `false` to always use the configured grid. |
+| `detect_approval_prompts` | `true` | **Experimental.** Auto-flag a pane as "needs input" when an approval-looking prompt sits at the bottom of its screen and the agent has been quiet for ~2s. Heuristic by nature — `/attention <agent>` is the manual, reliable path. Set `false` to disable. |
 | `max_scrollback_lines` | `5000` | Per-pane scrollback kept in memory. |
 | `initial_prompt_delay_ms` | `3000` | Wait this long after launch before broadcasting (lets agents finish booting). Raise it if agents miss the prompt — codex's MCP load is the slowest factor; `8000` is a good value when running many agents. |
 | `page_rows`, `page_cols` | grid-derived | Panes per page (for many agents). |

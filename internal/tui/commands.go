@@ -442,6 +442,7 @@ func (m *Model) cmdAttention(rest string) {
 		return
 	}
 	view.Attention = true
+	view.AttentionManual = true
 	m.Status = view.Session.Name + " flagged as needing input — F2 for direct mode"
 }
 

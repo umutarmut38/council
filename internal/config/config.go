@@ -161,8 +161,13 @@ type UIConfig struct {
 	// using page_rows x page_cols. Defaults to true; page_rows/page_cols still
 	// bound the page size for larger rosters, and adjusting rows/cols in the
 	// in-app settings locks the layout for that session.
-	AdaptiveGrid *bool  `yaml:"adaptive_grid,omitempty"`
-	GroupBy      string `yaml:"group_by,omitempty"`
+	AdaptiveGrid *bool `yaml:"adaptive_grid,omitempty"`
+	// DetectApprovalPrompts (EXPERIMENTAL) flags a pane as "needs input" when
+	// an approval-looking prompt sits at the bottom of its screen and the
+	// agent has gone quiet. Detection is heuristic; /attention <agent> is the
+	// manual, reliable path. Defaults to true; set false to disable.
+	DetectApprovalPrompts *bool  `yaml:"detect_approval_prompts,omitempty"`
+	GroupBy               string `yaml:"group_by,omitempty"`
 	// InitialPromptDelayMs is how long to wait after launch before broadcasting
 	// the `council ask` prompt, giving each agent's TUI time to finish booting
 	// and start accepting input. Too short and the prompt is dropped.
@@ -172,6 +177,12 @@ type UIConfig struct {
 // AdaptiveEnabled reports whether the adaptive grid is on (the default).
 func (u UIConfig) AdaptiveEnabled() bool {
 	return u.AdaptiveGrid == nil || *u.AdaptiveGrid
+}
+
+// ApprovalDetectionEnabled reports whether the experimental approval-prompt
+// detection is on (the default).
+func (u UIConfig) ApprovalDetectionEnabled() bool {
+	return u.DetectApprovalPrompts == nil || *u.DetectApprovalPrompts
 }
 
 type SessionConfig struct {

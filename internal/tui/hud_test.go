@@ -111,23 +111,109 @@ func TestPaneBadgeStates(t *testing.T) {
 	}
 }
 
-func TestDetectAttentionFlagsApprovalPrompts(t *testing.T) {
+// feed pushes output through the same path Update uses and reports whether a
+// confirmation check was requested.
+func feed(m *Model, view *agentView, chunk string) bool {
+	m.appendOutput(view, chunk)
+	return m.noteAttentionOutput(view)
+}
+
+// goIdle backdates the pane's last output so the idle condition holds.
+func goIdle(view *agentView) {
+	view.lastOutputAt = view.lastOutputAt.Add(-2 * attentionIdleDelay)
+}
+
+func TestAttentionConfirmsBlockingApprovalPrompts(t *testing.T) {
 	m := hudModel(t, "copilot")
 	view := m.Agents[0]
 
-	m.appendOutput(view, "compiling project...\n")
-	if view.Attention {
-		t.Fatal("plain output must not flag attention")
+	if feed(&m, view, "compiling project...\n") {
+		t.Fatal("plain output must not become a candidate")
 	}
-	m.appendOutput(view, "Allow command \"git add -A\"? [y/N]\n")
+	if !feed(&m, view, "Allow command \"git add -A\"? [y/N]\n") {
+		t.Fatal("an on-screen approval prompt should become a candidate")
+	}
+	// Not flagged yet: the pane must first go quiet.
+	if view.Attention {
+		t.Fatal("attention must not fire before the idle confirmation")
+	}
+	m.runAttentionCheck()
+	if view.Attention {
+		t.Fatal("attention must not fire while the pane is still active")
+	}
+	goIdle(view)
+	m.runAttentionCheck()
 	if !view.Attention {
-		t.Fatal("approval prompt should flag attention")
+		t.Fatal("idle pane with a visible approval prompt should be flagged")
 	}
 
 	// Sending to the agent clears the flag (the user engaged).
 	view.clearAttention()
 	if view.Attention {
 		t.Fatal("clearAttention failed")
+	}
+}
+
+func TestAttentionIgnoresConversationalQuestions(t *testing.T) {
+	// The exact false positive from a real run: codex's greeting matched the
+	// old bare "do you want to" pattern.
+	m := hudModel(t, "codex")
+	view := m.Agents[0]
+
+	if feed(&m, view, "Hi. What do you want to work on in /Users/x/dev/learning/counsil?\n") {
+		t.Fatal("a conversational question must not become a candidate")
+	}
+	goIdle(view)
+	m.runAttentionCheck()
+	if view.Attention {
+		t.Fatal("a conversational question must never flag attention")
+	}
+}
+
+func TestAttentionAutoClearsWhenAgentMovesOn(t *testing.T) {
+	m := hudModel(t, "claude")
+	view := m.Agents[0]
+
+	feed(&m, view, "Do you want to proceed? [y/N]\n")
+	goIdle(view)
+	m.runAttentionCheck()
+	if !view.Attention {
+		t.Fatal("setup: prompt should be flagged")
+	}
+
+	// The user answered inside the tool; the agent scrolls on. Push the
+	// prompt off the visible tail and the auto-flag dismisses itself.
+	var scroll strings.Builder
+	for i := 0; i < attentionTailLines+45; i++ {
+		scroll.WriteString("working on step...\n")
+	}
+	feed(&m, view, scroll.String())
+	if view.Attention {
+		t.Fatal("auto-set attention should clear once the prompt leaves the screen")
+	}
+
+	// A manual flag survives agent output.
+	view.Attention = true
+	view.AttentionManual = true
+	feed(&m, view, "more output\n")
+	if !view.Attention {
+		t.Fatal("manual /attention must not be auto-cleared by output")
+	}
+}
+
+func TestAttentionDetectionCanBeDisabled(t *testing.T) {
+	m := hudModel(t, "claude")
+	off := false
+	m.Config.UI.DetectApprovalPrompts = &off
+	view := m.Agents[0]
+
+	if feed(&m, view, "Do you want to proceed? [y/N]\n") {
+		t.Fatal("disabled detection must not schedule checks")
+	}
+	goIdle(view)
+	m.runAttentionCheck()
+	if view.Attention {
+		t.Fatal("disabled detection must never flag attention")
 	}
 }
 

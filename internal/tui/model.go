@@ -106,8 +106,14 @@ type agentView struct {
 
 	// Attention marks a pane that likely needs direct user input (an approval
 	// prompt was detected, or /attention was used). Cleared when the user
-	// interacts with the pane or its artifact lands.
+	// interacts with the pane or its artifact lands; auto-set flags also
+	// clear themselves when the prompt leaves the screen.
 	Attention bool
+	// AttentionManual records that the flag came from /attention, so the
+	// auto-clear never dismisses it.
+	AttentionManual bool
+	// lastOutputAt drives the idle check of the approval-prompt detection.
+	lastOutputAt time.Time
 }
 
 type Model struct {
@@ -152,6 +158,8 @@ type Model struct {
 	pendingClean bool
 	progress     *runProgress // cached HUD state; refreshProgress() updates it
 	layoutLocked bool         // user adjusted rows/cols in settings: adaptive off
+	// attentionCheckPending debounces the delayed approval-prompt re-check.
+	attentionCheckPending bool
 
 	// artifact browser (/artifacts)
 	Artifacts          []artifactEntry
@@ -358,8 +366,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case AgentOutputMsg:
 		if view := m.findAgentForMessage(msg.Name, msg.Session); view != nil {
 			m.appendOutput(view, string(msg.Data))
+			if m.noteAttentionOutput(view) {
+				return m, m.scheduleAttentionCheck()
+			}
 		}
 		return m, nil
+	case attentionCheckMsg:
+		return m, m.runAttentionCheck()
 	case AgentExitMsg:
 		if view := m.findAgentForMessage(msg.Name, msg.Session); view != nil {
 			if msg.ExitCode != nil {
@@ -460,7 +473,6 @@ func (m Model) View() string {
 func (m *Model) appendOutput(view *agentView, chunk string) {
 	view.appendTranscript(chunk, m.MaxScrollback)
 	view.applyTerminal(chunk)
-	detectAttention(view, chunk)
 }
 
 func (v *agentView) appendTranscript(chunk string, maxScrollback int) {

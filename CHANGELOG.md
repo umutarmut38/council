@@ -4,6 +4,19 @@ All notable changes will be documented here.
 
 This project follows semantic versioning once `v0.1.0` is tagged.
 
+## Unreleased
+
+### Changed
+
+- **Approval-prompt detection reworked (now marked experimental).** The old
+  detector matched substrings anywhere in the output stream and latched
+  forever, so codex's greeting "What do you want to work on?" lit up
+  "needs input". A pane is now flagged only when a concrete approval
+  phrasing is visible in the last lines of its live screen *and* the agent
+  has been quiet for ~2s; the auto-flag clears itself when output resumes
+  (manual `/attention` flags stick). New `ui.detect_approval_prompts: false`
+  disables it.
+
 ## v0.3.0 - 2026-06-11
 
 A large UI/UX and safety release: the TUI becomes an orchestrator HUD with a

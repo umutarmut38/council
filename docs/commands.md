@@ -76,7 +76,7 @@ See [Workflows → Personalities](workflows.md#personalities-categories-and-targ
 | `/restart <agent>` | Terminate and relaunch one pane with its current phase command. |
 | `/resend [agent]` | Resend the current phase prompt — to one agent, or to everyone still missing an artifact. |
 | `/nudge [agent]` | Send a short reminder to write the expected artifact. |
-| `/attention <agent> [off]` | Flag (or unflag) a pane as needing your input. council also auto-detects common approval prompts (`[y/N]`, "Do you want to…", trust prompts) and highlights the pane + footer. |
+| `/attention <agent> [off]` | Flag (or unflag) a pane as needing your input — the manual flag stays until you engage the pane or turn it off. council also auto-detects approval prompts (**experimental**): a pane is flagged only when an approval-looking prompt (`[y/N]`, "Do you want to proceed", trust dialogs, …) sits at the bottom of its screen *and* the agent has gone quiet for ~2s; the auto-flag clears itself when output resumes. Disable with `ui.detect_approval_prompts: false`. |
 
 ### Runs & resume
 

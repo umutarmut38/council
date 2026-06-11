@@ -35,9 +35,12 @@ reconstruct the workflow from memory:
   next command.
 - **Pane badges** show what each agent owes: `vote · waiting for VOTE.md`,
   `vote · wrote VOTE.md`, `build · working`, `needs input`.
-- **Blocked panes** (approval prompts like `[y/N]`, trust dialogs) turn the
-  border orange and put a recovery hint in the footer; `/attention <agent>`
-  flags one manually, `F2` direct mode answers it.
+- **Blocked panes** turn the border orange and put a recovery hint in the
+  footer. Auto-detection is **experimental**: it fires only when an
+  approval-looking prompt (`[y/N]`, "Do you want to proceed", trust dialogs)
+  is visible at the bottom of the pane and the agent has gone quiet, and it
+  clears itself when output resumes. `/attention <agent>` flags one manually
+  (and sticks); `F2` direct mode answers the prompt.
 - **Footer hints** are phase-aware: next actions during a run, the generic
   shortcut list otherwise.
 - **Command palette**: typing `/` lists every command vertically, with the
