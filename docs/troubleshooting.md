@@ -67,7 +67,7 @@ worktrees. Some agent tools ask for trust in every new directory.
 
 Options:
 
-- Trust `.council/worktrees/<agent>` once in that tool.
+- Trust `.council/worktrees/<run>/<agent>` once in that tool.
 - Use a phase-specific command with the tool's own safe auto-approval option.
 - Keep the agent as `role: [reviewer]` if it should never build.
 
@@ -113,5 +113,26 @@ or:
 council clean
 ```
 
-This removes `.council/worktrees/<agent>` and the corresponding
+This removes `.council/worktrees/<run>/<agent>` and the corresponding
 `council/<agent>/<timestamp>` branches.
+
+## Colors work in one terminal but not another
+
+Agent border colors are emitted as plain indexed SGR (`38;5;N`), the most
+widely supported color encoding there is. If they still don't show in a
+specific terminal, run `council doctor` there: it prints three test rows
+(colored text, colored blocks, colored borders).
+
+- All three rows colored: the terminal is fine; check that the session is
+  running the binary you think it is.
+- TEXT colored but BLOCKS/BORDERS not: the terminal draws box/block glyphs
+  itself and its renderer is dropping the color. **In VS Code the fix is:**
+
+  ```jsonc
+  "terminal.integrated.customGlyphs": false
+  ```
+
+  then *Developer: Reload Window* — the border glyphs are drawn from your
+  font like normal text, which restores their colors (confirmed fix). If it
+  is still wrong afterwards, also try
+  `"terminal.integrated.gpuAcceleration": "off"`.

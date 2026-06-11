@@ -8,6 +8,7 @@ Shortcuts depend on which screen/mode you're in. The default screen is the
 | Key | Action |
 |---|---|
 | `Enter` | Send the composer (or accept the highlighted file suggestion if open). |
+| `↑` / `↓` | Navigate the command palette (after typing `/`) or @file suggestions. |
 | `Tab` | Focus the next pane — or complete the `/command` you're typing. |
 | `Shift+Tab` | Focus the previous pane. |
 | `Ctrl+B` | Cycle the input target (all ↔ focused). |

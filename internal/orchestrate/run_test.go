@@ -93,3 +93,18 @@ func TestLoadTranscriptsCombinesPhaseLogs(t *testing.T) {
 		t.Fatalf("transcript missing %q: %q", want, got)
 	}
 }
+
+func TestNewRunStampsNeverCollide(t *testing.T) {
+	root := t.TempDir()
+	seen := map[string]bool{}
+	for i := 0; i < 5; i++ {
+		run, err := NewRun(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if seen[run.Stamp] {
+			t.Fatalf("duplicate run stamp %q", run.Stamp)
+		}
+		seen[run.Stamp] = true
+	}
+}

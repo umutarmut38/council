@@ -207,8 +207,9 @@ func TestTabCompletesCommandThenSwitchesFocus(t *testing.T) {
 }
 
 func TestPagedLayoutNavigation(t *testing.T) {
+	adaptiveOff := false
 	cfg := config.Config{
-		UI: config.UIConfig{PageRows: 1, PageCols: 2, MaxScrollbackLines: 1000},
+		UI: config.UIConfig{PageRows: 1, PageCols: 2, MaxScrollbackLines: 1000, AdaptiveGrid: &adaptiveOff},
 	}
 	cfg.Normalize()
 	sessions := []*agent.Session{
@@ -244,7 +245,8 @@ func TestPagedLayoutNavigation(t *testing.T) {
 }
 
 func TestTabCrossesPageBoundary(t *testing.T) {
-	cfg := config.Config{UI: config.UIConfig{PageRows: 1, PageCols: 2, MaxScrollbackLines: 1000}}
+	adaptiveOff := false
+	cfg := config.Config{UI: config.UIConfig{PageRows: 1, PageCols: 2, MaxScrollbackLines: 1000, AdaptiveGrid: &adaptiveOff}}
 	cfg.Normalize()
 	model := NewModelWithConfig([]*agent.Session{
 		agent.NewSession("a", config.AgentConfig{}, ""),
@@ -267,10 +269,16 @@ func TestSettingsAdjustsGridAndGrouping(t *testing.T) {
 	model := NewModelWithConfig([]*agent.Session{agent.NewSession("a", config.AgentConfig{}, "")}, nil, cfg, "", nil, 0, nil, nil)
 	model.ScreenMode = ScreenSettings
 
-	updated, _ := model.handleKey(keyMsg("right"))
+	// Item 0 is the adaptive toggle; rows are item 1.
+	updated, _ := model.handleKey(keyMsg("down"))
+	model = updated.(Model)
+	updated, _ = model.handleKey(keyMsg("right"))
 	model = updated.(Model)
 	if model.Config.UI.PageRows != 3 {
 		t.Fatalf("page rows = %d, want 3", model.Config.UI.PageRows)
+	}
+	if model.adaptiveLayout() {
+		t.Fatal("manually adjusting rows should lock the adaptive layout")
 	}
 
 	updated, _ = model.handleKey(keyMsg("down"))

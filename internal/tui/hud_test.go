@@ -1,0 +1,454 @@
+package tui
+
+import (
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+
+	"github.com/umutarmut38/council/internal/agent"
+	"github.com/umutarmut38/council/internal/config"
+	"github.com/umutarmut38/council/internal/orchestrate"
+)
+
+func hudModel(t *testing.T, names ...string) Model {
+	t.Helper()
+	cfg := config.Config{UI: config.UIConfig{MaxScrollbackLines: 1000}}
+	cfg.Normalize()
+	sessions := make([]*agent.Session, 0, len(names))
+	for _, name := range names {
+		sessions = append(sessions, agent.NewSession(name, config.AgentConfig{}, ""))
+	}
+	m := NewModelWithConfig(sessions, nil, cfg, "", nil, 0, nil, nil)
+	m.Width = 100
+	m.Height = 30
+	return m
+}
+
+func TestAdaptiveGridFollowsPaneCount(t *testing.T) {
+	cases := []struct {
+		agents     []string
+		rows, cols int
+	}{
+		{[]string{"a"}, 1, 1},
+		{[]string{"a", "b"}, 1, 2},
+		{[]string{"a", "b", "c"}, 2, 2},
+		{[]string{"a", "b", "c", "d"}, 2, 2},
+		{[]string{"a", "b", "c", "d", "e"}, 2, 2}, // falls back to page_rows x page_cols
+	}
+	for _, c := range cases {
+		m := hudModel(t, c.agents...)
+		rows, cols := m.gridDims()
+		if rows != c.rows || cols != c.cols {
+			t.Fatalf("%d agents: grid %dx%d, want %dx%d", len(c.agents), rows, cols, c.rows, c.cols)
+		}
+	}
+
+	// A manual adjustment locks the layout.
+	m := hudModel(t, "a", "b")
+	m.layoutLocked = true
+	if rows, cols := m.gridDims(); rows != 2 || cols != 2 {
+		t.Fatalf("locked grid = %dx%d, want configured 2x2", rows, cols)
+	}
+
+	// And so does disabling it in config.
+	off := false
+	m = hudModel(t, "a")
+	m.Config.UI.AdaptiveGrid = &off
+	if rows, cols := m.gridDims(); rows != 2 || cols != 2 {
+		t.Fatalf("adaptive off grid = %dx%d, want configured 2x2", rows, cols)
+	}
+}
+
+func TestPhaseRailRendering(t *testing.T) {
+	p := &runProgress{
+		Phases: []phaseInfo{
+			{Label: "Plan", State: phaseDone, Done: 2, Expected: 2, Counted: true},
+			{Label: "Vote", State: phaseActive, Done: 0, Expected: 2, Counted: true},
+			{Label: "Build", State: phasePending},
+			{Label: "Review", State: phasePending},
+			{Label: "Adopt", State: phasePending},
+		},
+		Next: "/vote",
+	}
+	rail := p.phaseRail()
+	for _, want := range []string{"Plan 2/2 ✓", "Vote 0/2 ●", "Build ○", "Adopt ○", "Next: /vote"} {
+		if !strings.Contains(rail, want) {
+			t.Fatalf("rail missing %q: %q", want, rail)
+		}
+	}
+}
+
+func TestPaneBadgeStates(t *testing.T) {
+	m := hudModel(t, "codex")
+	view := m.Agents[0]
+
+	if got := m.paneBadge(view); got != "running" {
+		t.Fatalf("idle badge = %q, want running", got)
+	}
+
+	m.phase = "vote"
+	m.watching = map[string]string{"codex": "/runs/x/votes/codex.md"}
+	if got := m.paneBadge(view); got != "vote · waiting for codex.md" {
+		t.Fatalf("waiting badge = %q", got)
+	}
+	view.PhaseDone = true
+	if got := m.paneBadge(view); got != "vote · wrote codex.md" {
+		t.Fatalf("done badge = %q", got)
+	}
+	view.PhaseDone = false
+	view.Attention = true
+	if got := m.paneBadge(view); got != "vote · needs input" {
+		t.Fatalf("attention badge = %q", got)
+	}
+
+	// Build has no artifact watch; agents are just working.
+	m.phase = "build"
+	m.watching = nil
+	view.Attention = false
+	if got := m.paneBadge(view); got != "build · working" {
+		t.Fatalf("build badge = %q", got)
+	}
+}
+
+func TestDetectAttentionFlagsApprovalPrompts(t *testing.T) {
+	m := hudModel(t, "copilot")
+	view := m.Agents[0]
+
+	m.appendOutput(view, "compiling project...\n")
+	if view.Attention {
+		t.Fatal("plain output must not flag attention")
+	}
+	m.appendOutput(view, "Allow command \"git add -A\"? [y/N]\n")
+	if !view.Attention {
+		t.Fatal("approval prompt should flag attention")
+	}
+
+	// Sending to the agent clears the flag (the user engaged).
+	view.clearAttention()
+	if view.Attention {
+		t.Fatal("clearAttention failed")
+	}
+}
+
+func TestContextHintPrioritizesBlockedPanes(t *testing.T) {
+	m := hudModel(t, "copilot", "codex")
+	m.progress = &runProgress{Next: "/vote"}
+
+	hint, ok := m.contextHint()
+	if !ok || !strings.Contains(hint, "Next: /vote") {
+		t.Fatalf("idle hint = %q, %v", hint, ok)
+	}
+
+	m.Agents[0].Attention = true
+	hint, ok = m.contextHint()
+	if !ok || !strings.Contains(hint, "copilot may need input") || !strings.Contains(hint, "/nudge copilot") {
+		t.Fatalf("blocked hint = %q", hint)
+	}
+}
+
+func TestCompressPathShortensHome(t *testing.T) {
+	var home, subPath, otherPath string
+	if runtime.GOOS == "windows" {
+		home = `C:\Users\example`
+		subPath = `C:\Users\example\dev\x`
+		otherPath = `C:\tmp\other`
+	} else {
+		home = "/Users/example"
+		subPath = "/Users/example/dev/x"
+		otherPath = "/tmp/other"
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	want := "~" + string(filepath.Separator) + filepath.Join("dev", "x")
+	if got := compressPath(subPath); got != want {
+		t.Fatalf("compressPath = %q, want %q", got, want)
+	}
+	if got := compressPath(otherPath); got != otherPath {
+		t.Fatalf("non-home path changed: %q", got)
+	}
+}
+
+func TestCommandPaletteFiltersAndNavigates(t *testing.T) {
+	m := hudModel(t, "a")
+	m.PromptInput = "/"
+
+	if !m.paletteActive() {
+		t.Fatal("palette should open on /")
+	}
+	matches := m.paletteMatches()
+	if len(matches) < 10 {
+		t.Fatalf("bare / should list all commands, got %d", len(matches))
+	}
+	// With no run, /plan is the top stage suggestion.
+	if matches[0].Name != "plan" {
+		t.Fatalf("idle palette top = %q, want plan", matches[0].Name)
+	}
+
+	// Arrow navigation wraps.
+	if !m.movePaletteSelection(1) || m.CmdSuggestIndex != 1 {
+		t.Fatalf("down: index = %d, want 1", m.CmdSuggestIndex)
+	}
+	if !m.movePaletteSelection(-1) || m.CmdSuggestIndex != 0 {
+		t.Fatalf("up: index = %d, want 0", m.CmdSuggestIndex)
+	}
+	m.movePaletteSelection(-1)
+	if m.CmdSuggestIndex != len(matches)-1 {
+		t.Fatalf("up from top should wrap to %d, got %d", len(matches)-1, m.CmdSuggestIndex)
+	}
+
+	// Filtering narrows; completion fills the selected command.
+	m.PromptInput = "/re"
+	m.CmdSuggestIndex = 0
+	filtered := m.paletteMatches()
+	for _, c := range filtered {
+		if !strings.HasPrefix(c.Name, "re") {
+			t.Fatalf("filter leaked %q", c.Name)
+		}
+	}
+	if !m.acceptPaletteSelection() {
+		t.Fatal("accept should complete the selection")
+	}
+	if !strings.HasPrefix(m.PromptInput, "/re") || !strings.HasSuffix(m.PromptInput, " ") {
+		t.Fatalf("completed input = %q", m.PromptInput)
+	}
+
+	// A space (args mode) closes the palette.
+	if m.paletteActive() {
+		t.Fatal("palette should close once the command word is complete")
+	}
+}
+
+func TestStageCommandsFollowThePipeline(t *testing.T) {
+	m := hudModel(t, "a")
+
+	top := func() string { return m.stageCommandNames()[0] }
+
+	if top() != "plan" {
+		t.Fatalf("no run: top = %q, want plan", top())
+	}
+	m.progress = &runProgress{Plans: 2}
+	if top() != "vote" {
+		t.Fatalf("plans done: top = %q, want vote", top())
+	}
+	m.progress = &runProgress{Plans: 2, PlanWinner: "a"}
+	if top() != "build" {
+		t.Fatalf("vote done: top = %q, want build", top())
+	}
+	m.progress = &runProgress{Plans: 2, PlanWinner: "a", Diffs: 2}
+	if top() != "review" {
+		t.Fatalf("builds done: top = %q, want review", top())
+	}
+	m.progress = &runProgress{Plans: 2, PlanWinner: "a", Diffs: 2, BuildWinner: "a"}
+	if top() != "compare" {
+		t.Fatalf("review done: top = %q, want compare", top())
+	}
+	m.progress = &runProgress{Adopted: "a"}
+	if top() != "report" {
+		t.Fatalf("adopted: top = %q, want report", top())
+	}
+	m.phase = "vote"
+	if top() != "finish" {
+		t.Fatalf("in vote: top = %q, want finish", top())
+	}
+	m.Agents[0].Attention = true
+	if top() != "attention" {
+		t.Fatalf("blocked pane: top = %q, want attention", top())
+	}
+}
+
+func TestFilePaletteIsVerticalAndNavigable(t *testing.T) {
+	m := hudModel(t, "a")
+	m.FileChoices = []string{"app.js", "index.html", "styles.css"}
+	m.PromptInput = "look at @s"
+
+	if !m.filePaletteActive() {
+		t.Fatal("file palette should open on @query")
+	}
+	lines := m.renderFilePalette()
+	if len(lines) < 2 {
+		t.Fatalf("file palette should be vertical, got %d line(s)", len(lines))
+	}
+	if !m.moveFileSuggestion(1) {
+		t.Fatal("down should move the file selection")
+	}
+
+	// The command palette never hijacks an @file query, and vice versa.
+	if m.paletteActive() {
+		t.Fatal("command palette must stay closed during @file input")
+	}
+}
+
+func TestPaneColorFallsBackToPersonality(t *testing.T) {
+	m := hudModel(t, "codex")
+	if got := m.paneColor("codex"); got != "" {
+		t.Fatalf("unconfigured agent color = %q, want empty", got)
+	}
+	agentCfg := m.Config.Agents["codex"]
+	agentCfg.Personality = "critic"
+	m.Config.Agents["codex"] = agentCfg
+	m.Config.Personalities = map[string]config.PersonalityConfig{"critic": {Color: "203"}}
+	if got := m.paneColor("codex"); got != "203" {
+		t.Fatalf("personality color = %q, want 203", got)
+	}
+	agentCfg.Color = "39"
+	m.Config.Agents["codex"] = agentCfg
+	if got := m.paneColor("codex"); got != "39" {
+		t.Fatalf("agent color should win, got %q", got)
+	}
+}
+
+func TestSyntheticViewerEscReturnsToPanes(t *testing.T) {
+	m := hudModel(t, "a")
+	// A synthetic view (e.g. /compare) — Esc must land on the panes even when
+	// an artifacts list exists from earlier browsing.
+	m.Artifacts = []artifactEntry{{Label: "plan: a.md", Path: "/tmp/a.md"}}
+	m.openArtifactText("compare builds", "table")
+	m.closeArtifactView()
+	if m.ScreenMode != ScreenPanes {
+		t.Fatalf("Esc from synthetic view: screen = %v, want panes", m.ScreenMode)
+	}
+
+	// A file opened from the list returns to the list.
+	m.ScreenMode = ScreenArtifacts
+	m.artifactView = "body"
+	m.artifactPath = "/tmp/a.md"
+	m.artifactFile = "/tmp/a.md"
+	m.viewerFromList = true
+	m.closeArtifactView()
+	if m.ScreenMode != ScreenArtifacts {
+		t.Fatalf("Esc from list-opened file: screen = %v, want artifacts list", m.ScreenMode)
+	}
+}
+
+func TestPaletteOverlaysBodyWithoutReflow(t *testing.T) {
+	m := hudModel(t, "a", "b")
+	m.resizeAgents()
+	m.appendOutput(m.Agents[0], "TOPLINE\n")
+
+	lineOf := func(view string, needle string) int {
+		for i, line := range strings.Split(view, "\n") {
+			if strings.Contains(line, needle) {
+				return i
+			}
+		}
+		return -1
+	}
+
+	closed := m.View()
+	closedLines := strings.Count(closed, "\n") + 1
+
+	m.PromptInput = "/"
+	open := m.View()
+	openLines := strings.Count(open, "\n") + 1
+
+	if closedLines != openLines {
+		t.Fatalf("view height changed when palette opened: %d -> %d", closedLines, openLines)
+	}
+	before, after := lineOf(closed, "TOPLINE"), lineOf(open, "TOPLINE")
+	if before == -1 || before != after {
+		t.Fatalf("pane content moved when palette opened: row %d -> %d", before, after)
+	}
+	if !strings.Contains(open, "suggested for this stage") {
+		t.Fatal("palette not rendered")
+	}
+}
+
+func TestPaneBorderColorsStayIndexed(t *testing.T) {
+	// Output must be 256-color INDICES (>= 16): the cube/gray indices render
+	// identically in every emulator, while truecolor and SGR-faint proved
+	// unreliable (VS Code). The focused color keeps the configured index; the
+	// muted variant is a computed darker index, never a terminal attribute.
+	focused, muted, ok := paneBorderColors("81")
+	if !ok || focused != "81" {
+		t.Fatalf("index 81 focused = %q (%v), want 81", focused, ok)
+	}
+	if muted != "23" { // 45%% of #5fd7ff -> dark teal #005f5f
+		t.Fatalf("muted 81 = %q, want 23", muted)
+	}
+	_, muted, ok = paneBorderColors("203")
+	if !ok || muted != "52" { // dimmed salmon stays red (#5f0000), not gray
+		t.Fatalf("muted 203 = %q (%v), want 52", muted, ok)
+	}
+	focused, _, ok = paneBorderColors("#ff5f5f")
+	if !ok || focused != "203" {
+		t.Fatalf("hex #ff5f5f = %q (%v), want index 203", focused, ok)
+	}
+	if _, _, ok := paneBorderColors("magenta"); ok {
+		t.Fatal("named colors are not resolvable here")
+	}
+}
+
+func TestCompareScreenNavigationAndDiffPager(t *testing.T) {
+	m := hudModel(t, "a")
+	m.CompareRows = []orchestrate.BuildComparison{
+		{Agent: "worker-a", Letter: "A", Files: 2, CheckStatus: "PASS"},
+		{Agent: "worker-b", Letter: "B", Files: 3, CheckStatus: "PASS", Winner: true},
+	}
+	m.ScreenMode = ScreenCompare
+
+	// Row navigation and pair-marking.
+	updated, _ := m.handleCompareKey(keyMsg("down"))
+	m = *updated.(*Model)
+	if m.CompareIndex != 1 {
+		t.Fatalf("down: index = %d", m.CompareIndex)
+	}
+	updated, _ = m.handleCompareKey(keyMsg("x"))
+	m = *updated.(*Model)
+	if m.compareMarked != "worker-b" {
+		t.Fatalf("mark = %q", m.compareMarked)
+	}
+	updated, _ = m.handleCompareKey(keyMsg("x"))
+	m = *updated.(*Model)
+	if m.compareMarked != "" {
+		t.Fatal("second x should unmark")
+	}
+
+	// File level: navigation and Esc unwinding.
+	m.compareFiles = &compareFileSet{
+		Title:  "worker-a vs base",
+		AgentA: "worker-a",
+		Files: []orchestrate.DiffFile{
+			{Path: "app.js", Status: "M", Patch: "diff --git a/app.js b/app.js\n+new\n-old\n"},
+			{Path: "index.html", Status: "A", Patch: "diff --git a/index.html b/index.html\n+hi\n"},
+		},
+	}
+	updated, _ = m.handleCompareKey(keyMsg("down"))
+	m = *updated.(*Model)
+	if m.CompareFileIndex != 1 {
+		t.Fatalf("file down: index = %d", m.CompareFileIndex)
+	}
+	updated, _ = m.handleCompareKey(keyMsg("enter"))
+	m = *updated.(*Model)
+	if m.ScreenMode != ScreenArtifacts || !m.artifactIsDiff {
+		t.Fatalf("enter should open the diff pager (screen=%v isDiff=%v)", m.ScreenMode, m.artifactIsDiff)
+	}
+	// Esc from the diff pager returns to compare, not panes.
+	m.closeArtifactView()
+	if m.ScreenMode != ScreenCompare {
+		t.Fatalf("pager Esc: screen = %v, want compare", m.ScreenMode)
+	}
+	// Esc from files returns to rows; Esc from rows returns to panes.
+	updated, _ = m.handleCompareKey(keyMsg("esc"))
+	m = *updated.(*Model)
+	if m.compareFiles != nil {
+		t.Fatal("esc should leave the file level")
+	}
+	updated, _ = m.handleCompareKey(keyMsg("esc"))
+	m = *updated.(*Model)
+	if m.ScreenMode != ScreenPanes {
+		t.Fatalf("esc from rows: screen = %v, want panes", m.ScreenMode)
+	}
+}
+
+func TestColorDiffLineStyles(t *testing.T) {
+	if colorDiffLine("+added line", 80) == "+added line" {
+		t.Fatal("added lines should be styled")
+	}
+	if colorDiffLine("-removed", 80) == "-removed" {
+		t.Fatal("removed lines should be styled")
+	}
+	if colorDiffLine("plain context", 80) != fitText("plain context", 80) {
+		t.Fatal("context lines stay unstyled")
+	}
+}

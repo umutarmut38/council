@@ -4,7 +4,7 @@
 
 | Platform | Status | Notes |
 |---|---|---|
-| macOS arm64/amd64 | Primary | Best tested. Works well in Terminal.app, iTerm2, and modern VS Code terminals. |
+| macOS arm64/amd64 | Primary | Best tested. Works well in Terminal.app, iTerm2, and modern VS Code terminals (for colored pane borders in VS Code, set `terminal.integrated.customGlyphs: false` — see [Troubleshooting](troubleshooting.md#colors-work-in-one-terminal-but-not-another)). |
 | Linux arm64/amd64 | Primary | Expected to work in modern terminal emulators with PTY support. |
 | Windows amd64/arm64 | Supported | Native pseudo-terminals via the ConPTY API. Best in Windows Terminal; older consoles render less well. WSL remains a fine alternative. |
 

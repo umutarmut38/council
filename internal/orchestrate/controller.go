@@ -8,9 +8,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/umutarmut38/council/internal/agent"
 	"github.com/umutarmut38/council/internal/config"
+	"github.com/umutarmut38/council/internal/fsperm"
 	runstore "github.com/umutarmut38/council/internal/session"
 )
 
@@ -173,6 +175,7 @@ func (c *Controller) SaveActivePhase(phase config.Phase, participants []string, 
 	if c.run == nil {
 		return errors.New("no active run")
 	}
+	c.run.RecordPhaseStart(string(phase), participants)
 	return c.run.SaveState(string(phase), participants, promptSent)
 }
 
@@ -190,6 +193,9 @@ func (c *Controller) MarkPhasePromptSent(phase config.Phase) error {
 func (c *Controller) ClearActivePhase() error {
 	if c.run == nil {
 		return nil
+	}
+	if state, err := c.run.LoadState(); err == nil && state.Phase != "" {
+		c.run.RecordPhaseEnd(string(state.Phase))
 	}
 	return c.run.ClearState()
 }
@@ -322,6 +328,18 @@ func (c *Controller) resumePhaseTarget(phase config.Phase, participants []string
 	c.SetScope(participants)
 	switch phase {
 	case config.PhasePlan:
+		// A refine round looks like a plan phase, but the winner's plan file
+		// was moved to .orig.md so the rewrite can be watched. Resume it with
+		// the refine prompt, not a from-scratch plan prompt.
+		if refinePrompts, ok := c.resumeRefinePrompts(participants); ok {
+			return ResumeTarget{
+				Phase:        phase,
+				Participants: c.AgentsForPhase(phase),
+				Prompts:      refinePrompts,
+				SendPrompts:  true,
+				Status:       resumeStatus(c.run.Stamp, "refining", refinePrompts),
+			}, nil
+		}
 		prompts, err := c.PlanPrompts()
 		if err != nil {
 			return ResumeTarget{}, err
@@ -383,6 +401,25 @@ func (c *Controller) resumePhaseTarget(phase config.Phase, participants []string
 	default:
 		return ResumeTarget{Status: "resumed run " + c.run.Stamp}, nil
 	}
+}
+
+// resumeRefinePrompts detects an interrupted /refine: exactly one participant
+// whose plan was backed up to .orig.md and whose live plan file is missing.
+func (c *Controller) resumeRefinePrompts(participants []string) (map[string]string, bool) {
+	if len(participants) != 1 {
+		return nil, false
+	}
+	agentName := participants[0]
+	planPath := c.run.PlanPath(agentName)
+	origPath := strings.TrimSuffix(planPath, ".md") + ".orig.md"
+	if fileExists(planPath) || !fileExists(origPath) {
+		return nil, false
+	}
+	prompts, err := c.RefinePrompts()
+	if err != nil {
+		return nil, false
+	}
+	return prompts, true
 }
 
 func (c *Controller) filterPromptsForMissing(phase config.Phase, prompts map[string]string) map[string]string {
@@ -590,24 +627,34 @@ func (c *Controller) CollectVotesAndTally() (Result, error) {
 
 // Winner returns the winning agent and its plan text from a tallied run.
 func (c *Controller) Winner() (agentName, plan string, err error) {
+	agentName, err = c.winnerName()
+	if err != nil {
+		return "", "", err
+	}
+	planBytes, err := os.ReadFile(c.run.PlanPath(agentName))
+	if err != nil {
+		return "", "", fmt.Errorf("winning plan missing: %w", err)
+	}
+	return agentName, string(planBytes), nil
+}
+
+// winnerName resolves the vote winner without requiring the plan file to
+// still exist (a refine round temporarily removes it).
+func (c *Controller) winnerName() (string, error) {
 	data, err := os.ReadFile(c.run.ResultPath())
 	if err != nil {
-		return "", "", errors.New("no result yet; run vote first")
+		return "", errors.New("no result yet; run vote first")
 	}
 	var payload struct {
 		Winner string `json:"winner_agent"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
-		return "", "", err
+		return "", err
 	}
 	if payload.Winner == "" {
-		return "", "", errors.New("result has no winner")
+		return "", errors.New("result has no winner")
 	}
-	planBytes, err := os.ReadFile(c.run.PlanPath(payload.Winner))
-	if err != nil {
-		return "", "", fmt.Errorf("winning plan missing: %w", err)
-	}
-	return payload.Winner, string(planBytes), nil
+	return payload.Winner, nil
 }
 
 // BuildPrompt resets each worktree to pristine and returns the build broadcast.
@@ -671,4 +718,110 @@ func (c *Controller) Clean() ([]string, error) {
 		mgr = NewManager(c.repoRoot, "")
 	}
 	return mgr.RemoveAll()
+}
+
+// ListWorktrees returns every council-managed worktree (all runs), for
+// previews of what Clean would remove.
+func (c *Controller) ListWorktrees() ([]Worktree, error) {
+	mgr := c.manager
+	if mgr == nil {
+		mgr = NewManager(c.repoRoot, "")
+	}
+	return mgr.List()
+}
+
+// JudgePlan records a human-selected plan winner, overriding (or standing in
+// for) the reviewers' vote. choice is an agent name or an assignment letter.
+func (c *Controller) JudgePlan(choice string) (string, error) {
+	if c.run == nil {
+		return "", errors.New("no active run")
+	}
+	choice = strings.TrimSpace(choice)
+	if choice == "" {
+		return "", errors.New("usage: /judge plan <agent|letter>")
+	}
+	refs, _ := c.run.LoadVoteRefs()
+
+	winnerAgent, winnerLetter := "", ""
+	for _, ref := range refs {
+		if strings.EqualFold(ref.Letter, choice) || ref.Agent == choice {
+			winnerAgent, winnerLetter = ref.Agent, ref.Letter
+			break
+		}
+	}
+	if winnerAgent == "" {
+		// No assignments yet (vote not started): accept any agent with a plan.
+		if !fileExists(c.run.PlanPath(choice)) {
+			return "", fmt.Errorf("no plan found for %q", choice)
+		}
+		winnerAgent = choice
+	}
+	res := Result{WinnerAgent: winnerAgent, WinnerLetter: winnerLetter}
+	if err := c.run.WriteResult(res, refs); err != nil {
+		return "", err
+	}
+	return winnerAgent, nil
+}
+
+// JudgeBuild records a human-selected build winner. choice must name an agent
+// with a captured build diff.
+func (c *Controller) JudgeBuild(choice string) (string, error) {
+	if c.run == nil {
+		return "", errors.New("no active run")
+	}
+	choice = strings.TrimSpace(choice)
+	avail := c.AdoptableBuilds()
+	for _, a := range avail {
+		if a == choice {
+			return choice, c.writeBuildResult(Result{WinnerAgent: choice})
+		}
+	}
+	if len(avail) == 0 {
+		return "", errors.New("no build diffs captured yet; run /review first")
+	}
+	return "", fmt.Errorf("no build diff for %q; available: %s", choice, strings.Join(avail, ", "))
+}
+
+// RefinePrompts builds the consensus-round prompt: the winning planner reads
+// the reviewers' critiques and rewrites its plan before the build starts. The
+// original plan is preserved as <agent>.orig.md and the watched plan file is
+// removed so the phase completes when the refined plan lands.
+func (c *Controller) RefinePrompts() (map[string]string, error) {
+	issue, err := c.issue()
+	if err != nil {
+		return nil, err
+	}
+	winner, err := c.winnerName()
+	if err != nil {
+		return nil, err
+	}
+
+	votePaths := []string{}
+	for _, voter := range c.allAgentsForPhase(config.PhaseVote) {
+		if path := c.run.VotePath(voter); fileExists(path) {
+			votePaths = append(votePaths, path)
+		}
+	}
+	if len(votePaths) == 0 {
+		return nil, errors.New("no votes on disk to refine from")
+	}
+
+	planPath := c.run.PlanPath(winner)
+	origPath := strings.TrimSuffix(planPath, ".md") + ".orig.md"
+	if !fileExists(origPath) {
+		data, err := os.ReadFile(planPath)
+		if err != nil {
+			return nil, fmt.Errorf("read winning plan: %w", err)
+		}
+		if err := os.WriteFile(origPath, data, fsperm.File()); err != nil {
+			return nil, err
+		}
+	}
+	// Remove the watched artifact so the refine phase finishes when the agent
+	// writes the new version (the original stays in .orig.md).
+	_ = os.Remove(planPath)
+
+	return map[string]string{
+		winner: RefinePrompt(issue, origPath, votePaths, planPath),
+	}, nil
 }

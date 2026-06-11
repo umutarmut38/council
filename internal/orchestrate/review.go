@@ -1,6 +1,7 @@
 package orchestrate
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,10 +9,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/umutarmut38/council/internal/config"
+	"github.com/umutarmut38/council/internal/fsperm"
 )
 
 // BuildCheck is the outcome of gating one agent's build implementation.
@@ -19,6 +23,9 @@ type BuildCheck struct {
 	Agent   string
 	Changed bool // produced a non-empty diff
 	Passed  bool // check command exited 0 (true if no check command configured)
+	// Warnings collects errors from best-effort steps (e.g. staging before the
+	// diff capture) that were ignored but are worth surfacing in /review.
+	Warnings []string
 }
 
 func revParse(repoRoot, ref string) (string, error) {
@@ -43,14 +50,14 @@ func (c *Controller) RunBuildChecks() ([]BuildCheck, error) {
 	if err != nil {
 		return nil, fmt.Errorf("no recorded build base; run build first: %w", err)
 	}
-	if err := os.MkdirAll(c.run.BuildsDir(), 0o755); err != nil {
+	if err := os.MkdirAll(c.run.BuildsDir(), fsperm.Dir()); err != nil {
 		return nil, err
 	}
 
-	// Candidates are every implementation that was actually built (every council
-	// worktree), independent of the current scope — the scope only picks the
-	// reviewers.
-	worktrees, err := c.manager.List()
+	// Candidates are every implementation that was actually built for THIS run
+	// (the run's worktrees), independent of the current scope — the scope only
+	// picks the reviewers.
+	worktrees, err := c.manager.ListRun()
 	if err != nil {
 		return nil, err
 	}
@@ -62,18 +69,45 @@ func (c *Controller) RunBuildChecks() ([]BuildCheck, error) {
 
 		// Stage everything first (respecting .gitignore) so newly-created files
 		// are included — a plain `git diff` omits untracked files, which would
-		// hide an implementation that builds a project from scratch.
-		_ = exec.Command("git", "-C", wt.Path, "add", "-A").Run()
+		// hide an implementation that builds a project from scratch. Staging is
+		// best-effort, but a failure here can hide work, so record it.
+		if out, addErr := exec.Command("git", "-C", wt.Path, "add", "-A").CombinedOutput(); addErr != nil {
+			res.Warnings = append(res.Warnings, fmt.Sprintf("git add -A: %v: %s", addErr, strings.TrimSpace(string(out))))
+		}
 		diff, derr := exec.Command("git", "-C", wt.Path, "diff", "--cached", base).Output()
-		if derr == nil && len(strings.TrimSpace(string(diff))) > 0 {
+		if derr != nil {
+			res.Warnings = append(res.Warnings, fmt.Sprintf("git diff --cached %s: %v", base, derr))
+		} else if len(strings.TrimSpace(string(diff))) > 0 {
 			res.Changed = true
-			_ = os.WriteFile(c.run.BuildDiffPath(wt.Agent), diff, 0o644)
+			_ = os.WriteFile(c.run.BuildDiffPath(wt.Agent), diff, fsperm.File())
 		}
 
 		res.Passed = c.runCheck(wt.Path, wt.Agent)
 		results = append(results, res)
 	}
+	c.logCheckWarnings(results)
 	return results, nil
+}
+
+// logCheckWarnings appends ignored best-effort errors to a per-run warnings
+// log so they stay inspectable after the fact.
+func (c *Controller) logCheckWarnings(results []BuildCheck) {
+	var b strings.Builder
+	for _, res := range results {
+		for _, w := range res.Warnings {
+			fmt.Fprintf(&b, "%s: %s\n", res.Agent, w)
+		}
+	}
+	if b.Len() == 0 {
+		return
+	}
+	path := filepath.Join(c.run.BuildsDir(), "warnings.log")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, fsperm.File())
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(b.String())
 }
 
 // runCheck runs the configured check command in dir, logging output. Returns
@@ -83,21 +117,32 @@ func (c *Controller) runCheck(dir, agent string) bool {
 	if len(cmd) == 0 {
 		return true
 	}
-	out, err := runInDir(dir, cmd)
+	out, timedOut, err := runInDir(dir, cmd, c.cfg.Review.CheckTimeout(), c.cfg.Review.CheckOutputLimit())
 	header := fmt.Sprintf("$ %s\n\n", strings.Join(cmd, " "))
 	status := "PASS"
-	if err != nil {
+	switch {
+	case timedOut:
+		status = fmt.Sprintf("FAIL: timed out after %s (review.check_timeout_seconds)", c.cfg.Review.CheckTimeout())
+		err = errors.New(status)
+	case err != nil:
 		status = "FAIL: " + err.Error()
 	}
-	_ = os.WriteFile(c.run.CheckLogPath(agent), []byte(header+out+"\n"+status+"\n"), 0o644)
+	_ = os.WriteFile(c.run.CheckLogPath(agent), []byte(header+out+"\n"+status+"\n"), fsperm.File())
 	return err == nil
 }
 
-func runInDir(dir string, args []string) (string, error) {
-	cmd := exec.Command(args[0], args[1:]...)
+// runInDir runs a command with a timeout and an output cap, so a hung or
+// log-spewing check command can't block review or fill the disk.
+func runInDir(dir string, args []string, timeout time.Duration, maxOutput int) (out string, timedOut bool, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
 	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
-	return string(out), err
+	raw, err := cmd.CombinedOutput()
+	if len(raw) > maxOutput {
+		raw = append(raw[:maxOutput], []byte("\n[output truncated]\n")...)
+	}
+	return string(raw), ctx.Err() == context.DeadlineExceeded, err
 }
 
 // Survivors returns the agents whose implementation changed something and passed.
@@ -155,7 +200,7 @@ func (c *Controller) reviewPromptsFromRefs(issue string, refs []PlanRef) (map[st
 			if rerr != nil {
 				return nil, nil, fmt.Errorf("read build diff %s: %w", ref.Agent, rerr)
 			}
-			if werr := os.WriteFile(dest, data, 0o644); werr != nil {
+			if werr := os.WriteFile(dest, data, fsperm.File()); werr != nil {
 				return nil, nil, werr
 			}
 		}
@@ -206,7 +251,7 @@ func (c *Controller) SetSingleWinner(agent string) error {
 }
 
 func (c *Controller) writeBuildResult(res Result) error {
-	if err := os.MkdirAll(c.run.BuildsDir(), 0o755); err != nil {
+	if err := os.MkdirAll(c.run.BuildsDir(), fsperm.Dir()); err != nil {
 		return err
 	}
 	payload := struct {
@@ -218,7 +263,7 @@ func (c *Controller) writeBuildResult(res Result) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(c.run.BuildResultPath(), data, 0o644)
+	return os.WriteFile(c.run.BuildResultPath(), data, fsperm.File())
 }
 
 // BuildWinner returns the winning agent recorded by the review.
@@ -239,10 +284,13 @@ func (c *Controller) BuildWinner() (string, error) {
 	return payload.Winner, nil
 }
 
-// Adopt applies the winning implementation's diff onto the repo's working tree
-// as uncommitted changes for the user to review and commit.
+// anonDiffName matches the anonymized review copies (diff-a.diff, diff-b.diff,
+// …) that live next to the per-agent diffs in the builds dir. They are inputs
+// for reviewers, not adoptable candidates.
+var anonDiffName = regexp.MustCompile(`^diff-[a-z][0-9]*$`)
+
 // AdoptableBuilds lists the agents that produced a non-empty build diff (i.e.
-// the candidates /adopt can apply).
+// the candidates /adopt can apply). Anonymized reviewer copies are excluded.
 func (c *Controller) AdoptableBuilds() []string {
 	var out []string
 	entries, err := os.ReadDir(c.run.BuildsDir())
@@ -254,35 +302,184 @@ func (c *Controller) AdoptableBuilds() []string {
 		if !strings.HasSuffix(name, ".diff") || e.IsDir() {
 			continue
 		}
+		agent := strings.TrimSuffix(name, ".diff")
+		if anonDiffName.MatchString(agent) {
+			continue
+		}
 		if fi, statErr := os.Stat(filepath.Join(c.run.BuildsDir(), name)); statErr == nil && fi.Size() > 0 {
-			out = append(out, strings.TrimSuffix(name, ".diff"))
+			out = append(out, agent)
 		}
 	}
 	sort.Strings(out)
 	return out
 }
 
-// Adopt applies a build's diff onto the repo's working tree as uncommitted
-// changes. With override == "" it adopts the reviewed winner; otherwise it
-// adopts the named agent's build (overriding the recommendation).
-func (c *Controller) Adopt(override string) (adopted string, err error) {
-	adopted = strings.TrimSpace(override)
-	if adopted == "" {
-		adopted, err = c.BuildWinner()
-		if err != nil {
-			return "", err
+// BuildComparison is one candidate build's row in the /compare view.
+type BuildComparison struct {
+	Agent        string
+	Letter       string // anonymized review letter, if assigned
+	Files        int    // files touched by the diff
+	CheckStatus  string // PASS, FAIL, or "—" when no check ran
+	Points       int    // review Borda points (0 when not reviewed)
+	Winner       bool
+	DiffPath     string
+	CheckLogPath string
+}
+
+// CompareBuilds summarizes every candidate build from the artifacts on disk:
+// diffstat, check outcome, review points, and the recommended winner.
+func (c *Controller) CompareBuilds() ([]BuildComparison, error) {
+	if c.run == nil {
+		return nil, errors.New("no active run")
+	}
+	agents := c.AdoptableBuilds()
+	if len(agents) == 0 {
+		return nil, errors.New("no build diffs captured; run /review first")
+	}
+	letters := map[string]string{}
+	if refs, err := c.run.LoadReviewRefs(); err == nil {
+		for _, ref := range refs {
+			letters[ref.Agent] = ref.Letter
 		}
 	}
-	diffPath := c.run.BuildDiffPath(adopted)
+	points := map[string]int{}
+	if data, err := os.ReadFile(c.run.BuildResultPath()); err == nil {
+		var payload struct {
+			Points map[string]int `json:"points"`
+		}
+		if json.Unmarshal(data, &payload) == nil {
+			points = payload.Points
+		}
+	}
+	winner, _ := c.BuildWinner()
+
+	rows := make([]BuildComparison, 0, len(agents))
+	for _, agentName := range agents {
+		row := BuildComparison{
+			Agent:        agentName,
+			Letter:       letters[agentName],
+			DiffPath:     c.run.BuildDiffPath(agentName),
+			CheckLogPath: c.run.CheckLogPath(agentName),
+			CheckStatus:  "—",
+			Winner:       agentName == winner,
+		}
+		if data, err := os.ReadFile(row.DiffPath); err == nil {
+			row.Files = strings.Count(string(data), "\ndiff --git ")
+			if strings.HasPrefix(string(data), "diff --git ") {
+				row.Files++
+			}
+		}
+		if log, err := os.ReadFile(row.CheckLogPath); err == nil {
+			row.CheckStatus = "FAIL"
+			if strings.HasSuffix(strings.TrimSpace(string(log)), "PASS") {
+				row.CheckStatus = "PASS"
+			}
+		}
+		if row.Letter != "" {
+			row.Points = points[row.Letter]
+		}
+		rows = append(rows, row)
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Winner != rows[j].Winner {
+			return rows[i].Winner
+		}
+		if rows[i].Points != rows[j].Points {
+			return rows[i].Points > rows[j].Points
+		}
+		return rows[i].Agent < rows[j].Agent
+	})
+	return rows, nil
+}
+
+// AdoptPlan describes what /adopt would do, so the user can inspect the
+// change before any file in the working tree is touched.
+type AdoptPlan struct {
+	Agent      string
+	DiffPath   string
+	Files      []string // files the diff touches
+	DirtyFiles []string // uncommitted working-tree files (overlap risk)
+	CheckError string   // non-empty when `git apply --check --3way` failed
+}
+
+// PlanAdopt resolves which build would be adopted and preflights it: the
+// touched files, the current working-tree dirt, and a `git apply --check`
+// result. It never modifies the working tree.
+func (c *Controller) PlanAdopt(override string) (AdoptPlan, error) {
+	agentName, diffPath, err := c.resolveAdopt(override)
+	if err != nil {
+		return AdoptPlan{}, err
+	}
+	plan := AdoptPlan{Agent: agentName, DiffPath: diffPath}
+
+	if out, err := exec.Command("git", "-C", c.repoRoot, "apply", "--numstat", diffPath).Output(); err == nil {
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) >= 3 {
+				plan.Files = append(plan.Files, fields[2])
+			}
+		}
+	}
+	plan.DirtyFiles = c.DirtyFiles()
+	if out, checkErr := exec.Command("git", "-C", c.repoRoot, "apply", "--check", "--3way", diffPath).CombinedOutput(); checkErr != nil {
+		plan.CheckError = strings.TrimSpace(string(out))
+		if plan.CheckError == "" {
+			plan.CheckError = checkErr.Error()
+		}
+	}
+	return plan, nil
+}
+
+// DirtyFiles lists uncommitted changes in the repo's working tree.
+func (c *Controller) DirtyFiles() []string {
+	out, err := exec.Command("git", "-C", c.repoRoot, "status", "--porcelain").Output()
+	if err != nil {
+		return nil
+	}
+	var files []string
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if len(line) > 3 {
+			files = append(files, strings.TrimSpace(line[3:]))
+		}
+	}
+	return files
+}
+
+func (c *Controller) resolveAdopt(override string) (agentName, diffPath string, err error) {
+	agentName = strings.TrimSpace(override)
+	if agentName == "" {
+		agentName, err = c.BuildWinner()
+		if err != nil {
+			return "", "", err
+		}
+	}
+	diffPath = c.run.BuildDiffPath(agentName)
 	if fi, statErr := os.Stat(diffPath); statErr != nil || fi.Size() == 0 {
 		avail := c.AdoptableBuilds()
 		if len(avail) == 0 {
-			return "", fmt.Errorf("no build diff for %q; run /review first", adopted)
+			return "", "", fmt.Errorf("no build diff for %q; run /review first", agentName)
 		}
-		return "", fmt.Errorf("no build diff for %q; available: %s", adopted, strings.Join(avail, ", "))
+		return "", "", fmt.Errorf("no build diff for %q; available: %s", agentName, strings.Join(avail, ", "))
 	}
-	if out, applyErr := exec.Command("git", "-C", c.repoRoot, "apply", "--3way", diffPath).CombinedOutput(); applyErr != nil {
-		return "", fmt.Errorf("git apply %s: %v: %s", adopted, applyErr, strings.TrimSpace(string(out)))
+	return agentName, diffPath, nil
+}
+
+// Adopt applies a build's diff onto the repo's working tree as uncommitted
+// changes. With override == "" it adopts the reviewed winner; otherwise it
+// adopts the named agent's build (overriding the recommendation). The diff is
+// preflighted with `git apply --check --3way` first so a conflicting patch
+// fails cleanly instead of half-applying.
+func (c *Controller) Adopt(override string) (adopted string, files []string, err error) {
+	plan, err := c.PlanAdopt(override)
+	if err != nil {
+		return "", nil, err
 	}
-	return adopted, nil
+	if plan.CheckError != "" {
+		return "", nil, fmt.Errorf("diff for %s does not apply cleanly: %s", plan.Agent, plan.CheckError)
+	}
+	if out, applyErr := exec.Command("git", "-C", c.repoRoot, "apply", "--3way", plan.DiffPath).CombinedOutput(); applyErr != nil {
+		return "", nil, fmt.Errorf("git apply %s: %v: %s", plan.Agent, applyErr, strings.TrimSpace(string(out)))
+	}
+	_ = c.run.RecordAdoption(plan.Agent, plan.Files)
+	return plan.Agent, plan.Files, nil
 }

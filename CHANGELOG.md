@@ -4,6 +4,133 @@ All notable changes will be documented here.
 
 This project follows semantic versioning once `v0.1.0` is tagged.
 
+## v0.3.0 - 2026-06-11
+
+A large UI/UX and safety release: the TUI becomes an orchestrator HUD with a
+phase rail, adaptive layout, a command palette, and an interactive build
+inspector, while runs gain a trust model, private-by-default artifacts, and
+preview-before-apply adoption.
+
+### Added (UI/UX)
+
+- **`/compare` is a full build inspector**: navigate candidate builds,
+  drill into changed files, read per-file git-style colored diffs, open the
+  live worktree (or a single file) in `$EDITOR`, and mark one build with `x`
+  to diff two implementations directly against each other (via git trees —
+  exact rename/mode handling, no noise).
+- **`/adopt` opens the full preview**: files, dirty-tree warning, and the
+  complete diff, applied with an explicit `y` — the previous status-line-only
+  confirm was routinely missed, leaving users believing they had adopted.
+- **`$EDITOR` integration**: `e` opens the viewed artifact, diff, or selected
+  file in `$VISUAL`/`$EDITOR` (vim by default) from /artifacts, /preview, and
+  the adopt preview.
+- **Vertical @file picker**: the `@` file suggestions use the same vertical,
+  arrow-navigable list as the command palette.
+- **Per-agent colors**: `agents.<name>.color` (or the personality color)
+  tints the pane border — full strength while focused, a computed darker
+  shade otherwise; the pane content stays untouched. Rendering sticks to
+  indexed cube colors (never SGR faint, never truecolor sequences), the only
+  encoding that proved consistent across emulators; `council doctor` now
+  prints a color test strip for diagnosing terminal differences. VS Code
+  users need `terminal.integrated.customGlyphs: false` for colored borders
+  (its custom-glyph renderer drops colors on box/block glyphs).
+- **Smoother rendering**: 120 FPS frame budget and a larger PTY read buffer.
+- Esc from synthetic views (/compare, /preview, /clean) returns to the panes;
+  only files opened from /artifacts return to the list.
+- The command/@file palettes **overlay** the bottom of the panes instead of
+  reflowing them, so the agent CLIs no longer jump while a command is typed.
+- Fixed panes rendering at the wrong size after visiting overview/settings or
+  while a palette was open (PTY sizes no longer track transient footers, and
+  every screen exit re-syncs sizes).
+- **Command palette**: typing `/` opens a vertical, arrow-navigable list of
+  commands (↑/↓ select, Tab/Enter complete), with the commands suggested for
+  the current pipeline stage marked ● and sorted first.
+- **Rounded pane borders**: panes use the same box-drawing set as the
+  composer (no more `+--|` ASCII), and the focused pane title is bold.
+- **Resume hardening**: every stage resumes correctly — interrupted `/refine`
+  rounds resume with the refine prompt (not a from-scratch plan prompt), and
+  post-review runs reopen idle with the HUD pointing at `/compare or /adopt`.
+- **Orchestrator HUD**: a phase rail in the header (`Plan 2/2 ✓  Vote 0/2 ●
+  …  · Next: /vote`) with artifact counts and the recommended next command,
+  visible whenever a run is active.
+- **Adaptive grid** (default): 1 pane fills the screen, 2 sit side by side at
+  full height, 3-4 use a 2x2; bigger rosters page as before. Adjusting
+  rows/cols in `/settings` locks the layout; `ui.adaptive_grid: false`
+  disables it.
+- **Pane badges** carry phase state: `vote · waiting for VOTE.md`,
+  `vote · wrote VOTE.md`, `build · working`, `needs input`.
+- **Approval-prompt detection**: panes that print `[y/N]`-style or trust
+  prompts get an orange border and a footer recovery hint; `/attention
+  <agent> [off]` flags or clears manually.
+- **Context-aware footer**: next actions and recovery commands during a run,
+  the generic shortcut list otherwise.
+- **Overview is a run dashboard**: phase progress plus each agent's role,
+  personality, visibility, and artifact state.
+- `/preview` now renders the **full diff** in the pager, stages the adopt,
+  and accepts `y`/`n` to apply or cancel; `/compare` shows each agent's
+  anonymized review letter.
+- Settings show a live layout preview; header paths compress `$HOME` to `~`.
+
+### Fixed
+
+- `/compare` and `/adopt` no longer list the anonymized `diff-<letter>`
+  reviewer copies as candidate builds.
+
+### Changed (safety)
+
+- **Worktrees are now per-run**: `.council/worktrees/<stamp>/<agent>` instead
+  of `.council/worktrees/<agent>`, with branch verification on reuse — a new
+  run can no longer build inside a stale checkout, and reviews only consider
+  the current run's builds. Worktrees from older releases are removed by
+  `council clean`.
+- **Repo-local `.council.yaml` requires trust**: council asks before applying
+  a new or changed repo config (it can change which commands run) and
+  remembers the decision by content hash. New: `council trust [--revoke|--show]`
+  and `--no-local-config`. Repo-root discovery now uses
+  `git rev-parse --show-toplevel` and handles linked worktrees (`.git` file).
+- **Run artifacts are private by default**: `0700` directories / `0600` files
+  (`sessions.private: false` restores the old behavior). Optional secret
+  redaction for saved transcripts via `sessions.redact: true`.
+- **`/adopt` is a two-step preview + confirm**: preflighted with
+  `git apply --check --3way`, shows touched files and dirty-tree overlap, then
+  `/adopt confirm` applies. CLI parity: `council adopt [run] [agent]
+  [--dry-run] [--yes]`.
+- **The generated config is safe**: every agent preset ships disabled and
+  without auto-approval flags (they moved to commented examples and the
+  wizard). `policy.mode: safe|normal|aggressive` sets the risk posture;
+  `safe` refuses risky flags outright.
+- `@file` expansion is constrained to the working directory (plus a size cap
+  and binary detection); `files.allow_absolute` opts out.
+- `review.check_command` runs with a timeout (`check_timeout_seconds`, default
+  600s) and an output cap (`max_check_output_bytes`, default 1 MiB).
+- `/clean`, `council clean`, and the new `council clean-runs` preview what
+  they will delete and ask for confirmation.
+- Runs save the **effective merged config** (`config.effective.yaml`) and its
+  provenance (`config.sources.json`) instead of the raw global file; run IDs
+  are collision-proof; agent names are validated (charset + safe-name
+  collisions).
+
+### Added (orchestration & CLI)
+
+- `council review` and `council adopt` CLI parity with the in-chat commands.
+- Run reports (`report.md`, `/report`, `council report [--post N]`), phase
+  timings, and `adopted.json`.
+- `/artifacts` in-app browser for plans, votes, diffs, check logs, reviews,
+  and transcripts; `/compare` and `/preview` for candidate builds.
+- `/judge plan|build` human overrides and the `/refine` consensus round
+  (winning planner absorbs reviewer critiques before `/build`).
+- `/restart`, `/resend`, and `/nudge` recovery commands.
+- `council config wizard`, `council config add-agent <preset>`, and
+  `council stack detect|set` for review gates.
+- `council scorecard` (agent performance across runs), `council queue`
+  (batch issues), and `council pr` (open a PR from the winning branch).
+- A much deeper `council doctor`: config validity, trust state, role
+  coverage, writable directories, stale worktrees, risky flags, terminal
+  settings, and the check command.
+- CI: race detector on Linux, plus a required Windows cross-build smoke job;
+  releases get build provenance attestations and documented verification
+  steps.
+
 ## v0.2.0 - 2026-06-07
 
 Native Windows support.

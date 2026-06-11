@@ -459,3 +459,138 @@ func TestResumeBuildDoesNotResetInterruptedWorktree(t *testing.T) {
 		t.Fatalf("resume reset or removed interrupted work: %v", err)
 	}
 }
+
+func resumeTestController(t *testing.T, root string) *Controller {
+	t.Helper()
+	cfg := config.Config{
+		Agents: map[string]config.AgentConfig{
+			"a": {Enabled: true, Command: []string{"true"}},
+			"b": {Enabled: true, Command: []string{"true"}},
+		},
+		Sessions: config.SessionConfig{RootDir: filepath.Join(root, ".council", "runs")},
+	}
+	cfg.Normalize()
+	ctrl, err := NewController(cfg, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.StartRun("do it"); err != nil {
+		t.Fatal(err)
+	}
+	return ctrl
+}
+
+func reopen(t *testing.T, ctrl *Controller) *Controller {
+	t.Helper()
+	resumed, err := NewController(ctrl.cfg, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := resumed.UseRun(ctrl.Run().Stamp); err != nil {
+		t.Fatal(err)
+	}
+	return resumed
+}
+
+// TestResumeTargetCoversEveryStage walks the pipeline and checks the inferred
+// resume target at each point, so an interrupted run can always be reopened.
+func TestResumeTargetCoversEveryStage(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := resumeTestController(t, root)
+
+	// Stage 1: nothing produced -> resume planning.
+	target, err := reopen(t, ctrl).ResumeTarget()
+	if err != nil || target.Phase != config.PhasePlan {
+		t.Fatalf("fresh run: phase = %q (%v), want plan", target.Phase, err)
+	}
+
+	// Stage 2: plans exist, no vote result -> resume voting.
+	for _, name := range []string{"a", "b"} {
+		if err := os.WriteFile(ctrl.Run().PlanPath(name), []byte("plan "+name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	target, err = reopen(t, ctrl).ResumeTarget()
+	if err != nil || target.Phase != config.PhaseVote {
+		t.Fatalf("after plans: phase = %q (%v), want vote", target.Phase, err)
+	}
+
+	// Stage 3: vote tallied, build base recorded -> resume build (staged).
+	refs := []PlanRef{{Letter: "A", Agent: "a"}, {Letter: "B", Agent: "b"}}
+	res := Tally([]Ballot{{Voter: "b", Ranking: []string{"A"}}}, refs)
+	if err := ctrl.Run().WriteResult(res, refs); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.Run().SaveBaseSHA("deadbeef"); err != nil {
+		t.Fatal(err)
+	}
+	target, err = reopen(t, ctrl).ResumeTarget()
+	if err != nil || target.Phase != config.PhaseBuild {
+		t.Fatalf("after vote: phase = %q (%v), want build", target.Phase, err)
+	}
+	if !target.PendingBuild {
+		t.Fatal("inferred build resume should stage, not auto-send")
+	}
+
+	// Stage 4: review tallied -> idle resume (HUD takes over from here).
+	if err := ctrl.SetSingleWinner("a"); err != nil {
+		t.Fatal(err)
+	}
+	target, err = reopen(t, ctrl).ResumeTarget()
+	if err != nil || target.Phase != "" {
+		t.Fatalf("after review: phase = %q (%v), want idle", target.Phase, err)
+	}
+	if !strings.Contains(target.Status, "resumed") {
+		t.Fatalf("idle resume status = %q", target.Status)
+	}
+}
+
+// TestResumeRefineRoundKeepsRefinePrompt: an interrupted /refine must resume
+// with the refine prompt (critiques + rewrite), not a from-scratch plan prompt.
+func TestResumeRefineRoundKeepsRefinePrompt(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := resumeTestController(t, root)
+
+	for _, name := range []string{"a", "b"} {
+		if err := os.WriteFile(ctrl.Run().PlanPath(name), []byte("plan "+name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(ctrl.Run().VotePath("b"), []byte("RANKING: A\nWINNER: A"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	refs := []PlanRef{{Letter: "A", Agent: "a"}, {Letter: "B", Agent: "b"}}
+	res := Tally([]Ballot{{Voter: "b", Ranking: []string{"A"}}}, refs)
+	if err := ctrl.Run().WriteResult(res, refs); err != nil {
+		t.Fatal(err)
+	}
+
+	// Start the refine round (backs up the plan, removes the live file), save
+	// the phase as the TUI would, then simulate a crash + resume.
+	if _, err := ctrl.RefinePrompts(); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.SaveActivePhase(config.PhasePlan, []string{"a"}, true); err != nil {
+		t.Fatal(err)
+	}
+
+	target, err := reopen(t, ctrl).ResumeTarget()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.Phase != config.PhasePlan {
+		t.Fatalf("phase = %q, want plan", target.Phase)
+	}
+	prompt := target.Prompts["a"]
+	if prompt == "" {
+		t.Fatal("winner should be prompted on refine resume")
+	}
+	if !strings.Contains(prompt, "REVIEWER CRITIQUES") || !strings.Contains(prompt, "refine") {
+		t.Fatalf("resume used a plain plan prompt, not the refine prompt:\n%s", prompt)
+	}
+	if !strings.Contains(target.Status, "refining") {
+		t.Fatalf("status = %q, want refining", target.Status)
+	}
+}

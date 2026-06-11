@@ -7,6 +7,9 @@ on:
 
 permissions:
   contents: write
+  # For build provenance attestations on the release archives.
+  id-token: write
+  attestations: write
 
 jobs:
   release:
@@ -72,10 +75,27 @@ jobs:
             dist/*.zip
             dist/checksums.txt
 
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
+          body: |
+            ## Verifying the artifacts
+
+            ```sh
+            sha256sum -c checksums.txt --ignore-missing
+            gh attestation verify <archive> --repo ${{ github.repository }}
+            ```
+
+            > **Note:** Windows binaries are experimental — the Windows build is
+            > verified in CI, but the full test suite does not yet gate it.
           files: |
             dist/*.tar.gz
             dist/*.zip
