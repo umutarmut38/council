@@ -23,27 +23,44 @@ func TestCommandForPhaseFallsBackToCommand(t *testing.T) {
 	}
 }
 
-func TestDefaultOrchestrationPresets(t *testing.T) {
+func TestDefaultsAreSafe(t *testing.T) {
 	d := Default().Agents
-	// Claude and Copilot stay interactive in every phase: no -p, prompt
-	// delivered through the live pane (not argv).
-	if got := d["claude"].CommandForPhase(PhasePlan); !reflect.DeepEqual(got, []string{"claude", "--dangerously-skip-permissions"}) {
-		t.Fatalf("claude plan command = %v", got)
+	if len(d) == 0 {
+		t.Fatal("default config should ship agent presets")
 	}
-	if d["claude"].PromptInCommandForPhase(PhasePlan) {
-		t.Fatal("claude should receive plan prompts interactively, not via argv")
+	for name, agentCfg := range d {
+		if agentCfg.Enabled {
+			t.Fatalf("%s preset must ship disabled", name)
+		}
+		if flags := AgentRiskyFlags(agentCfg); len(flags) > 0 {
+			t.Fatalf("%s preset must not carry auto-approval flags, got %v", name, flags)
+		}
 	}
-	if !d["copilot"].ParticipatesIn(PhasePlan) || !d["copilot"].ParticipatesIn(PhaseVote) {
-		t.Fatal("copilot should participate in planning and voting by default")
-	}
+	// Copilot remains excluded from build (worktree quirk), and the opt-in
+	// auto-approval commands stay available but never applied by default.
 	if d["copilot"].ParticipatesIn(PhaseBuild) {
 		t.Fatal("copilot should be excluded from build by default")
 	}
-	if got := d["copilot"].CommandForPhase(PhasePlan); !reflect.DeepEqual(got, []string{"copilot", "--allow-all-tools"}) {
-		t.Fatalf("copilot plan command = %v", got)
+	if got := PresetAutoApproveCommand("claude"); !reflect.DeepEqual(got, []string{"claude", "--dangerously-skip-permissions"}) {
+		t.Fatalf("claude auto-approve command = %v", got)
 	}
-	if d["copilot"].PromptInCommandForPhase(PhasePlan) {
-		t.Fatal("copilot should receive plan prompts interactively, not via argv")
+	if flags := RiskyCommandFlags([]string{"claude", "--dangerously-skip-permissions"}); len(flags) != 1 {
+		t.Fatalf("risky flag detection = %v", flags)
+	}
+}
+
+func TestValidateAgentNames(t *testing.T) {
+	good := Config{Agents: map[string]AgentConfig{"claude": {}, "codex-2": {}, "a_b": {}}}
+	if err := ValidateAgentNames(good); err != nil {
+		t.Fatalf("valid names rejected: %v", err)
+	}
+	bad := Config{Agents: map[string]AgentConfig{"a/b": {}}}
+	if err := ValidateAgentNames(bad); err == nil {
+		t.Fatal("name with '/' should be rejected")
+	}
+	dup := Config{Agents: map[string]AgentConfig{"Claude": {}, "claude": {}}}
+	if err := ValidateAgentNames(dup); err == nil {
+		t.Fatal("names colliding after normalization should be rejected")
 	}
 }
 
@@ -88,7 +105,9 @@ func TestLoadMergesDefaultOrchestrationWhenBlockIsOmitted(t *testing.T) {
 	if !copilot.ParticipatesIn(PhasePlan) || !copilot.ParticipatesIn(PhaseVote) || copilot.ParticipatesIn(PhaseBuild) {
 		t.Fatalf("copilot phase participation = %+v", copilot.Orchestration)
 	}
-	if got := copilot.CommandForPhase(PhasePlan); !reflect.DeepEqual(got, []string{"copilot", "--allow-all-tools"}) {
+	// No auto-approval flags are inherited from defaults; phase commands fall
+	// back to the agent's own command.
+	if got := copilot.CommandForPhase(PhasePlan); !reflect.DeepEqual(got, []string{"gh", "copilot"}) {
 		t.Fatalf("copilot plan command = %v", got)
 	}
 	if copilot.PromptInCommandForPhase(PhasePlan) {
@@ -148,6 +167,12 @@ func TestFindLocalConfigWalksUpToGitRoot(t *testing.T) {
 
 func TestApplyLocalOverrideDeepMerges(t *testing.T) {
 	base := Default()
+	claude := base.Agents["claude"]
+	claude.Enabled = true
+	base.Agents["claude"] = claude
+	cursor := base.Agents["cursor"]
+	cursor.Enabled = true
+	base.Agents["cursor"] = cursor
 	wantDelay := base.Agents["cursor"].Terminal.SubmitDelayMs
 	base.PersonalityCategories = map[string]PersonalityCategoryConfig{
 		"strategy": {Label: "Strategy", Order: 10},
@@ -182,7 +207,7 @@ personalities:
 		t.Fatal(err)
 	}
 
-	cursor := merged.Agents["cursor"]
+	cursor = merged.Agents["cursor"]
 	if cursor.Enabled {
 		t.Fatal("local override should disable cursor")
 	}

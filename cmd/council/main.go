@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -35,17 +34,22 @@ func run(args []string) error {
 		}
 	}
 
-	if len(args) >= 2 && args[0] == "config" && args[1] == "init" {
-		return initConfig(args[2:])
+	if len(args) >= 2 && args[0] == "config" {
+		return runConfigCommand(args[1], args[2:])
 	}
 
 	if len(args) >= 1 && args[0] == "doctor" {
-		return doctor()
+		return doctor(args[1:])
+	}
+
+	if len(args) >= 1 && args[0] == "trust" {
+		return councilTrust(args[1:])
 	}
 
 	if len(args) >= 1 {
 		switch args[0] {
-		case "plan", "vote", "build", "run", "clean", "status", "resume":
+		case "plan", "vote", "build", "run", "review", "adopt", "clean", "clean-runs",
+			"status", "resume", "report", "stack", "scorecard", "queue", "pr":
 			return runOrchestration(args[0], args[1:])
 		}
 	}
@@ -53,6 +57,7 @@ func run(args []string) error {
 	flags := flag.NewFlagSet("council", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	agentList := flags.String("agents", "", "comma-separated agent names to launch")
+	noLocal := flags.Bool("no-local-config", false, "ignore repo-local .council.yaml")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -74,27 +79,24 @@ func run(args []string) error {
 		}
 	}
 
-	cfgPath, err := config.DefaultPath()
-	if err != nil {
-		return err
-	}
-
-	cfg, rawConfig, err := config.Load(cfgPath)
+	cfg, sources, err := loadEffectiveConfig(*noLocal)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			cfgPath, perr := config.DefaultPath()
+			if perr != nil {
+				return perr
+			}
 			if err := config.WriteDefault(cfgPath, false); err != nil {
 				return err
 			}
-			fmt.Printf("Created default config at %s.\nEdit it, then run council again.\n", cfgPath)
+			fmt.Printf("Created default config at %s.\nEnable the agents you use (or run `council config wizard`), then run council again.\n", cfgPath)
 			return nil
 		}
 		return err
 	}
-	if merged, localPath, lerr := config.ApplyLocal(cfg); lerr != nil {
-		return lerr
-	} else if localPath != "" {
-		cfg = merged
-		fmt.Fprintf(os.Stderr, "Using repo config %s\n", localPath)
+
+	if err := applyRuntimeConfig(cfg); err != nil {
+		return err
 	}
 
 	names := parseAgentList(*agentList)
@@ -106,10 +108,10 @@ func run(args []string) error {
 		return err
 	}
 	if len(selected) == 0 {
-		return errors.New("no agents selected; enable agents in ~/.council.yaml or pass --agents name1,name2")
+		return errors.New("no agents selected; enable agents in ~/.council.yaml (or run `council config wizard`), or pass --agents name1,name2")
 	}
 
-	store, err := runstore.New(cfg.Sessions.RootDir, rawConfig)
+	store, err := runstore.New(cfg.Sessions.RootDir, effectiveYAML(cfg), sources.JSON())
 	if err != nil {
 		return err
 	}
@@ -162,71 +164,12 @@ func launchTUIWithTranscripts(sessions []*agent.Session, store *runstore.Store, 
 
 	model := tui.NewModelWithConfig(sessions, store, cfg, initialPrompt, initialPrompts, time.Duration(cfg.UI.InitialPromptDelayMs)*time.Millisecond, launch, orch)
 	model.LoadTranscripts(transcripts)
-	program = tea.NewProgram(model, tea.WithAltScreen())
+	// 120 FPS (bubbletea's max): agent PTYs stream constantly, and the default
+	// frame budget makes scrolling output feel choppy.
+	program = tea.NewProgram(model, tea.WithAltScreen(), tea.WithFPS(120))
 
 	_, err := program.Run()
 	return err
-}
-
-func initConfig(args []string) error {
-	flags := flag.NewFlagSet("config init", flag.ContinueOnError)
-	flags.SetOutput(os.Stderr)
-	force := flags.Bool("force", false, "overwrite an existing config")
-	if err := flags.Parse(args); err != nil {
-		return err
-	}
-
-	cfgPath, err := config.DefaultPath()
-	if err != nil {
-		return err
-	}
-	if err := config.WriteDefault(cfgPath, *force); err != nil {
-		return err
-	}
-	fmt.Printf("Wrote %s\n", cfgPath)
-	return nil
-}
-
-func doctor() error {
-	cfgPath, err := config.DefaultPath()
-	if err != nil {
-		return err
-	}
-	cfg, _, err := config.Load(cfgPath)
-	if err != nil {
-		return err
-	}
-
-	selected, _, err := config.SelectAgents(cfg, nil)
-	if err != nil {
-		return err
-	}
-	if len(selected) == 0 {
-		fmt.Println("No enabled agents.")
-		return nil
-	}
-
-	hadProblem := false
-	for _, spec := range selected {
-		if len(spec.Config.Command) == 0 {
-			fmt.Printf("x %s: no command configured\n", spec.Name)
-			hadProblem = true
-			continue
-		}
-		binary := spec.Config.Command[0]
-		path, err := exec.LookPath(binary)
-		if err != nil {
-			fmt.Printf("x %s: %s not found in PATH\n", spec.Name, binary)
-			hadProblem = true
-			continue
-		}
-		fmt.Printf("ok %s: %s\n", spec.Name, path)
-	}
-
-	if hadProblem {
-		return errors.New("doctor found missing agent commands")
-	}
-	return nil
 }
 
 func parseAgentList(value string) []string {
@@ -247,18 +190,29 @@ func parseAgentList(value string) []string {
 
 func printUsage() {
 	fmt.Println(`Usage:
-  council [--agents claude,codex]
- council [--agents claude,codex] ask "<prompt>"
-  council config init [--force]
-  council doctor
+  council [--agents claude,codex] [--no-local-config]
+  council [--agents claude,codex] ask "<prompt>"
+  council config init [--force]       write the default (safe) config
+  council config wizard               interactive setup
+  council config add-agent <preset>   add a known agent CLI to the config
+  council doctor                      check config, commands, repo, run dirs
+  council trust [--revoke|--show]     trust this repo's .council.yaml
   council version
 
 Orchestration (each phase runs in live panes, one git worktree per agent):
   council plan  "<issue>" | --file issue.md | --issue 123
   council vote  [run]            tally ranked votes into a winner
   council build [run]            all agents implement the winning plan
+  council review [run]           gate builds + reviewers pick the best
+  council adopt [run] [agent] [--dry-run] [--yes]
   council run   "<issue>"        plan -> vote -> build
   council resume [run]           reopen an older run with fresh agent processes
-  council status [run]           show a run's artifacts
-  council clean                  remove council worktrees + branches`)
+  council status [run]           show a run's phase, artifacts, and winners
+  council report [run] [--post]  write report.md (--post comments on the issue)
+  council pr [run] [agent]       open a PR from a build branch (via gh)
+  council scorecard              agent performance across runs
+  council queue add|list|run|clear   batch issues through council
+  council stack detect|set <go|node|rust|python>   set review.check_command
+  council clean [--dry-run] [--yes]  remove council worktrees + branches
+  council clean-runs [--keep N] [--dry-run]  prune old run artifacts`)
 }

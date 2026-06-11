@@ -189,7 +189,9 @@ func (s *Session) run(onOutput OutputFunc, onExit ExitFunc) {
 
 	go func() {
 		defer close(readDone)
-		buf := make([]byte, 4096)
+		// A larger read buffer coalesces bursty PTY output into fewer messages,
+		// which keeps the TUI smooth while agents stream.
+		buf := make([]byte, 32768)
 		for {
 			n, err := s.conn.Read(buf)
 			if n > 0 {

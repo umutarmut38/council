@@ -17,8 +17,8 @@ when you press `Enter`.
 | `some text` | Broadcast to the current target (all agents by default). |
 | `@all message` | Send to every agent. |
 | `@claude message` | Send to one agent by name. |
-| `@path/to/file` | Expand the file's contents inline when the message is sent. Type `@` to get a file picker (see [Shortcuts](shortcuts.md)). |
-| `/command …` | Run a command (below). Type `/` to see suggestions; `Tab` completes the command word. |
+| `@path/to/file` | Expand the file's contents inline when the message is sent. Typing `@` opens a **vertical file picker** — `↑/↓` selects, `Enter` inserts, `Esc` closes. |
+| `/command …` | Run a command (below). Typing `/` opens the **command palette**: a vertical list of matching commands, with the ones suggested for the current pipeline stage (●) on top. `↑/↓` selects, `Tab`/`Enter` completes, then `Enter` runs. |
 
 `@agent` only targets a pane when the word after `@` is a known agent (or
 `all`); otherwise `@path` is treated as a file reference.
@@ -57,10 +57,26 @@ See [Workflows → Personalities](workflows.md#personalities-categories-and-targ
 | `/build` | **Stage** the build: create a git worktree per agent and relaunch the panes there — but do not send the prompt yet. |
 | `/start-build` | Send the build prompt staged by `/build`. |
 | `/review` | Run the check command in each build worktree, drop failures, then in-scope agents vote the best diff. |
-| `/adopt [agent]` | `git apply` a build's diff onto your working tree as uncommitted changes — the reviewed winner, or a specific agent's build to override the recommendation. |
+| `/refine` | Consensus round: the winning planner reads the reviewers' critiques and rewrites its plan before `/build`. |
+| `/compare` | **Interactive build inspector.** ↑/↓ selects a build (files touched, check result, review points, live/cleaned worktree, ★ winner). `Enter` drills into its changed files vs the run base; `Enter` on a file shows its git-style colored diff; `e` opens the worktree file (or the whole worktree from the build list) in `$EDITOR`. Press `x` to mark a build, then `Enter` on another to diff the **two implementations against each other** (computed natively via git trees). `d` shows the full diff vs base. Esc unwinds: diff → files → builds → panes. |
+| `/preview [agent]` | Show exactly what `/adopt` would change: files, dirty-tree overlap, the `git apply --check` result, **and the full diff**. A clean preview is staged — press `y` in the viewer to apply, `n` to cancel, `e` to open the diff in `$EDITOR`. |
+| `/adopt [agent]` | Opens the same full-screen preview and waits for `y` to apply the diff as uncommitted changes (`n` cancels). Name an agent to override the reviewed winner. `policy.mode: aggressive` applies immediately without the preview. |
+| `/judge plan <agent\|letter>` | Record a human-picked plan winner (override or stand in for the vote). |
+| `/judge build <agent>` | Record a human-picked build winner. |
 | `/finish` | Force-collect the current phase now (use if a pane finished but auto-detect didn't fire). |
 | `/status` | Show the active run and phase. |
-| `/clean` | Remove council worktrees and branches. |
+| `/report` | Write `report.md` for the run and open it in the viewer. |
+| `/artifacts` | Browse the run's plans, votes, diffs, check logs, reviews, and transcripts in-app. `Enter` views in the pager; `e` opens the file in `$VISUAL`/`$EDITOR` (vim by default). |
+| `/clean` | Two-step removal: first call previews the worktrees/branches; `/clean confirm` removes them. |
+
+### Recovery
+
+| Command | What it does |
+|---|---|
+| `/restart <agent>` | Terminate and relaunch one pane with its current phase command. |
+| `/resend [agent]` | Resend the current phase prompt — to one agent, or to everyone still missing an artifact. |
+| `/nudge [agent]` | Send a short reminder to write the expected artifact. |
+| `/attention <agent> [off]` | Flag (or unflag) a pane as needing your input. council also auto-detects common approval prompts (`[y/N]`, "Do you want to…", trust prompts) and highlights the pane + footer. |
 
 ### Runs & resume
 
@@ -81,10 +97,13 @@ See [Workflows → Personalities](workflows.md#personalities-categories-and-targ
 ## CLI subcommands
 
 ```text
-council [--agents claude,codex]                 launch the multiplexer
+council [--agents claude,codex] [--no-local-config]   launch the multiplexer
 council [--agents …] ask "<prompt>"             launch and broadcast a prompt
-council config init [--force]                   write ~/.council.yaml
-council doctor                                  check configured agent commands exist
+council config init [--force]                   write ~/.council.yaml (safe defaults, agents disabled)
+council config wizard                           interactive setup: detect CLIs, roles, stack, policy
+council config add-agent <preset> [--role …]    add a known agent CLI (claude, codex, cursor, copilot, opencode)
+council doctor                                  check config, commands, roles, git, run dirs, risky flags
+council trust [--revoke|--show]                 trust (or audit) this repo's .council.yaml
 council version                                 print build version, commit, and date
 ```
 
@@ -95,10 +114,18 @@ you quit it:
 council plan  "<issue>" | --file issue.md | --issue 123    start a run and plan
 council vote  [run]                                        tally ranked votes
 council build [run]                                        all agents implement the winner
+council review [run]                                       gate builds, reviewers pick the best
+council adopt [run] [agent] [--dry-run] [--yes]            preview + apply a build's diff
 council run   "<issue>"                                    plan -> vote -> build, chained
 council resume [run]                                       reopen an older run
-council status [run]                                       show a run's artifacts
-council clean                                              remove council worktrees + branches
+council status [run]                                       phase, artifacts, winners, check results
+council report [run] [--post N]                            write report.md (--post comments on issue N via gh)
+council pr [run] [agent]                                   push the build branch and open a PR via gh
+council scorecard                                          agent performance across all runs
+council queue add|list|run|clear                           batch several issues through council
+council stack detect|set <go|node|rust|python>             set review.check_command in .council.yaml
+council clean [--dry-run] [--yes]                          remove council worktrees + branches
+council clean-runs [--keep N] [--dry-run] [--yes]          prune old run artifact directories
 ```
 
 Notes:
@@ -107,4 +134,4 @@ Notes:
 - `--agents` restricts to a comma-separated subset.
 - `--file` reads the issue from a markdown file; `--issue <n>` fetches a GitHub
   issue body via `gh`.
-- The in-chat `/review` and `/adopt` are not (yet) CLI subcommands.
+- Repo-local `.council.yaml` files are only applied once trusted (`council trust`); pass `--no-local-config` to ignore them entirely.

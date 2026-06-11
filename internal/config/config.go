@@ -4,17 +4,23 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
 
 type AgentConfig struct {
-	Enabled       bool                `yaml:"enabled"`
-	Command       []string            `yaml:"command"`
-	CWD           string              `yaml:"cwd"`
+	Enabled bool     `yaml:"enabled"`
+	Command []string `yaml:"command"`
+	CWD     string   `yaml:"cwd"`
+	// Color tints this agent's pane border and title (a 256-color code such
+	// as "212", or an empty string for the default chrome color). Falls back
+	// to the agent's personality color when unset.
+	Color         string              `yaml:"color,omitempty"`
 	Personality   string              `yaml:"personality,omitempty"`
 	Role          []string            `yaml:"role,omitempty"`
 	Terminal      TerminalConfig      `yaml:"terminal"`
@@ -150,15 +156,37 @@ type UIConfig struct {
 	MaxScrollbackLines int    `yaml:"max_scrollback_lines"`
 	PageRows           int    `yaml:"page_rows,omitempty"`
 	PageCols           int    `yaml:"page_cols,omitempty"`
-	GroupBy            string `yaml:"group_by,omitempty"`
+	// AdaptiveGrid sizes the grid to the number of visible panes (1 pane →
+	// full screen, 2 → side-by-side full height, 3-4 → 2x2) instead of always
+	// using page_rows x page_cols. Defaults to true; page_rows/page_cols still
+	// bound the page size for larger rosters, and adjusting rows/cols in the
+	// in-app settings locks the layout for that session.
+	AdaptiveGrid *bool  `yaml:"adaptive_grid,omitempty"`
+	GroupBy      string `yaml:"group_by,omitempty"`
 	// InitialPromptDelayMs is how long to wait after launch before broadcasting
 	// the `council ask` prompt, giving each agent's TUI time to finish booting
 	// and start accepting input. Too short and the prompt is dropped.
 	InitialPromptDelayMs int `yaml:"initial_prompt_delay_ms"`
 }
 
+// AdaptiveEnabled reports whether the adaptive grid is on (the default).
+func (u UIConfig) AdaptiveEnabled() bool {
+	return u.AdaptiveGrid == nil || *u.AdaptiveGrid
+}
+
 type SessionConfig struct {
 	RootDir string `yaml:"root_dir"`
+	// Private keeps run artifacts (logs, transcripts, prompts, diffs) readable
+	// by the owner only (0700 dirs / 0600 files). Defaults to true.
+	Private *bool `yaml:"private,omitempty"`
+	// Redact rewrites common secret patterns (API keys, tokens, PEM blocks) in
+	// saved transcripts. Off by default; redaction is best-effort.
+	Redact bool `yaml:"redact,omitempty"`
+}
+
+// IsPrivate reports whether run artifacts use owner-only permissions.
+func (s SessionConfig) IsPrivate() bool {
+	return s.Private == nil || *s.Private
 }
 
 // ReviewConfig controls the post-build review phase.
@@ -170,7 +198,82 @@ type ReviewConfig struct {
 	// out of the box. Set it to your project's build/test command to enable the
 	// gate, e.g. ["go","build","./..."], ["npm","test"], ["cargo","build"].
 	CheckCommand []string `yaml:"check_command,omitempty"`
+	// CheckTimeoutSeconds bounds one check command run; a hung test command
+	// would otherwise block review forever. 0 uses the default (600s).
+	CheckTimeoutSeconds int `yaml:"check_timeout_seconds,omitempty"`
+	// MaxCheckOutputBytes caps a check log. 0 uses the default (1 MiB).
+	MaxCheckOutputBytes int `yaml:"max_check_output_bytes,omitempty"`
 }
+
+// CheckTimeout returns the effective check command timeout.
+func (r ReviewConfig) CheckTimeout() time.Duration {
+	if r.CheckTimeoutSeconds > 0 {
+		return time.Duration(r.CheckTimeoutSeconds) * time.Second
+	}
+	return 10 * time.Minute
+}
+
+// CheckOutputLimit returns the effective check log size cap in bytes.
+func (r ReviewConfig) CheckOutputLimit() int {
+	if r.MaxCheckOutputBytes > 0 {
+		return r.MaxCheckOutputBytes
+	}
+	return 1 << 20
+}
+
+// FilesConfig constrains @file reference expansion.
+type FilesConfig struct {
+	// AllowAbsolute permits expanding absolute paths and paths outside the
+	// working directory. Off by default so a pasted task can't quietly inline
+	// ~/.ssh/id_rsa or /etc/passwd into an agent prompt.
+	AllowAbsolute bool `yaml:"allow_absolute,omitempty"`
+	// MaxBytes caps the size of a single expanded file. 0 uses the default
+	// (256 KiB).
+	MaxBytes int `yaml:"max_bytes,omitempty"`
+}
+
+// MaxRefBytes returns the effective per-file expansion cap.
+func (f FilesConfig) MaxRefBytes() int {
+	if f.MaxBytes > 0 {
+		return f.MaxBytes
+	}
+	return 256 << 10
+}
+
+// Policy modes bundle the risk posture for automation features.
+const (
+	PolicySafe       = "safe"
+	PolicyNormal     = "normal"
+	PolicyAggressive = "aggressive"
+)
+
+// PolicyConfig selects how much automation council allows without asking.
+type PolicyConfig struct {
+	// Mode is one of safe, normal (default), aggressive.
+	//   safe:       refuse risky auto-approval phase flags, never expand
+	//               absolute @file refs, always confirm adopt/clean.
+	//   normal:     warn about risky flags, confirm adopt/clean.
+	//   aggressive: allow auto-approval flags and skip confirmations; meant
+	//               for sandboxed or fully-trusted environments.
+	Mode string `yaml:"mode,omitempty"`
+}
+
+func (p PolicyConfig) Normalized() string {
+	switch strings.ToLower(strings.TrimSpace(p.Mode)) {
+	case PolicySafe:
+		return PolicySafe
+	case PolicyAggressive:
+		return PolicyAggressive
+	default:
+		return PolicyNormal
+	}
+}
+
+func (p PolicyConfig) IsSafe() bool       { return p.Normalized() == PolicySafe }
+func (p PolicyConfig) IsAggressive() bool { return p.Normalized() == PolicyAggressive }
+
+// ConfirmDestructive reports whether adopt/clean should ask before acting.
+func (p PolicyConfig) ConfirmDestructive() bool { return !p.IsAggressive() }
 
 type PersonalityCategoryConfig struct {
 	Label string `yaml:"label,omitempty"`
@@ -191,6 +294,8 @@ type Config struct {
 	UI                    UIConfig                             `yaml:"ui"`
 	Sessions              SessionConfig                        `yaml:"sessions"`
 	Review                ReviewConfig                         `yaml:"review"`
+	Files                 FilesConfig                          `yaml:"files,omitempty"`
+	Policy                PolicyConfig                         `yaml:"policy,omitempty"`
 	PersonalityCategories map[string]PersonalityCategoryConfig `yaml:"personality_categories,omitempty"`
 	Personalities         map[string]PersonalityConfig         `yaml:"personalities,omitempty"`
 }
@@ -208,80 +313,19 @@ func DefaultPath() (string, error) {
 	return filepath.Join(home, ".council.yaml"), nil
 }
 
+// Default returns the baseline config: presets for the common agent CLIs with
+// their terminal quirks encoded, all DISABLED and with no auto-approval flags.
+// Users opt in per agent (enabled: true) and opt in to risky phase flags
+// explicitly — first runs should never execute permission-bypassing commands
+// the user has not seen. See AgentPreset for the known presets.
 func Default() Config {
+	agents := map[string]AgentConfig{}
+	for _, name := range PresetNames() {
+		preset, _ := AgentPreset(name)
+		agents[name] = preset
+	}
 	return Config{
-		Agents: map[string]AgentConfig{
-			"claude": {
-				Enabled: true,
-				Command: []string{"claude"},
-				CWD:     ".",
-				Terminal: TerminalConfig{
-					Renderer:       "screen",
-					PTYSize:        "pane",
-					SendMode:       "type",
-					SubmitSequence: "cr",
-					SubmitDelayMs:  250,
-				},
-				// Claude stays interactive for every phase; it posts a typed
-				// prompt fine once loaded, and the delayed submit lands the Enter.
-				Orchestration: OrchestrationConfig{
-					PlanCommand:  []string{"claude", "--dangerously-skip-permissions"},
-					VoteCommand:  []string{"claude", "--dangerously-skip-permissions"},
-					BuildCommand: []string{"claude", "--dangerously-skip-permissions"},
-				},
-			},
-			"codex": {
-				Enabled: true,
-				Command: []string{"codex"},
-				CWD:     ".",
-				Terminal: TerminalConfig{
-					Renderer:           "screen",
-					PTYSize:            "pane",
-					Cols:               120,
-					Rows:               40,
-					SendMode:           "paste",
-					BeforeSendSequence: "ctrl+u",
-					SubmitSequence:     "cr",
-				},
-			},
-			"cursor": {
-				Enabled: true,
-				Command: []string{"cursor-agent"},
-				CWD:     ".",
-				Terminal: TerminalConfig{
-					Renderer:       "screen",
-					PTYSize:        "pane",
-					SendMode:       "type",
-					SubmitSequence: "cr",
-					SubmitDelayMs:  250,
-				},
-				Orchestration: OrchestrationConfig{
-					PlanCommand:  []string{"cursor-agent", "--force"},
-					VoteCommand:  []string{"cursor-agent", "--force"},
-					BuildCommand: []string{"cursor-agent", "--force"},
-				},
-			},
-			"copilot": {
-				Enabled: true,
-				Command: []string{"gh", "copilot"},
-				CWD:     ".",
-				Terminal: TerminalConfig{
-					Renderer:       "screen",
-					PTYSize:        "pane",
-					SendMode:       "type",
-					SubmitSequence: "cr",
-					SubmitDelayMs:  250,
-				},
-				// Copilot stays interactive and posts via a typed prompt with a
-				// delayed submit (like cursor). It is excluded from build by
-				// default as it is less suited to parallel build worktrees.
-				Orchestration: OrchestrationConfig{
-					PlanCommand:  []string{"copilot", "--allow-all-tools"},
-					VoteCommand:  []string{"copilot", "--allow-all-tools"},
-					ExcludeBuild: true,
-				},
-			},
-		},
+		Agents: agents,
 		UI: UIConfig{
 			Layout:               "grid",
 			MaxScrollbackLines:   5000,
@@ -294,7 +338,7 @@ func Default() Config {
 			RootDir: ".council/runs",
 		},
 		// CheckCommand left empty: review is language-agnostic by default. Set
-		// review.check_command in ~/.council.yaml to gate builds for your stack.
+		// review.check_command (or run `council stack detect`) to gate builds.
 		Review: ReviewConfig{},
 	}
 }
@@ -322,15 +366,24 @@ var localConfigNames = []string{".council.yaml", ".council.yml"}
 // none is found. It searches from the current directory upward, stopping at the
 // git repo root, and never returns the global config path.
 func FindLocalConfig() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return findLocalConfigFrom(cwd)
+}
+
+func findLocalConfigFrom(start string) string {
 	globalAbs := ""
 	if p, err := DefaultPath(); err == nil {
 		globalAbs, _ = filepath.Abs(p)
 	}
 
-	dir, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
+	// Prefer git's own notion of the repo root: it handles worktrees (where
+	// .git is a file) and submodules correctly.
+	repoRoot := gitToplevel(start)
+
+	dir := start
 	for {
 		for _, name := range localConfigNames {
 			p := filepath.Join(dir, name)
@@ -341,8 +394,15 @@ func FindLocalConfig() string {
 				return p
 			}
 		}
-		if fi, statErr := os.Stat(filepath.Join(dir, ".git")); statErr == nil && fi.IsDir() {
+		if repoRoot != "" && sameFile(dir, repoRoot) {
 			return "" // reached the repo root without finding one
+		}
+		// Fallback boundary when git is unavailable: a .git entry (directory in
+		// a normal checkout, file in a linked worktree) marks the repo root.
+		if repoRoot == "" {
+			if _, statErr := os.Stat(filepath.Join(dir, ".git")); statErr == nil {
+				return ""
+			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -352,24 +412,18 @@ func FindLocalConfig() string {
 	}
 }
 
-// ApplyLocal layers a repo-local config (if present) over cfg, returning the
-// merged config and the path that was applied ("" if none). Keys set locally
-// override the global ones; everything else falls through.
-func ApplyLocal(cfg Config) (Config, string, error) {
-	path := FindLocalConfig()
-	if path == "" {
-		return cfg, "", nil
-	}
-	raw, err := os.ReadFile(path)
+func gitToplevel(dir string) string {
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Output()
 	if err != nil {
-		return cfg, "", err
+		return ""
 	}
-	merged, err := ApplyLocalOverride(cfg, raw)
-	if err != nil {
-		return cfg, "", fmt.Errorf("%s: %w", path, err)
-	}
-	merged.Normalize()
-	return merged, path, nil
+	return strings.TrimSpace(string(out))
+}
+
+func sameFile(a, b string) bool {
+	fa, errA := os.Stat(a)
+	fb, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(fa, fb)
 }
 
 // ApplyLocalOverride merges a local config document onto cfg. Top-level sections
@@ -531,11 +585,56 @@ func WriteDefault(path string, force bool) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, raw, 0o644)
+	content := defaultConfigHeader + string(raw) + defaultConfigExamples
+	return os.WriteFile(path, []byte(content), 0o600)
 }
+
+const defaultConfigHeader = `# council configuration.
+#
+# All agent presets ship DISABLED and without auto-approval flags. Enable the
+# CLIs you actually use (enabled: true), or run:
+#
+#   council config wizard
+#
+# Docs: https://github.com/umutarmut38/council
+`
+
+const defaultConfigExamples = `
+# --- Opt-in examples (commented out on purpose) ---------------------------
+#
+# Auto-approval phase commands let orchestration phases run unattended, but
+# they bypass each tool's permission prompts. Only enable them once you trust
+# the repos you run council in (consider policy.mode: safe below instead):
+#
+# agents:
+#   claude:
+#     orchestration:
+#       plan_command: ["claude", "--dangerously-skip-permissions"]
+#       vote_command: ["claude", "--dangerously-skip-permissions"]
+#       build_command: ["claude", "--dangerously-skip-permissions"]
+#   copilot:
+#     orchestration:
+#       plan_command: ["copilot", "--allow-all-tools"]
+#       vote_command: ["copilot", "--allow-all-tools"]
+#
+# Gate build review with your project's test command (or run
+# ` + "`council stack detect`" + ` inside the repo):
+#
+# review:
+#   check_command: ["go", "test", "./..."]
+#
+# Risk posture (safe | normal | aggressive):
+#
+# policy:
+#   mode: normal
+`
 
 func SelectAgents(cfg Config, overrides []string) ([]AgentSpec, []string, error) {
 	cfg.Normalize()
+
+	if err := ValidateAgentNames(cfg); err != nil {
+		return nil, nil, err
+	}
 
 	if len(overrides) > 0 {
 		selected := make([]AgentSpec, 0, len(overrides))
@@ -613,7 +712,11 @@ func (c *Config) Normalize() {
 	if c.Agents == nil {
 		c.Agents = map[string]AgentConfig{}
 	}
-	if c.UI.Layout == "" {
+	// "paged-grid" appeared in older example configs; the paged grid is the
+	// only layout, so both names mean the same thing. Unknown values are left
+	// as-is for doctor to flag.
+	switch strings.ToLower(strings.TrimSpace(c.UI.Layout)) {
+	case "", "grid", "paged-grid":
 		c.UI.Layout = "grid"
 	}
 	if c.UI.PageRows <= 0 {

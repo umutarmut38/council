@@ -4,7 +4,7 @@
 # installed on your machine.
 
 ui:
-  layout: paged-grid
+  layout: grid
   page_rows: 2
   page_cols: 4
   group_by: category

@@ -49,10 +49,20 @@ More seriously:
 - **File references** with `@path/to/file` expansion.
 - **Configurable terminal delivery** for tools that need paste mode, delayed
   Enter, fixed PTY sizes, or transcript rendering.
-- **Plan/vote/build/review/adopt orchestration**: a bureaucratic workflow for
-  your AI employees.
-- **Resume** from interrupted phases (agents crash; it's fine; so do I).
-- **Per-repo config overlays** with `.council.yaml`.
+- **Plan/vote/build/review/adopt orchestration** — a bureaucratic workflow for
+  your AI employees, with an optional `/refine` consensus round and human
+  `/judge` overrides.
+- **Run reports, timings, and scorecards** — `report.md` per run, `council
+  scorecard` across runs, `council pr` to ship the winner.
+- **Inspect everything**: `/artifacts` browses plans, votes, diffs, check
+  logs, and transcripts in-app; `/compare` and `/preview` before `/adopt`.
+- **Resume** from interrupted phases (agents crash; it's fine; so do I), plus
+  `/restart`, `/resend`, and `/nudge` for the stragglers.
+- **Per-repo config overlays** with `.council.yaml` — gated by a trust store,
+  because a repo file that changes which commands run should ask first.
+- **Safe defaults**: presets ship disabled with no auto-approval flags,
+  artifacts are owner-only, `@file` expansion stays inside the repo, and
+  `policy.mode: safe|normal|aggressive` sets the risk posture.
 - **Release artifacts** for macOS, Linux, and Windows.
 
 ## The Philosophy (if you can call it that)
@@ -298,11 +308,16 @@ go build \
 ## Security
 
 `council` launches local agent CLIs with your user permissions. It does not
-sandbox those tools. Build attempts run in git worktrees, but `/adopt` applies a
-diff to your working tree. Always review changes before committing.
+sandbox those tools. Build attempts run in git worktrees, and `/adopt`
+preflights the diff, shows what it touches, and asks before applying it to
+your working tree. Always review changes before committing.
 
 Raw logs and transcripts can contain private prompts, local paths, and secrets
-pasted into agents. Do not publish `.council/runs/` without reviewing it.
+pasted into agents. Run artifacts are written owner-only by default
+(`sessions.private`), optional transcript redaction exists
+(`sessions.redact`), and repo-local `.council.yaml` files are only applied
+once trusted (`council trust`). Still: do not publish `.council/runs/`
+without reviewing it.
 
 See [SECURITY.md](SECURITY.md).
 

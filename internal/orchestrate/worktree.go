@@ -18,7 +18,9 @@ type Worktree struct {
 }
 
 // Manager creates and tears down per-agent git worktrees under
-// <repo>/.council/worktrees, each on its own council/<agent>/<stamp> branch.
+// <repo>/.council/worktrees/<stamp>, each on its own council/<agent>/<stamp>
+// branch. Scoping the path by run stamp guarantees a new run can never build
+// inside a stale worktree left behind by an earlier run.
 type Manager struct {
 	RepoRoot string
 	Stamp    string
@@ -51,12 +53,21 @@ func (m *Manager) branch(agent string) string {
 	return fmt.Sprintf("council/%s/%s", agent, m.Stamp)
 }
 
+func (m *Manager) worktreesRoot() string {
+	return filepath.Join(m.RepoRoot, ".council", "worktrees")
+}
+
 func (m *Manager) pathFor(agent string) string {
-	return filepath.Join(m.RepoRoot, ".council", "worktrees", agent)
+	if m.Stamp == "" {
+		return filepath.Join(m.worktreesRoot(), agent)
+	}
+	return filepath.Join(m.worktreesRoot(), m.Stamp, agent)
 }
 
 // Add creates a worktree for the agent on a fresh branch from baseRef (HEAD if
-// empty). If a worktree already exists at the path it is reused.
+// empty). An existing worktree at the run's path is reused only when it is
+// checked out on this run's branch; anything else fails with a pointer to
+// /clean rather than silently building in a stale checkout.
 func (m *Manager) Add(agent, baseRef string) (Worktree, error) {
 	wt := Worktree{Agent: agent, Path: m.pathFor(agent), Branch: m.branch(agent)}
 
@@ -68,10 +79,13 @@ func (m *Manager) Add(agent, baseRef string) (Worktree, error) {
 	}
 	for _, e := range existing {
 		if e.Path == wt.Path {
-			if _, statErr := os.Stat(e.Path); statErr == nil {
-				return e, nil
+			if _, statErr := os.Stat(e.Path); statErr != nil {
+				break // pruned/deleted on disk; recreate below
 			}
-			break
+			if e.Branch != wt.Branch {
+				return wt, fmt.Errorf("worktree %s is on branch %q, expected %q; run /clean (or `council clean`) and retry", e.Path, e.Branch, wt.Branch)
+			}
+			return e, nil
 		}
 	}
 
@@ -118,17 +132,20 @@ func (m *Manager) Remove(wt Worktree) error {
 		// Best effort: the branch may already be gone or checked out elsewhere.
 		_ = exec.Command("git", "-C", m.RepoRoot, "branch", "-D", wt.Branch).Run()
 	}
+	m.removeEmptyStampDirs()
 	return nil
 }
 
-// List returns the council-managed worktrees (those under .council/worktrees).
+// List returns every council-managed worktree (those under .council/worktrees),
+// across all runs and including pre-stamp legacy paths. Use ListRun for the
+// worktrees that belong to this manager's run.
 func (m *Manager) List() ([]Worktree, error) {
 	out, err := exec.Command("git", "-C", m.RepoRoot, "worktree", "list", "--porcelain").Output()
 	if err != nil {
 		return nil, fmt.Errorf("git worktree list: %w", err)
 	}
 
-	prefix := filepath.Join(m.RepoRoot, ".council", "worktrees") + string(filepath.Separator)
+	prefix := m.worktreesRoot() + string(filepath.Separator)
 	var result []Worktree
 	var cur Worktree
 	flush := func() {
@@ -154,6 +171,29 @@ func (m *Manager) List() ([]Worktree, error) {
 	return result, nil
 }
 
+// ListRun returns only the worktrees that belong to this manager's run stamp,
+// so a review never picks up implementations left behind by an older run.
+func (m *Manager) ListRun() ([]Worktree, error) {
+	all, err := m.List()
+	if err != nil {
+		return nil, err
+	}
+	if m.Stamp == "" {
+		return all, nil
+	}
+	runPrefix := filepath.Join(m.worktreesRoot(), m.Stamp) + string(filepath.Separator)
+	branchSuffix := "/" + m.Stamp
+	out := make([]Worktree, 0, len(all))
+	for _, wt := range all {
+		// Legacy worktrees (pre-stamp layout) still count when their branch
+		// carries this run's stamp.
+		if strings.HasPrefix(wt.Path, runPrefix) || strings.HasSuffix(wt.Branch, branchSuffix) {
+			out = append(out, wt)
+		}
+	}
+	return out, nil
+}
+
 // RemoveAll tears down every council-managed worktree for cleanup.
 func (m *Manager) RemoveAll() ([]string, error) {
 	worktrees, err := m.List()
@@ -167,5 +207,22 @@ func (m *Manager) RemoveAll() ([]string, error) {
 		}
 		removed = append(removed, wt.Agent)
 	}
+	m.removeEmptyStampDirs()
 	return removed, nil
+}
+
+// removeEmptyStampDirs prunes empty per-run directories left under
+// .council/worktrees after their agent worktrees are removed.
+func (m *Manager) removeEmptyStampDirs() {
+	entries, err := os.ReadDir(m.worktreesRoot())
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			// os.Remove only deletes empty directories, which is exactly what
+			// we want here.
+			_ = os.Remove(filepath.Join(m.worktreesRoot(), e.Name()))
+		}
+	}
 }

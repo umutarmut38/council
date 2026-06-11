@@ -72,6 +72,24 @@ WINNING PLAN (read this file):
 %s`, strings.TrimSpace(issue), strings.TrimSpace(planPath))
 }
 
+// RefinePrompt asks the winning planner to absorb the reviewers' critiques and
+// rewrite its plan before the build starts.
+func RefinePrompt(issue, origPlanPath string, votePaths []string, artifactPath string) string {
+	var b strings.Builder
+	b.WriteString("Your plan won the council vote. Before the build starts, refine it using the reviewers' critiques.\n\nISSUE:\n")
+	b.WriteString(strings.TrimSpace(issue))
+	fmt.Fprintf(&b, "\n\nYOUR ORIGINAL PLAN (read this file):\n%s\n\nREVIEWER CRITIQUES (read each file):\n", origPlanPath)
+	for _, path := range votePaths {
+		fmt.Fprintf(&b, "- %s\n", path)
+	}
+	fmt.Fprintf(&b, `
+Write the REFINED implementation plan to this file (overwrite if it exists):
+%s
+
+The refined plan must keep your approach but address the valid objections. End it with two sections: "## Risks" (the failure modes reviewers raised and how you mitigate them) and "## Test checklist" (concrete tests the build must pass). Do NOT implement anything yet.`, artifactPath)
+	return b.String()
+}
+
 // LetterContents maps anonymized letters to plan contents, given agent->content.
 func LetterContents(refs []PlanRef, byAgent map[string]string) map[string]string {
 	out := map[string]string{}

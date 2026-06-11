@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/umutarmut38/council/internal/config"
@@ -109,7 +110,7 @@ func TestReviewFlowAndAdopt(t *testing.T) {
 	}
 
 	// Adopt applies a's diff to the repo working tree.
-	winner, err := ctrl.Adopt("")
+	winner, _, err := ctrl.Adopt("")
 	if err != nil {
 		t.Fatalf("adopt: %v", err)
 	}
@@ -168,7 +169,7 @@ func TestRunBuildChecksCapturesUntrackedFiles(t *testing.T) {
 	if err := ctrl.SetSingleWinner("b"); err != nil { // pretend b "won"
 		t.Fatal(err)
 	}
-	adopted, err := ctrl.Adopt("a") // override the winner
+	adopted, _, err := ctrl.Adopt("a") // override the winner
 	if err != nil {
 		t.Fatalf("adopt override: %v", err)
 	}
@@ -177,5 +178,280 @@ func TestRunBuildChecksCapturesUntrackedFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "new.txt")); err != nil {
 		t.Fatalf("override adopt did not apply a's new file: %v", err)
+	}
+}
+
+func newTestController(t *testing.T, root string, agents []string, review config.ReviewConfig) *Controller {
+	t.Helper()
+	agentMap := map[string]config.AgentConfig{}
+	for _, name := range agents {
+		agentMap[name] = config.AgentConfig{Enabled: true, Command: []string{"true"}}
+	}
+	cfg := config.Config{
+		Agents:   agentMap,
+		Sessions: config.SessionConfig{RootDir: filepath.Join(root, ".council", "runs")},
+		Review:   review,
+	}
+	cfg.Normalize()
+	ctrl, err := NewController(cfg, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.StartRun("do it"); err != nil {
+		t.Fatal(err)
+	}
+	return ctrl
+}
+
+func buildOneDiff(t *testing.T, ctrl *Controller, root, agent, file, content string) {
+	t.Helper()
+	base, err := revParse(root, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.run.SaveBaseSHA(base); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.ensureWorktrees(config.PhaseBuild); err != nil {
+		t.Fatal(err)
+	}
+	wt := ctrl.worktrees[agent]
+	if err := os.WriteFile(filepath.Join(wt, file), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt, "add", ".")
+	gitIn(t, wt, "commit", "-m", "impl")
+	if _, err := ctrl.RunBuildChecks(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPlanAdoptReportsDirtyTreeAndFiles(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := newTestController(t, root, []string{"a"}, config.ReviewConfig{})
+	buildOneDiff(t, ctrl, root, "a", "a.txt", "impl by a\n")
+
+	// Dirty the working tree.
+	if err := os.WriteFile(filepath.Join(root, "WIP.txt"), []byte("wip\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := ctrl.PlanAdopt("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Agent != "a" || len(plan.Files) != 1 || plan.Files[0] != "a.txt" {
+		t.Fatalf("plan = %+v", plan)
+	}
+	if len(plan.DirtyFiles) == 0 {
+		t.Fatal("dirty working tree not reported")
+	}
+	if plan.CheckError != "" {
+		t.Fatalf("clean diff flagged as failing: %s", plan.CheckError)
+	}
+	// PlanAdopt must not touch the tree.
+	if _, err := os.Stat(filepath.Join(root, "a.txt")); !os.IsNotExist(err) {
+		t.Fatal("PlanAdopt applied the diff")
+	}
+}
+
+func TestAdoptRefusesConflictingDiff(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := newTestController(t, root, []string{"a"}, config.ReviewConfig{})
+	// The agent edits README.md...
+	base, _ := revParse(root, "HEAD")
+	if err := ctrl.run.SaveBaseSHA(base); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.ensureWorktrees(config.PhaseBuild); err != nil {
+		t.Fatal(err)
+	}
+	wt := ctrl.worktrees["a"]
+	if err := os.WriteFile(filepath.Join(wt, "README.md"), []byte("agent version\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt, "add", ".")
+	gitIn(t, wt, "commit", "-m", "impl")
+	if _, err := ctrl.RunBuildChecks(); err != nil {
+		t.Fatal(err)
+	}
+	// ...and the user rewrites the same file incompatibly.
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("conflicting local edit\nmore\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := ctrl.Adopt("a"); err == nil {
+		t.Fatal("conflicting diff should be refused")
+	}
+	// The conflicting local edit survives untouched.
+	data, err := os.ReadFile(filepath.Join(root, "README.md"))
+	if err != nil || string(data) != "conflicting local edit\nmore\n" {
+		t.Fatalf("working tree was modified by a failed adopt: %q, %v", data, err)
+	}
+}
+
+func TestRunCheckTimesOut(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := newTestController(t, root, []string{"a"}, config.ReviewConfig{
+		CheckCommand:        []string{"sleep", "5"},
+		CheckTimeoutSeconds: 1,
+	})
+	buildOneDiff(t, ctrl, root, "a", "a.txt", "impl\n")
+
+	log, err := os.ReadFile(ctrl.run.CheckLogPath("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(log), "timed out") {
+		t.Fatalf("check log should record the timeout, got:\n%s", log)
+	}
+}
+
+func TestWriteReportSummarizesRun(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := newTestController(t, root, []string{"a", "b"}, config.ReviewConfig{})
+	if err := os.WriteFile(ctrl.run.PlanPath("a"), []byte("plan a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	refs := []PlanRef{{Letter: "A", Agent: "a"}, {Letter: "B", Agent: "b"}}
+	res := Tally([]Ballot{{Voter: "b", Ranking: []string{"A"}}}, refs)
+	if err := ctrl.run.WriteResult(res, refs); err != nil {
+		t.Fatal(err)
+	}
+
+	path, err := WriteReport(ctrl.run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := string(data)
+	for _, want := range []string{"# Council run", "## Issue", "do it", "## Plan vote", "**a**"} {
+		if !strings.Contains(report, want) {
+			t.Fatalf("report missing %q:\n%s", want, report)
+		}
+	}
+}
+
+func TestJudgePlanAndBuild(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := newTestController(t, root, []string{"a", "b"}, config.ReviewConfig{})
+	if err := os.WriteFile(ctrl.run.PlanPath("b"), []byte("plan b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	winner, err := ctrl.JudgePlan("b")
+	if err != nil || winner != "b" {
+		t.Fatalf("judge plan = %q, %v", winner, err)
+	}
+	gotWinner, _, err := ctrl.Winner()
+	if err != nil || gotWinner != "b" {
+		t.Fatalf("recorded winner = %q, %v", gotWinner, err)
+	}
+
+	if _, err := ctrl.JudgeBuild("b"); err == nil {
+		t.Fatal("judge build without a diff should fail")
+	}
+	buildOneDiff(t, ctrl, root, "b", "b.txt", "impl\n")
+	if _, err := ctrl.JudgeBuild("b"); err != nil {
+		t.Fatalf("judge build: %v", err)
+	}
+	if got, err := ctrl.BuildWinner(); err != nil || got != "b" {
+		t.Fatalf("build winner = %q, %v", got, err)
+	}
+}
+
+func TestAdoptableBuildsExcludesAnonymizedCopies(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := newTestController(t, root, []string{"a", "b"}, config.ReviewConfig{})
+	if err := os.MkdirAll(ctrl.run.BuildsDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Real candidate diffs plus the anonymized copies reviewers read.
+	for _, name := range []string{"a.diff", "b.diff", "diff-a.diff", "diff-b.diff"} {
+		if err := os.WriteFile(filepath.Join(ctrl.run.BuildsDir(), name), []byte("diff --git x x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := ctrl.AdoptableBuilds()
+	if len(got) != 2 || got[0] != "a" || got[1] != "b" {
+		t.Fatalf("AdoptableBuilds = %v, want [a b] (anonymized diff-a/diff-b excluded)", got)
+	}
+}
+
+func TestDiffBuildsComparesTwoWorktrees(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := newTestController(t, root, []string{"a", "b"}, config.ReviewConfig{})
+	base, _ := revParse(root, "HEAD")
+	if err := ctrl.run.SaveBaseSHA(base); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.ensureWorktrees(config.PhaseBuild); err != nil {
+		t.Fatal(err)
+	}
+	// Two implementations: a shared file with different contents plus one
+	// unique file each — all uncommitted, like a real build.
+	write := func(agent, name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(ctrl.worktrees[agent], name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("a", "app.js", "version A\n")
+	write("a", "only-a.txt", "a\n")
+	write("b", "app.js", "version B\n")
+	write("b", "only-b.txt", "b\n")
+
+	diff, err := ctrl.DiffBuilds("a", "b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"-version A", "+version B", "only-a.txt", "only-b.txt"} {
+		if !strings.Contains(diff, want) {
+			t.Fatalf("pairwise diff missing %q:\n%s", want, diff)
+		}
+	}
+	if strings.Contains(diff, ".git") {
+		t.Fatalf("pairwise diff leaked .git noise:\n%s", diff)
+	}
+
+	// The worktree lookup also works.
+	if path, ok := ctrl.WorktreePath("a"); !ok || path != ctrl.worktrees["a"] {
+		t.Fatalf("WorktreePath = %q (%v)", path, ok)
+	}
+	if _, ok := ctrl.WorktreePath("nope"); ok {
+		t.Fatal("unknown agent should have no worktree")
+	}
+}
+
+func TestSplitUnifiedDiff(t *testing.T) {
+	diff := "diff --git a/app.js b/app.js\nindex 1..2 100644\n--- a/app.js\n+++ b/app.js\n@@ -1 +1 @@\n-old\n+new\n" +
+		"diff --git a/added.txt b/added.txt\nnew file mode 100644\n--- /dev/null\n+++ b/added.txt\n@@ -0,0 +1 @@\n+hi\n" +
+		"diff --git a/gone.txt b/gone.txt\ndeleted file mode 100644\n--- a/gone.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-bye\n"
+	files := SplitUnifiedDiff(diff)
+	if len(files) != 3 {
+		t.Fatalf("files = %d, want 3", len(files))
+	}
+	if files[0].Path != "app.js" || files[0].Status != "M" || files[0].Added != 1 || files[0].Deleted != 1 {
+		t.Fatalf("modified entry = %+v", files[0])
+	}
+	if files[1].Status != "A" || files[1].Added != 1 {
+		t.Fatalf("added entry = %+v", files[1])
+	}
+	if files[2].Status != "D" || files[2].Path != "gone.txt" {
+		t.Fatalf("deleted entry = %+v", files[2])
+	}
+	if !strings.Contains(files[0].Patch, "+new") || strings.Contains(files[0].Patch, "+hi") {
+		t.Fatalf("per-file patch slicing wrong: %q", files[0].Patch)
 	}
 }

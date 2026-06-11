@@ -7,11 +7,16 @@ also carry a local `.council.yaml` that layers on top (see
 ```yaml
 agents: { … }                 # the agents and how to drive them
 ui: { … }                     # layout, paging, grouping, timing
-sessions: { root_dir: … }     # where runs are written
-review: { check_command: … }  # the build gate
+sessions: { root_dir: … }     # where runs are written, privacy, redaction
+review: { check_command: … }  # the build gate (+ timeout and output caps)
+files: { … }                  # optional: @file expansion limits
+policy: { mode: … }           # optional: safe | normal | aggressive
 personality_categories: { … } # optional: persona groups
 personalities: { … }          # optional: behavioral personas
 ```
+
+The generated default config ships every agent preset **disabled** and without
+auto-approval flags — enable what you use, or run `council config wizard`.
 
 ---
 
@@ -38,6 +43,7 @@ agents:
 | `command` | — | argv used to start the interactive agent. |
 | `cwd` | `"."` | Working directory for the process. |
 | `role` | `[worker, reviewer]` | Which orchestration phases the agent joins (see [Roles](#roles)). |
+| `color` | — | 256-color index (`"212"`) or hex (`"#ff5f87"`) tinting this agent's pane **border**: full strength while focused, a computed darker shade otherwise. Rendering always uses indexed (non-themeable cube) colors, so VS Code, Apple Terminal, iTerm, Ghostty, etc. show the same shades; `council doctor` prints a color test strip if a terminal misbehaves. Falls back to the personality's `color`. |
 | `personality` | — | Personality name (must exist under `personalities`). |
 
 #### Roles
@@ -106,6 +112,13 @@ prompt is typed into the TUI or appended as an argv argument.
 
 > The default presets keep agents **interactive** for every phase (no `-p`), so
 > you watch them work in the panes. Copilot is excluded from build by default.
+>
+> **Auto-approval flags** (`--dangerously-skip-permissions`,
+> `--allow-all-tools`, `--force`, …) are never configured by default. They make
+> unattended phases possible but bypass each tool's own permission prompts —
+> opt in per agent (the generated config has commented examples), and `council
+> doctor` will warn whenever one is configured. `policy.mode: safe` refuses to
+> run with them entirely.
 
 ---
 
@@ -114,6 +127,7 @@ prompt is typed into the TUI or appended as an argv argument.
 | Key | Default | Meaning |
 |---|---|---|
 | `layout` | `grid` | Pane layout. |
+| `adaptive_grid` | `true` | Size the grid to the visible panes: 1 pane fills the screen, 2 sit side by side at full height, 3-4 use a 2x2. Larger rosters page with `page_rows` x `page_cols`. Adjusting rows/cols in `/settings` locks the layout for that session; set `false` to always use the configured grid. |
 | `max_scrollback_lines` | `5000` | Per-pane scrollback kept in memory. |
 | `initial_prompt_delay_ms` | `3000` | Wait this long after launch before broadcasting (lets agents finish booting). Raise it if agents miss the prompt — codex's MCP load is the slowest factor; `8000` is a good value when running many agents. |
 | `page_rows`, `page_cols` | grid-derived | Panes per page (for many agents). |
@@ -126,6 +140,10 @@ prompt is typed into the TUI or appended as an argv argument.
 | Key | Default | Meaning |
 |---|---|---|
 | `root_dir` | `.council/runs` | Where run directories are written. Relative paths are anchored to the directory council was launched from. |
+| `private` | `true` | Run artifacts (raw logs, transcripts, prompts, diffs, check logs) are written owner-only: `0700` directories, `0600` files. Set `false` for shared-machine workflows that need group reads. |
+| `redact` | `false` | Best-effort scrubbing of common secret patterns (AWS/GitHub/OpenAI/Slack keys, bearer tokens, PEM blocks, `api_key=` assignments) from **saved transcripts**. Raw PTY logs are a live stream and are not redacted — keep `private: true`. |
+
+Old runs accumulate; prune them with `council clean-runs --keep 10`.
 
 ---
 
@@ -133,7 +151,35 @@ prompt is typed into the TUI or appended as an argv argument.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `check_command` | empty | Run in each build worktree to gate implementations before the review vote; ones that fail (non-zero exit) are dropped. Empty = no gate (language-agnostic; every changed build goes to the vote). Set it per stack, e.g. `["go","build","./..."]`, `["npm","test"]`, `["cargo","build"]`. |
+| `check_command` | empty | Run in each build worktree to gate implementations before the review vote; ones that fail (non-zero exit) are dropped. Empty = no gate (language-agnostic; every changed build goes to the vote). Set it per stack, e.g. `["go","build","./..."]`, `["npm","test"]`, `["cargo","build"]` — or let `council stack detect` write it for you. |
+| `check_timeout_seconds` | `600` | Hard timeout per check run, so a hung test can't block review forever. A timeout is recorded as FAIL in the check log. |
+| `max_check_output_bytes` | `1048576` | Cap on each check log; longer output is truncated. |
+
+---
+
+## `files`
+
+Limits for `@path` file-reference expansion in prompts and issues.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `allow_absolute` | `false` | By default only paths **inside the working directory** expand — a pasted task can't quietly inline `~/.ssh/id_rsa` into an agent prompt. Set `true` to allow absolute/outside paths (ignored under `policy.mode: safe`). |
+| `max_bytes` | `262144` | Per-file size cap; bigger files stay as `@tokens`. Binary files are always skipped. |
+
+---
+
+## `policy`
+
+```yaml
+policy:
+  mode: normal   # safe | normal | aggressive
+```
+
+| Mode | Behavior |
+|---|---|
+| `safe` | Refuses to run when enabled agents carry auto-approval flags; absolute `@file` refs never expand; adopt/clean always confirm. |
+| `normal` *(default)* | Doctor warns about risky flags; adopt/clean ask for confirmation. |
+| `aggressive` | Skips the adopt/clean confirmations — for sandboxed or fully-trusted environments. |
 
 ---
 
@@ -187,3 +233,18 @@ ui:
 ```
 
 When a local file is applied, council prints `Using repo config <path>`.
+
+### Trust
+
+A repo-local config can change **which commands council executes** (including
+auto-approval flags), so it is only applied once you trust it:
+
+- The first time council sees a repo's `.council.yaml` (or whenever its
+  content changes), it asks before applying it and remembers your answer by
+  content hash.
+- `council trust` trusts the current repo's config explicitly (useful in
+  scripts); `council trust --show` audits it; `council trust --revoke` forgets it.
+- `--no-local-config` ignores repo-local config for one invocation.
+- The trust store lives under your user config directory
+  (`council/trust.json`). `council stack` writes are auto-trusted — you just
+  authored them.

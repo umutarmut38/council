@@ -12,6 +12,9 @@ jobs:
   test:
     name: Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # Native Windows support is experimental: its job may fail without
+    # blocking the build. The required windows-smoke job below still
+    # guarantees the Windows binary compiles.
     continue-on-error: ${{ matrix.os == 'windows-latest' }}
     strategy:
       fail-fast: false
@@ -31,6 +34,12 @@ jobs:
       - name: Go test
         run: go test ./...
 
+      # PTY reads, delayed submits, and TUI messages all run on goroutines;
+      # the race detector is the cheapest way to catch regressions there.
+      - name: Go test (race)
+        if: matrix.os == 'ubuntu-latest'
+        run: go test -race ./...
+
       - name: Go vet
         run: go vet ./...
 
@@ -47,3 +56,23 @@ jobs:
         with:
           name: council-${{ runner.os }}-${{ runner.arch }}
           path: bin/*
+
+  windows-smoke:
+    # Must pass: releases ship Windows binaries, so the Windows build cannot
+    # be allowed to rot even while the Windows test suite is experimental.
+    name: Windows cross-build smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cross-compile for Windows
+        run: |
+          GOOS=windows GOARCH=amd64 go build -o /dev/null ./...
+          GOOS=windows GOARCH=arm64 go build -o /dev/null ./...

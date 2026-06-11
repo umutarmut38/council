@@ -9,6 +9,9 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/umutarmut38/council/internal/fsperm"
+	runstore "github.com/umutarmut38/council/internal/session"
 )
 
 // Artifact filenames agents are told to write into their worktree (their cwd)
@@ -50,15 +53,19 @@ type RunState struct {
 // persistence. Controller converts to/from config.Phase at the boundary.
 type configPhase string
 
-// NewRun creates a fresh timestamped run directory.
+// NewRun creates a fresh timestamped run directory. Run IDs get a numeric
+// suffix on collision so two runs started in the same second stay separate.
 func NewRun(rootDir string) (*Run, error) {
 	if rootDir == "" {
 		rootDir = ".council/runs"
 	}
-	stamp := time.Now().Format("20060102-150405")
-	r := &Run{RootDir: rootDir, Stamp: stamp, Dir: filepath.Join(rootDir, stamp)}
+	dir, stamp, err := runstore.CreateRunDir(rootDir)
+	if err != nil {
+		return nil, err
+	}
+	r := &Run{RootDir: rootDir, Stamp: stamp, Dir: dir}
 	for _, d := range []string{r.PlansDir(), r.VotesDir()} {
-		if err := os.MkdirAll(d, 0o755); err != nil {
+		if err := os.MkdirAll(d, fsperm.Dir()); err != nil {
 			return nil, err
 		}
 	}
@@ -137,10 +144,10 @@ func SummarizeRun(rootDir string, stamp string) (RunSummary, error) {
 		Stamp:         run.Stamp,
 		Dir:           run.Dir,
 		PromptPreview: promptPreview(run),
-		Plans:         markdownNames(run.PlansDir()),
+		Plans:         planNames(run.PlansDir()),
 		Votes:         voteNames(run.VotesDir()),
 		Reviews:       suffixNames(run.BuildsDir(), ".review.md"),
-		Diffs:         suffixNames(run.BuildsDir(), ".diff"),
+		Diffs:         diffNames(run.BuildsDir()),
 	}
 	summary.Winner = resultWinner(run.ResultPath())
 	agentSet := map[string]bool{}
@@ -189,6 +196,33 @@ func resultWinner(path string) string {
 
 func markdownNames(dir string) []string {
 	return suffixNames(dir, ".md")
+}
+
+// planNames lists agent plans, skipping the .orig.md backups kept by /refine.
+func planNames(dir string) []string {
+	names := markdownNames(dir)
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if strings.HasSuffix(name, ".orig") {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
+// diffNames lists agent build diffs, skipping the anonymized diff-<letter>
+// copies written for reviewers.
+func diffNames(dir string) []string {
+	names := suffixNames(dir, ".diff")
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if anonDiffName.MatchString(name) {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
 }
 
 func voteNames(dir string) []string {
@@ -310,10 +344,10 @@ func (r *Run) AnonDiffPath(letter string) string {
 // SaveBaseSHA records the commit the build worktrees branched from, so the diff
 // and patch can be computed later (even from a separate `council review` run).
 func (r *Run) SaveBaseSHA(sha string) error {
-	if err := os.MkdirAll(r.BuildsDir(), 0o755); err != nil {
+	if err := os.MkdirAll(r.BuildsDir(), fsperm.Dir()); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(r.BuildsDir(), "base.txt"), []byte(strings.TrimSpace(sha)+"\n"), 0o644)
+	return os.WriteFile(filepath.Join(r.BuildsDir(), "base.txt"), []byte(strings.TrimSpace(sha)+"\n"), fsperm.File())
 }
 
 func (r *Run) BaseSHA() (string, error) {
@@ -334,7 +368,7 @@ func (r *Run) SaveIssue(text string) error {
 	if !strings.HasSuffix(text, "\n") {
 		text += "\n"
 	}
-	return os.WriteFile(r.IssuePath(), []byte(text), 0o644)
+	return os.WriteFile(r.IssuePath(), []byte(text), fsperm.File())
 }
 
 func (r *Run) Issue() (string, error) {
@@ -346,7 +380,7 @@ func (r *Run) Issue() (string, error) {
 }
 
 func (r *Run) SaveState(phase string, participants []string, promptSent bool) error {
-	if err := os.MkdirAll(r.Dir, 0o755); err != nil {
+	if err := os.MkdirAll(r.Dir, fsperm.Dir()); err != nil {
 		return err
 	}
 	state := RunState{
@@ -359,7 +393,7 @@ func (r *Run) SaveState(phase string, participants []string, promptSent bool) er
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(r.StatePath(), data, 0o644)
+	return os.WriteFile(r.StatePath(), data, fsperm.File())
 }
 
 func (r *Run) ClearState() error {
@@ -382,6 +416,112 @@ func (r *Run) LoadState() (RunState, error) {
 	return state, nil
 }
 
+// ---- timings and adoption metadata ----
+
+// PhaseTiming records when a phase ran, who participated, and how many pane
+// restarts it needed — cheap, vendor-neutral signals for tuning a council.
+type PhaseTiming struct {
+	Phase        string   `json:"phase"`
+	Start        string   `json:"start,omitempty"`
+	End          string   `json:"end,omitempty"`
+	Participants []string `json:"participants,omitempty"`
+	Restarts     int      `json:"restarts,omitempty"`
+}
+
+func (r *Run) TimingsPath() string { return filepath.Join(r.Dir, "timings.json") }
+
+func (r *Run) LoadTimings() map[string]*PhaseTiming {
+	timings := map[string]*PhaseTiming{}
+	data, err := os.ReadFile(r.TimingsPath())
+	if err == nil {
+		_ = json.Unmarshal(data, &timings)
+	}
+	return timings
+}
+
+func (r *Run) saveTimings(timings map[string]*PhaseTiming) error {
+	data, err := json.MarshalIndent(timings, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(r.TimingsPath(), data, fsperm.File())
+}
+
+// RecordPhaseStart stamps a phase's start time (kept if already set, so a
+// resumed phase keeps its original start).
+func (r *Run) RecordPhaseStart(phase string, participants []string) {
+	timings := r.LoadTimings()
+	t, ok := timings[phase]
+	if !ok {
+		t = &PhaseTiming{Phase: phase}
+		timings[phase] = t
+	}
+	if t.Start == "" {
+		t.Start = time.Now().Format(time.RFC3339)
+	}
+	if len(participants) > 0 {
+		t.Participants = participants
+	}
+	_ = r.saveTimings(timings)
+}
+
+// RecordPhaseEnd stamps a phase's end time.
+func (r *Run) RecordPhaseEnd(phase string) {
+	timings := r.LoadTimings()
+	t, ok := timings[phase]
+	if !ok {
+		t = &PhaseTiming{Phase: phase}
+		timings[phase] = t
+	}
+	t.End = time.Now().Format(time.RFC3339)
+	_ = r.saveTimings(timings)
+}
+
+// RecordRestart counts a pane restart against the current phase.
+func (r *Run) RecordRestart(phase string) {
+	if phase == "" {
+		phase = "session"
+	}
+	timings := r.LoadTimings()
+	t, ok := timings[phase]
+	if !ok {
+		t = &PhaseTiming{Phase: phase}
+		timings[phase] = t
+	}
+	t.Restarts++
+	_ = r.saveTimings(timings)
+}
+
+// AdoptionPath records which build the user applied to the working tree.
+func (r *Run) AdoptionPath() string { return filepath.Join(r.Dir, "adopted.json") }
+
+func (r *Run) RecordAdoption(agent string, files []string) error {
+	payload := struct {
+		Agent     string   `json:"agent"`
+		Files     []string `json:"files,omitempty"`
+		AdoptedAt string   `json:"adopted_at"`
+	}{agent, files, time.Now().Format(time.RFC3339)}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(r.AdoptionPath(), data, fsperm.File())
+}
+
+func (r *Run) Adoption() (agent string, ok bool) {
+	data, err := os.ReadFile(r.AdoptionPath())
+	if err != nil {
+		return "", false
+	}
+	var payload struct {
+		Agent string `json:"agent"`
+	}
+	if json.Unmarshal(data, &payload) != nil || payload.Agent == "" {
+		return "", false
+	}
+	return payload.Agent, true
+}
+
 func (r *Run) SaveVoteRefs(refs []PlanRef) error {
 	return saveRefs(r.VoteRefsPath(), refs)
 }
@@ -399,14 +539,14 @@ func (r *Run) LoadReviewRefs() ([]PlanRef, error) {
 }
 
 func saveRefs(path string, refs []PlanRef) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), fsperm.Dir()); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(refs, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return os.WriteFile(path, data, fsperm.File())
 }
 
 func loadRefs(path string) ([]PlanRef, error) {
@@ -432,7 +572,7 @@ func CollectArtifact(worktrees map[string]string, filename string, destFor func(
 			missing = append(missing, agent)
 			continue
 		}
-		if writeErr := os.WriteFile(destFor(agent), data, 0o644); writeErr != nil {
+		if writeErr := os.WriteFile(destFor(agent), data, fsperm.File()); writeErr != nil {
 			return found, missing, writeErr
 		}
 		found[agent] = string(data)
@@ -471,7 +611,7 @@ func (r *Run) WriteResult(res Result, refs []PlanRef) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(r.ResultPath(), data, 0o644); err != nil {
+	if err := os.WriteFile(r.ResultPath(), data, fsperm.File()); err != nil {
 		return err
 	}
 
@@ -480,7 +620,7 @@ func (r *Run) WriteResult(res Result, refs []PlanRef) error {
 	for _, ref := range refs {
 		fmt.Fprintf(&b, "- Plan %s — %s: %d points, %d first-place\n", ref.Letter, ref.Agent, res.Points[ref.Letter], res.Firsts[ref.Letter])
 	}
-	return os.WriteFile(r.SummaryPath(), []byte(b.String()), 0o644)
+	return os.WriteFile(r.SummaryPath(), []byte(b.String()), fsperm.File())
 }
 
 func safeName(name string) string {
