@@ -44,6 +44,7 @@ agents:
 | `cwd` | `"."` | Working directory for the process. |
 | `role` | `[worker, reviewer]` | Which orchestration phases the agent joins (see [Roles](#roles)). |
 | `color` | — | 256-color index (`"212"`) or hex (`"#ff5f87"`) tinting this agent's pane **border**: full strength while focused, a computed darker shade otherwise. Rendering always uses indexed (non-themeable cube) colors, so VS Code, Apple Terminal, iTerm, Ghostty, etc. show the same shades; `council doctor` prints a color test strip if a terminal misbehaves. Falls back to the personality's `color`. |
+| `env` | — | Extra environment for this agent's process (`KEY: value` map), merged over the top-level [`env`](#env-and-setup-experimental) — the per-agent value wins. Experimental: requires `experimental.setup_env: true`. |
 | `personality` | — | Personality name (must exist under `personalities`). |
 
 #### Roles
@@ -133,6 +134,63 @@ prompt is typed into the TUI or appended as an argv argument.
 | `initial_prompt_delay_ms` | `3000` | Wait this long after launch before broadcasting (lets agents finish booting). Raise it if agents miss the prompt — codex's MCP load is the slowest factor; `8000` is a good value when running many agents. |
 | `page_rows`, `page_cols` | grid-derived | Panes per page (for many agents). |
 | `group_by` | `none` | `none`, `personality`, or `category` — orders panes and the overview. |
+
+---
+
+## `env` and `setup` (experimental)
+
+Council can export environment variables to agents and run commands before any
+agent launches — a vendor-agnostic way to wire agents to a local service (a
+context-compression proxy, a mock backend, a tunnel) without council knowing
+anything about it.
+
+> **Experimental — off by default.** `setup` runs **arbitrary commands** and
+> `env` mutates the agent environment, so the whole feature is opt-in. Set
+> `experimental.setup_env: true` to turn it on; otherwise any `env`/`setup` you
+> configure is ignored and `council doctor` warns that it was. Enable it in the
+> same config file as the `env`/`setup` it applies to.
+
+```yaml
+# Required: env/setup do nothing unless this is set.
+experimental:
+  setup_env: true
+
+# exported to every agent process (merged under each agent's own env, which
+# wins). Does NOT affect council's own subprocesses (git, gh).
+env:
+  OPENAI_BASE_URL: "http://127.0.0.1:8787"
+
+# commands run once before agents launch (and re-run per one-shot CLI phase).
+setup:
+  - name: proxy                                   # optional label for logs/doctor
+    command: ["headroom", "proxy", "--port", "8787"]
+    background: true                              # supervised; stopped on exit
+    wait_for_port: 8787                           # block until it's listening
+  - command: ["docker", "compose", "up", "-d"]    # one-shot: run to completion
+```
+
+| Key | Meaning |
+|---|---|
+| `experimental.setup_env` | **Required to enable this feature.** `false` by default — `env`/`setup` are ignored unless this is `true`. |
+| `env` | `KEY: value` map exported to every agent. Per-agent `agents.<name>.env` overrides it. |
+| `setup[].command` | argv to run before launching agents. |
+| `setup[].background` | `true` keeps the process alive for the session and terminates it on exit (a daemon/proxy). `false` (default) runs it to completion — a non-zero exit aborts startup. |
+| `setup[].wait_for_port` | On a background command, block startup until `127.0.0.1:<port>` is listening (a readiness gate), up to ~10s. |
+| `setup[].name` | Optional label shown in logs and `council doctor`. |
+
+`council doctor` lists the exported env keys and setup commands and checks each
+setup binary is on `PATH`. Setup runs once per interactive session and once per
+`council run`; the standalone one-shot phases (`council plan`, etc.) each run it
+for their own invocation.
+
+> **Trust.** `setup` runs arbitrary commands, so from a **repo-local**
+> `.council.yaml` it is gated exactly like the rest of the config: an untrusted
+> or changed local file never runs setup or applies its env (`council trust` to
+> approve, `--no-local-config` to ignore). Your global `~/.council.yaml` is
+> always trusted.
+
+See [`examples/configs/headroom.yaml`](https://github.com/umutarmut38/council/blob/main/examples/configs/headroom.yaml)
+for routing agents through a local compression proxy.
 
 ---
 

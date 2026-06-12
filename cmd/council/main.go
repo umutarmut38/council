@@ -19,7 +19,9 @@ import (
 )
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	err := run(os.Args[1:])
+	stopSetup() // tear down any supervised background setup processes
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -109,6 +111,10 @@ func run(args []string) error {
 	}
 	if len(selected) == 0 {
 		return errors.New("no agents selected; enable agents in ~/.council.yaml (or run `council config wizard`), or pass --agents name1,name2")
+	}
+
+	if err := ensureSetup(cfg); err != nil {
+		return err
 	}
 
 	store, err := runstore.New(cfg.Sessions.RootDir, effectiveYAML(cfg), sources.JSON())

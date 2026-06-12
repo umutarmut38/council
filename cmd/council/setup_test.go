@@ -1,0 +1,93 @@
+package main
+
+import (
+	"net"
+	"testing"
+	"time"
+
+	"github.com/umutarmut38/council/internal/config"
+)
+
+func resetSetup() {
+	setupDone = false
+	setupState = nil
+}
+
+func TestEnsureSetupRunsOneShotAndIsIdempotent(t *testing.T) {
+	resetSetup()
+	t.Cleanup(func() { stopSetup(); resetSetup() })
+
+	cfg := config.Config{Setup: []config.SetupCommand{
+		{Name: "noop", Command: []string{"true"}},
+	}}
+	if err := ensureSetup(cfg); err != nil {
+		t.Fatalf("one-shot setup: %v", err)
+	}
+	// Second call is a no-op (guard), even with a command that would fail.
+	if err := ensureSetup(config.Config{Setup: []config.SetupCommand{
+		{Command: []string{"false"}},
+	}}); err != nil {
+		t.Fatalf("second ensureSetup should be a no-op, got %v", err)
+	}
+}
+
+func TestEnsureSetupAbortsOnFailingOneShot(t *testing.T) {
+	resetSetup()
+	t.Cleanup(func() { stopSetup(); resetSetup() })
+
+	err := ensureSetup(config.Config{Setup: []config.SetupCommand{
+		{Name: "boom", Command: []string{"false"}},
+	}})
+	if err == nil {
+		t.Fatal("a one-shot command exiting non-zero must abort setup")
+	}
+}
+
+func TestEnsureSetupBackgroundWaitsForPortAndStops(t *testing.T) {
+	resetSetup()
+	t.Cleanup(func() { stopSetup(); resetSetup() })
+
+	// A listener stands in for the daemon's port being ready.
+	srv, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+	port := srv.Addr().(*net.TCPAddr).Port
+
+	cfg := config.Config{Setup: []config.SetupCommand{
+		{Name: "daemon", Command: []string{"sleep", "30"}, Background: true, WaitForPort: port},
+	}}
+	start := time.Now()
+	if err := ensureSetup(cfg); err != nil {
+		t.Fatalf("background setup with ready port: %v", err)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatal("readiness gate took too long for an already-listening port")
+	}
+	if setupState == nil || len(setupState.background) != 1 {
+		t.Fatalf("background process not tracked: %+v", setupState)
+	}
+	cmd := setupState.background[0]
+	stopSetup() // must terminate the supervised sleeper
+
+	// Reap with a timeout: a killed `sleep 30` returns promptly; a still-alive
+	// one would block the whole window.
+	done := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("background process still alive after stopSetup")
+	}
+}
+
+func TestWaitForPortTimesOut(t *testing.T) {
+	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+	port := ln.Addr().(*net.TCPAddr).Port
+	_ = ln.Close() // nothing listening now
+
+	if err := waitForPort(port, 600*time.Millisecond); err == nil {
+		t.Fatal("waitForPort should time out when nothing is listening")
+	}
+}

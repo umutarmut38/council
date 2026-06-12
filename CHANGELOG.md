@@ -6,6 +6,21 @@ This project follows semantic versioning once `v0.1.0` is tagged.
 
 ## Unreleased
 
+### Added
+
+- **Pre-launch `setup` commands and agent `env` (experimental, opt-in).**
+  Council can export environment variables to agents (top-level `env` +
+  per-agent `agents.<name>.env`) and run commands before any agent launches
+  (`setup`: one-shot, or supervised `background` services with an optional
+  `wait_for_port` readiness gate, stopped on exit). This is a vendor-agnostic
+  primitive — e.g. start a local context-compression proxy and point agents at
+  it (see `examples/configs/headroom.yaml`). Because `setup` runs arbitrary
+  commands, the feature is **off by default**: enable it with
+  `experimental.setup_env: true`, otherwise any `env`/`setup` is ignored and
+  `council doctor` warns. `setup` from a repo-local config is additionally
+  gated by the trust store; `council doctor` lists the env keys and setup
+  commands when enabled.
+
 ### Changed
 
 - **Approval-prompt detection reworked (now marked experimental).** The old
