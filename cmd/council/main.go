@@ -19,11 +19,16 @@ import (
 )
 
 func main() {
+	os.Exit(mainExitCode(os.Args[1:]))
+}
+
+func mainExitCode(args []string) int {
 	defer stopSetup() // tear down any supervised background setup processes
-	if err := run(os.Args[1:]); err != nil {
+	if err := run(args); err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
 
 func run(args []string) error {
