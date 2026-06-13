@@ -19,9 +19,8 @@ import (
 )
 
 func main() {
-	err := run(os.Args[1:])
-	stopSetup() // tear down any supervised background setup processes
-	if err != nil {
+	defer stopSetup() // tear down any supervised background setup processes
+	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

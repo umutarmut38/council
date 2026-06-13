@@ -146,9 +146,10 @@ anything about it.
 
 > **Experimental — off by default.** `setup` runs **arbitrary commands** and
 > `env` mutates the agent environment, so the whole feature is opt-in. Set
-> `experimental.setup_env: true` to turn it on; otherwise any `env`/`setup` you
-> configure is ignored and `council doctor` warns that it was. Enable it in the
-> same config file as the `env`/`setup` it applies to.
+> `experimental.setup_env: true` to turn it on in the merged effective config;
+> otherwise any `env`/`setup` you configure is ignored and `council doctor`
+> warns that it was. A trusted repo-local config can use `env`/`setup` when this
+> flag is enabled globally.
 
 ```yaml
 # Required: env/setup do nothing unless this is set.
