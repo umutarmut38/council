@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/umutarmut38/council/internal/config"
@@ -92,28 +93,32 @@ func stopSetup() {
 	}
 }
 
-// stop terminates every supervised background process (SIGINT, then Kill).
+// stop terminates every supervised background process: SIGINT, then a short
+// grace period to exit cleanly, then Kill for any straggler. Each process is
+// reaped with Wait (the only thing that releases it and populates
+// ProcessState), so none are left as zombies.
 func (s *setupSession) stop() {
+	const grace = 800 * time.Millisecond
+	var wg sync.WaitGroup
 	for _, cmd := range s.background {
 		if cmd.Process == nil {
 			continue
 		}
 		_ = cmd.Process.Signal(os.Interrupt)
-	}
-	// Give them a moment to exit cleanly, then hard-kill any stragglers.
-	deadline := time.Now().Add(800 * time.Millisecond)
-	for _, cmd := range s.background {
-		if cmd.Process == nil {
-			continue
-		}
-		for time.Now().Before(deadline) {
-			if cmd.ProcessState != nil {
-				break
+		wg.Add(1)
+		go func(c *exec.Cmd) {
+			defer wg.Done()
+			done := make(chan error, 1)
+			go func() { done <- c.Wait() }()
+			select {
+			case <-done: // exited within the grace period
+			case <-time.After(grace):
+				_ = c.Process.Kill()
+				<-done // reap the killed process
 			}
-			time.Sleep(20 * time.Millisecond)
-		}
-		_ = cmd.Process.Kill()
+		}(cmd)
 	}
+	wg.Wait()
 	s.background = nil
 }
 

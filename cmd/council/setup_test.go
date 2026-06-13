@@ -69,16 +69,16 @@ func TestEnsureSetupBackgroundWaitsForPortAndStops(t *testing.T) {
 		t.Fatalf("background process not tracked: %+v", setupState)
 	}
 	cmd := setupState.background[0]
-	stopSetup() // must terminate the supervised sleeper
+	stopSetup() // must terminate AND reap the supervised sleeper
 
-	// Reap with a timeout: a killed `sleep 30` returns promptly; a still-alive
-	// one would block the whole window.
-	done := make(chan struct{})
-	go func() { _ = cmd.Wait(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("background process still alive after stopSetup")
+	// stop() Waits on each process, so once it returns the sleeper is reaped:
+	// ProcessState is non-nil (a leaked zombie would leave it nil) and it did
+	// not exit on its own (it was signaled/killed).
+	if cmd.ProcessState == nil {
+		t.Fatal("background process not reaped after stopSetup (ProcessState is nil)")
+	}
+	if cmd.ProcessState.Success() {
+		t.Fatal("supervised `sleep 30` should have been signaled/killed, not exited successfully")
 	}
 }
 
