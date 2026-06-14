@@ -2,6 +2,7 @@ package main
 
 import (
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,6 +41,21 @@ func TestEnsureSetupAbortsOnFailingOneShot(t *testing.T) {
 	}})
 	if err == nil {
 		t.Fatal("a one-shot command exiting non-zero must abort setup")
+	}
+}
+
+func TestEnsureSetupRejectsEmptyCommand(t *testing.T) {
+	resetSetup()
+	t.Cleanup(func() { stopSetup(); resetSetup() })
+
+	err := ensureSetup(config.Config{Setup: []config.SetupCommand{
+		{Name: "missing"},
+	}})
+	if err == nil {
+		t.Fatal("empty setup command should fail")
+	}
+	if !strings.Contains(err.Error(), "command is required") {
+		t.Fatalf("empty setup command error should explain the problem, got %v", err)
 	}
 }
 
@@ -89,5 +105,13 @@ func TestWaitForPortTimesOut(t *testing.T) {
 
 	if err := waitForPort(port, 600*time.Millisecond); err == nil {
 		t.Fatal("waitForPort should time out when nothing is listening")
+	}
+}
+
+func TestWaitForPortRejectsInvalidPort(t *testing.T) {
+	if err := waitForPort(70000, time.Minute); err == nil {
+		t.Fatal("waitForPort should reject invalid ports")
+	} else if !strings.Contains(err.Error(), "invalid wait_for_port") {
+		t.Fatalf("invalid port error should explain the problem, got %v", err)
 	}
 }

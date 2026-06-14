@@ -471,6 +471,33 @@ func TestExperimentalGateClearsSetupEnvWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestExperimentalGateClearsIgnoredStateWhenEnabled(t *testing.T) {
+	cfg := Config{
+		Env:   map[string]string{"OPENAI_BASE_URL": "http://proxy:8787"},
+		Setup: []SetupCommand{{Name: "proxy", Command: []string{"true"}}},
+		Agents: map[string]AgentConfig{
+			"codex": {Enabled: true, Command: []string{"codex"}, Env: map[string]string{"X": "y"}},
+		},
+	}
+
+	cfg.Normalize()
+	if !cfg.ExperimentalIgnored {
+		t.Fatal("ExperimentalIgnored should be true after dropping configured env/setup")
+	}
+
+	cfg.Experimental.SetupEnv = true
+	cfg.Env = map[string]string{"OPENAI_BASE_URL": "http://proxy:8787"}
+	cfg.Setup = []SetupCommand{{Name: "proxy", Command: []string{"true"}}}
+	agent := cfg.Agents["codex"]
+	agent.Env = map[string]string{"X": "y"}
+	cfg.Agents["codex"] = agent
+
+	cfg.Normalize()
+	if cfg.ExperimentalIgnored {
+		t.Fatal("ExperimentalIgnored should reset once env/setup are enabled")
+	}
+}
+
 func TestApplyLocalOverrideEnvAndSetup(t *testing.T) {
 	base := Default()
 	base.Env = map[string]string{"A": "1"}

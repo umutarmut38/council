@@ -50,7 +50,8 @@ func ensureSetup(cfg config.Config) error {
 
 	for _, sc := range cfg.Setup {
 		if len(sc.Command) == 0 {
-			continue
+			sess.stop()
+			return fmt.Errorf("setup %q: command is required", sc.Label())
 		}
 		if _, lookErr := exec.LookPath(sc.Command[0]); lookErr != nil {
 			sess.stop()
@@ -125,6 +126,9 @@ func (s *setupSession) stop() {
 // waitForPort blocks until 127.0.0.1:port accepts a TCP connection, or the
 // timeout elapses.
 func waitForPort(port int, timeout time.Duration) error {
+	if port < 1 || port > 65535 {
+		return fmt.Errorf("invalid wait_for_port %d: must be between 1 and 65535", port)
+	}
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {

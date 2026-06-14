@@ -854,6 +854,9 @@ func (c *Config) Normalize() {
 	// off, env is dropped here (terminalEnv is the only injector) and setup is
 	// dropped below, so every downstream consumer sees the feature as absent.
 	setupEnvOn := c.SetupEnvEnabled()
+	if setupEnvOn {
+		c.ExperimentalIgnored = false
+	}
 	var droppedAgentEnv bool
 	// Only tool-agnostic fallbacks live here. Per-agent behavior (how to type,
 	// how to submit, paste vs raw, delays, etc.) is configured entirely from
