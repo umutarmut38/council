@@ -36,14 +36,21 @@ func captureOutput(t *testing.T, fn func()) string {
 	return out
 }
 
-// setTempHome points HOME and XDG_CONFIG_HOME at a fresh temp directory so
-// config.DefaultPath (~/.council.yaml) and the trust store (os.UserConfigDir)
-// resolve under the test sandbox instead of the developer's real home.
+// setTempHome points the home and config-dir environment variables at a fresh
+// temp directory so config.DefaultPath (~/.council.yaml) and the trust store
+// (os.UserConfigDir) resolve under the test sandbox instead of the developer's
+// real home. The Windows variables matter: os.UserHomeDir reads HOME on unix
+// but USERPROFILE on Windows, and os.UserConfigDir reads XDG_CONFIG_HOME on
+// Linux but %AppData% on Windows. Without them these tests escape the sandbox
+// and collide on the real ~/.council.yaml (Windows CI hit "already exists").
 func setTempHome(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
+	cfgDir := filepath.Join(dir, ".config")
 	t.Setenv("HOME", dir)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(dir, ".config"))
+	t.Setenv("USERPROFILE", dir) // os.UserHomeDir on Windows
+	t.Setenv("XDG_CONFIG_HOME", cfgDir)
+	t.Setenv("APPDATA", cfgDir) // os.UserConfigDir on Windows
 	return dir
 }
 
