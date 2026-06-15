@@ -5,6 +5,7 @@
 # council runtime data
 .council/
 .claude/
+.headroom/
 poc/
 
 # Internal planning notes — not part of the public release

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -399,5 +400,133 @@ func TestRolePhaseRouting(t *testing.T) {
 	w := AgentConfig{Role: []string{RoleWorker}, Orchestration: OrchestrationConfig{ExcludePlan: true}}
 	if w.ParticipatesIn(PhasePlan) {
 		t.Fatal("exclude_plan should override the worker role")
+	}
+}
+
+func TestGlobalEnvMergesIntoAgents(t *testing.T) {
+	cfg := Config{
+		Experimental: ExperimentalConfig{SetupEnv: true},
+		Env:          map[string]string{"OPENAI_BASE_URL": "http://proxy:8787", "SHARED": "global"},
+		Agents: map[string]AgentConfig{
+			"codex":  {Enabled: true, Command: []string{"codex"}, Env: map[string]string{"SHARED": "agent", "EXTRA": "x"}},
+			"claude": {Enabled: true, Command: []string{"claude"}},
+		},
+	}
+	cfg.Normalize()
+
+	codex := cfg.Agents["codex"]
+	if codex.Env["OPENAI_BASE_URL"] != "http://proxy:8787" {
+		t.Fatalf("global env not folded into codex: %v", codex.Env)
+	}
+	if codex.Env["SHARED"] != "agent" {
+		t.Fatalf("agent env should win over global: %v", codex.Env)
+	}
+	if codex.Env["EXTRA"] != "x" {
+		t.Fatalf("agent-only env lost: %v", codex.Env)
+	}
+	claude := cfg.Agents["claude"]
+	if claude.Env["OPENAI_BASE_URL"] != "http://proxy:8787" || claude.Env["SHARED"] != "global" {
+		t.Fatalf("global env not applied to agent without its own env: %v", claude.Env)
+	}
+}
+
+func TestExperimentalGateClearsSetupEnvWhenDisabled(t *testing.T) {
+	// With the gate off (the default), Normalize must drop global env, per-agent
+	// env, and setup, and flag that it did so for the SelectAgents warning.
+	cfg := Config{
+		Env:   map[string]string{"OPENAI_BASE_URL": "http://proxy:8787"},
+		Setup: []SetupCommand{{Name: "proxy", Command: []string{"true"}}},
+		Agents: map[string]AgentConfig{
+			"codex": {Enabled: true, Command: []string{"codex"}, Env: map[string]string{"X": "y"}},
+		},
+	}
+	cfg.Normalize()
+
+	if len(cfg.Env) != 0 {
+		t.Fatalf("global env should be dropped when gate is off: %v", cfg.Env)
+	}
+	if len(cfg.Setup) != 0 {
+		t.Fatalf("setup should be dropped when gate is off: %v", cfg.Setup)
+	}
+	if env := cfg.Agents["codex"].Env; len(env) != 0 {
+		t.Fatalf("agent env should be dropped when gate is off: %v", env)
+	}
+	if !cfg.ExperimentalIgnored {
+		t.Fatal("ExperimentalIgnored should be true after dropping configured env/setup")
+	}
+
+	// SelectAgents must surface a single warning about the ignored hooks.
+	_, warnings, err := SelectAgents(cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, w := range warnings {
+		if strings.Contains(w, "experimental.setup_env") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected an experimental.setup_env warning, got %v", warnings)
+	}
+}
+
+func TestExperimentalGateClearsIgnoredStateWhenEnabled(t *testing.T) {
+	cfg := Config{
+		Env:   map[string]string{"OPENAI_BASE_URL": "http://proxy:8787"},
+		Setup: []SetupCommand{{Name: "proxy", Command: []string{"true"}}},
+		Agents: map[string]AgentConfig{
+			"codex": {Enabled: true, Command: []string{"codex"}, Env: map[string]string{"X": "y"}},
+		},
+	}
+
+	cfg.Normalize()
+	if !cfg.ExperimentalIgnored {
+		t.Fatal("ExperimentalIgnored should be true after dropping configured env/setup")
+	}
+
+	cfg.Experimental.SetupEnv = true
+	cfg.Env = map[string]string{"OPENAI_BASE_URL": "http://proxy:8787"}
+	cfg.Setup = []SetupCommand{{Name: "proxy", Command: []string{"true"}}}
+	agent := cfg.Agents["codex"]
+	agent.Env = map[string]string{"X": "y"}
+	cfg.Agents["codex"] = agent
+
+	cfg.Normalize()
+	if cfg.ExperimentalIgnored {
+		t.Fatal("ExperimentalIgnored should reset once env/setup are enabled")
+	}
+}
+
+func TestApplyLocalOverrideEnvAndSetup(t *testing.T) {
+	base := Default()
+	base.Env = map[string]string{"A": "1"}
+	local := []byte(`
+env:
+  A: "2"
+  B: "3"
+setup:
+  - name: proxy
+    command: ["headroom", "proxy", "--port", "8787"]
+    background: true
+    wait_for_port: 8787
+`)
+	merged, err := ApplyLocalOverride(base, local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.Env["A"] != "2" || merged.Env["B"] != "3" {
+		t.Fatalf("env override = %v, want A=2 B=3", merged.Env)
+	}
+	if len(merged.Setup) != 1 {
+		t.Fatalf("setup not decoded: %+v", merged.Setup)
+	}
+	sc := merged.Setup[0]
+	if sc.Name != "proxy" || !sc.Background || sc.WaitForPort != 8787 ||
+		len(sc.Command) != 4 || sc.Command[0] != "headroom" {
+		t.Fatalf("setup decoded wrong: %+v", sc)
+	}
+	if sc.Label() != "proxy" {
+		t.Fatalf("Label() = %q, want proxy", sc.Label())
 	}
 }

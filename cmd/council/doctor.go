@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/umutarmut38/council/internal/config"
@@ -108,6 +109,11 @@ func doctor(args []string) error {
 		} else {
 			ok("%s: %s", spec.Name, path)
 		}
+		// Env this agent gets beyond the global set (new keys or overrides) —
+		// the per-agent routing that doesn't show up in the global env line.
+		if extra := agentExtraEnvKeys(cfg.Env, spec.Config.Env); len(extra) > 0 {
+			ok("%s env: %s", spec.Name, strings.Join(extra, ", "))
+		}
 		for _, phase := range []config.Phase{config.PhasePlan, config.PhaseVote, config.PhaseBuild} {
 			phaseCmd := spec.Config.CommandForPhase(phase)
 			if len(phaseCmd) > 0 && phaseCmd[0] != binary {
@@ -185,12 +191,47 @@ func doctor(args []string) error {
 		ok("review.check_command: %s", strings.Join(cfg.Review.CheckCommand, " "))
 	}
 
+	// Pre-launch env and setup commands.
+	if len(cfg.Env) > 0 {
+		keys := make([]string, 0, len(cfg.Env))
+		for k := range cfg.Env {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		ok("env exported to all agents: %s", strings.Join(keys, ", "))
+	}
+	for _, sc := range cfg.Setup {
+		if len(sc.Command) == 0 {
+			warn("setup entry has no command")
+			continue
+		}
+		if _, lookErr := exec.LookPath(sc.Command[0]); lookErr != nil {
+			fail("setup %q: %s not found in PATH", sc.Label(), sc.Command[0])
+		} else {
+			ok("setup: %s", setupSummary(sc))
+		}
+	}
+
 	printColorDiagnostics()
 
 	if problems > 0 {
 		return fmt.Errorf("doctor found %d problem(s)", problems)
 	}
 	return nil
+}
+
+// agentExtraEnvKeys returns the sorted env keys an agent receives that aren't
+// already covered by the global env with the same value — i.e. the per-agent
+// additions and overrides. global may be nil.
+func agentExtraEnvKeys(global, agent map[string]string) []string {
+	var keys []string
+	for k, v := range agent {
+		if gv, ok := global[k]; !ok || gv != v {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // printColorDiagnostics shows what this terminal advertises and how it

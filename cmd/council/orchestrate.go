@@ -89,6 +89,11 @@ func loadConfig(noLocal bool) (config.Config, error) {
 
 // runPhase launches a phase's sessions in the TUI and blocks until the user quits.
 func runPhase(ctrl *orchestrate.Controller, phase config.Phase, cfg config.Config, prompts map[string]string) error {
+	// Bring up pre-launch setup (idempotent: once per invocation, even when
+	// `council run` chains plan→vote→build).
+	if err := ensureSetup(cfg); err != nil {
+		return err
+	}
 	store, err := ctrl.Store(phase)
 	if err != nil {
 		return err
@@ -558,6 +563,9 @@ func councilResume(args []string) error {
 	}
 	store, err := ctrl.Store(config.Phase("resume"))
 	if err != nil {
+		return err
+	}
+	if err := ensureSetup(cfg); err != nil {
 		return err
 	}
 	sessions := ctrl.ResumeSessions(store)

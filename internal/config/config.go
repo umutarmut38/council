@@ -20,9 +20,13 @@ type AgentConfig struct {
 	// Color tints this agent's pane border and title (a 256-color code such
 	// as "212", or an empty string for the default chrome color). Falls back
 	// to the agent's personality color when unset.
-	Color         string              `yaml:"color,omitempty"`
-	Personality   string              `yaml:"personality,omitempty"`
-	Role          []string            `yaml:"role,omitempty"`
+	Color       string   `yaml:"color,omitempty"`
+	Personality string   `yaml:"personality,omitempty"`
+	Role        []string `yaml:"role,omitempty"`
+	// Env is extra environment for this agent's process, merged over the
+	// top-level env (this wins on conflicts). Populated from config; the
+	// global env is folded in by Normalize.
+	Env           map[string]string   `yaml:"env,omitempty"`
 	Terminal      TerminalConfig      `yaml:"terminal"`
 	Orchestration OrchestrationConfig `yaml:"orchestration,omitempty"`
 }
@@ -301,14 +305,68 @@ type PersonalityConfig struct {
 }
 
 type Config struct {
-	Agents                map[string]AgentConfig               `yaml:"agents"`
-	UI                    UIConfig                             `yaml:"ui"`
+	Agents map[string]AgentConfig `yaml:"agents"`
+	UI     UIConfig               `yaml:"ui"`
+	// Env (EXPERIMENTAL — requires experimental.setup_env: true) is extra
+	// environment exported to every agent process (merged under each agent's
+	// own env, which wins). Use it to point agents at a local proxy, set
+	// per-tool flags, etc. It does NOT affect council's own subprocesses
+	// (git, gh). Ignored unless the experimental gate is on.
+	Env map[string]string `yaml:"env,omitempty"`
+	// Setup (EXPERIMENTAL — requires experimental.setup_env: true) runs commands
+	// once before any agent launches — e.g. starting a proxy/daemon the agents
+	// should use. See SetupCommand. Setup commands from a repo-local config are
+	// subject to the same trust gate as the rest of the config (an untrusted
+	// .council.yaml never runs them). Ignored unless the experimental gate is on.
+	Setup                 []SetupCommand                       `yaml:"setup,omitempty"`
+	Experimental          ExperimentalConfig                   `yaml:"experimental,omitempty"`
 	Sessions              SessionConfig                        `yaml:"sessions"`
 	Review                ReviewConfig                         `yaml:"review"`
 	Files                 FilesConfig                          `yaml:"files,omitempty"`
 	Policy                PolicyConfig                         `yaml:"policy,omitempty"`
 	PersonalityCategories map[string]PersonalityCategoryConfig `yaml:"personality_categories,omitempty"`
 	Personalities         map[string]PersonalityConfig         `yaml:"personalities,omitempty"`
+
+	// ExperimentalIgnored is computed by Normalize: true when env/setup were
+	// present but dropped because the experimental gate was off. Never
+	// serialized; used to surface a single warning via SelectAgents.
+	ExperimentalIgnored bool `yaml:"-"`
+}
+
+// ExperimentalConfig gates opt-in, not-yet-stable features.
+type ExperimentalConfig struct {
+	// SetupEnv enables the top-level/per-agent `env` and the pre-launch `setup`
+	// commands. Off unless explicitly true: `setup` runs arbitrary commands and
+	// `env` mutates the agent environment, so both are deliberately opt-in.
+	SetupEnv bool `yaml:"setup_env,omitempty"`
+}
+
+// SetupEnvEnabled reports whether the experimental env/setup hooks are on.
+// They are off unless explicitly enabled.
+func (c Config) SetupEnvEnabled() bool { return c.Experimental.SetupEnv }
+
+// SetupCommand is a command council runs before launching agents.
+type SetupCommand struct {
+	// Name is a short label for logs/doctor (defaults to the command).
+	Name string `yaml:"name,omitempty"`
+	// Command is the argv to run.
+	Command []string `yaml:"command"`
+	// Background keeps the process running for the whole council session and
+	// terminates it on exit (e.g. a proxy). When false, council runs the
+	// command to completion and aborts startup if it exits non-zero.
+	Background bool `yaml:"background,omitempty"`
+	// WaitForPort, when set on a background command, blocks startup until
+	// 127.0.0.1:<port> accepts a connection (a readiness gate for proxies),
+	// up to a short timeout.
+	WaitForPort int `yaml:"wait_for_port,omitempty"`
+}
+
+// Label returns a human-friendly name for the setup command.
+func (s SetupCommand) Label() string {
+	if strings.TrimSpace(s.Name) != "" {
+		return s.Name
+	}
+	return strings.Join(s.Command, " ")
 }
 
 type AgentSpec struct {
@@ -463,6 +521,37 @@ func ApplyLocalOverride(cfg Config, raw []byte) (Config, error) {
 			}
 		case "review":
 			if err := val.Decode(&cfg.Review); err != nil {
+				return cfg, err
+			}
+		case "files":
+			if err := val.Decode(&cfg.Files); err != nil {
+				return cfg, err
+			}
+		case "policy":
+			if err := val.Decode(&cfg.Policy); err != nil {
+				return cfg, err
+			}
+		case "experimental":
+			// A trusted local config can opt into the experimental hooks.
+			if err := val.Decode(&cfg.Experimental); err != nil {
+				return cfg, err
+			}
+		case "env":
+			// Deep-merge: local keys add to / override the global env.
+			merged := map[string]string{}
+			if err := val.Decode(&merged); err != nil {
+				return cfg, err
+			}
+			if cfg.Env == nil {
+				cfg.Env = map[string]string{}
+			}
+			for k, v := range merged {
+				cfg.Env[k] = v
+			}
+		case "setup":
+			// A local setup list replaces the global one wholesale (running
+			// both global and repo setup would be surprising).
+			if err := val.Decode(&cfg.Setup); err != nil {
 				return cfg, err
 			}
 		case "personality_categories":
@@ -647,6 +736,13 @@ func SelectAgents(cfg Config, overrides []string) ([]AgentSpec, []string, error)
 		return nil, nil, err
 	}
 
+	// Emitted on both selection paths: env/setup were configured but dropped
+	// because the experimental gate is off.
+	warnings := make([]string, 0)
+	if cfg.ExperimentalIgnored {
+		warnings = append(warnings, "warning: 'setup'/'env' are experimental and were ignored — set experimental.setup_env: true to enable")
+	}
+
 	if len(overrides) > 0 {
 		selected := make([]AgentSpec, 0, len(overrides))
 		for _, name := range overrides {
@@ -656,7 +752,7 @@ func SelectAgents(cfg Config, overrides []string) ([]AgentSpec, []string, error)
 			}
 			selected = append(selected, AgentSpec{Name: name, Config: agentCfg})
 		}
-		return selected, nil, nil
+		return selected, warnings, nil
 	}
 
 	names := make([]string, 0, len(cfg.Agents))
@@ -668,7 +764,6 @@ func SelectAgents(cfg Config, overrides []string) ([]AgentSpec, []string, error)
 	sort.Strings(names)
 
 	selected := make([]AgentSpec, 0, len(names))
-	warnings := make([]string, 0)
 	for _, name := range names {
 		agentCfg := cfg.Agents[name]
 		if len(agentCfg.Command) == 0 {
@@ -755,6 +850,14 @@ func (c *Config) Normalize() {
 	if c.Sessions.RootDir == "" {
 		c.Sessions.RootDir = ".council/runs"
 	}
+	// The experimental env/setup hooks are off unless explicitly enabled. When
+	// off, env is dropped here (terminalEnv is the only injector) and setup is
+	// dropped below, so every downstream consumer sees the feature as absent.
+	setupEnvOn := c.SetupEnvEnabled()
+	if setupEnvOn {
+		c.ExperimentalIgnored = false
+	}
+	var droppedAgentEnv bool
 	// Only tool-agnostic fallbacks live here. Per-agent behavior (how to type,
 	// how to submit, paste vs raw, delays, etc.) is configured entirely from
 	// ~/.council.yaml so new agents can be supported without code changes.
@@ -788,6 +891,35 @@ func (c *Config) Normalize() {
 			value := true
 			agentCfg.Terminal.Color = &value
 		}
+		// Fold the global env into each agent (the agent's own env wins), so
+		// the launch path only has to read one map — but only when the
+		// experimental gate is on. When off, drop the agent's env entirely.
+		if setupEnvOn {
+			if len(c.Env) > 0 || len(agentCfg.Env) > 0 {
+				merged := make(map[string]string, len(c.Env)+len(agentCfg.Env))
+				for k, v := range c.Env {
+					merged[k] = v
+				}
+				for k, v := range agentCfg.Env {
+					merged[k] = v
+				}
+				agentCfg.Env = merged
+			}
+		} else if len(agentCfg.Env) > 0 {
+			droppedAgentEnv = true
+			agentCfg.Env = nil
+		}
 		c.Agents[name] = agentCfg
+	}
+
+	// Gate the experimental env/setup hooks: when off, drop global env and
+	// setup too, and record that we did so (if anything was configured) so
+	// SelectAgents can warn once.
+	if !setupEnvOn {
+		if len(c.Env) > 0 || len(c.Setup) > 0 || droppedAgentEnv {
+			c.ExperimentalIgnored = true
+		}
+		c.Env = nil
+		c.Setup = nil
 	}
 }

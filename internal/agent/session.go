@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -269,10 +270,32 @@ func terminalEnv(cfg config.AgentConfig) []string {
 	env := append([]string{}, os.Environ()...)
 	if colorEnabled(cfg) {
 		env = append(env, "TERM=xterm-256color", "COLORTERM=truecolor")
-		return env
+	} else {
+		env = append(env, "TERM=dumb", "NO_COLOR=1")
 	}
-	env = append(env, "TERM=dumb", "NO_COLOR=1")
+	// Config-supplied env is appended last so it overrides the inherited
+	// shell environment (a later KEY=VALUE wins).
+	for _, kv := range sortedEnv(cfg.Env) {
+		env = append(env, kv)
+	}
 	return env
+}
+
+// sortedEnv renders an env map as KEY=VALUE entries in a deterministic order.
+func sortedEnv(m map[string]string) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, k+"="+m[k])
+	}
+	return out
 }
 
 func expandPath(path string) (string, error) {

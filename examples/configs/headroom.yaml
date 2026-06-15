@@ -1,0 +1,45 @@
+# Route every agent's model traffic through a local headroom proxy for
+# context compression — an example of council's vendor-agnostic `setup` +
+# `env` hooks. council just starts the command and exports the env vars;
+# nothing about headroom is special-cased.
+#
+#   https://github.com/chopratejas/headroom
+#
+# Copy the relevant parts into ~/.council.yaml (or a repo-local .council.yaml,
+# which must be trusted with `council trust`).
+
+# Required: `env` and `setup` are experimental and off by default (setup runs
+# arbitrary commands). Without this, council ignores everything below and
+# `council doctor` warns that it did.
+experimental:
+  setup_env: true
+
+# Start the proxy before any agent launches, keep it running for the whole
+# session, and stop it on exit. wait_for_port blocks until it is listening so
+# the first agent call doesn't race startup.
+setup:
+  - name: headroom-proxy
+    command: ["headroom", "proxy", "--port", "8787"]
+    background: true
+    wait_for_port: 8787
+
+# Point each agent at the proxy. There is no universal base-URL variable, so
+# set the one its CLI honors — and leave out agents whose CLI can't be
+# redirected (cursor-agent and gh copilot talk to their own backends). Use the
+# top-level `env` for vars shared by all agents, and `agents.<name>.env` for
+# per-agent ones (the per-agent value wins on conflicts).
+agents:
+  claude:
+    enabled: true
+    command: ["claude"]
+    env:
+      ANTHROPIC_BASE_URL: "http://127.0.0.1:8787"
+
+  codex:
+    enabled: true
+    command: ["codex"]
+    env:
+      OPENAI_BASE_URL: "http://127.0.0.1:8787"
+
+# `council doctor` prints the configured env keys and setup commands (and
+# checks the binaries are on PATH) so you can confirm the wiring before a run.
