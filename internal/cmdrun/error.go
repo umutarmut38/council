@@ -23,6 +23,11 @@ func (e *Error) Error() string {
 		b.WriteByte(' ')
 		b.WriteString(a)
 	}
+	if e.Dir != "" {
+		b.WriteString(" (in ")
+		b.WriteString(e.Dir)
+		b.WriteByte(')')
+	}
 	if e.Err != nil {
 		b.WriteString(": ")
 		b.WriteString(e.Err.Error())

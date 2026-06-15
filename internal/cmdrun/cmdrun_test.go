@@ -3,16 +3,33 @@ package cmdrun
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
 
+// helperEnv gates TestHelperProcess: it only acts as a scripted command when set
+// to "1" in a re-executed child, and is a no-op during the normal test run.
+const helperEnv = "CMDRUN_HELPER_PROCESS"
+
+// helperSpec builds a Spec that re-executes this test binary as a scripted
+// command (handled by TestHelperProcess). This keeps the runner tests portable
+// across operating systems instead of depending on Unix utilities like sh/cat.
+func helperSpec(args ...string) Spec {
+	return Spec{
+		Name: os.Args[0],
+		Args: append([]string{"-test.run=^TestHelperProcess$", "--"}, args...),
+		Env:  map[string]string{helperEnv: "1"},
+	}
+}
+
 func TestOutputSuccess(t *testing.T) {
-	out, err := OS{}.Output(context.Background(), Spec{Name: "sh", Args: []string{"-c", "printf hello"}})
+	out, err := OS{}.Output(context.Background(), helperSpec("stdout", "hello"))
 	if err != nil {
 		t.Fatalf("Output: %v", err)
 	}
@@ -22,7 +39,7 @@ func TestOutputSuccess(t *testing.T) {
 }
 
 func TestCombinedOutputInterleavesStreams(t *testing.T) {
-	out, err := OS{}.CombinedOutput(context.Background(), Spec{Name: "sh", Args: []string{"-c", "echo out; echo err 1>&2"}})
+	out, err := OS{}.CombinedOutput(context.Background(), helperSpec("streams", "out", "err"))
 	if err != nil {
 		t.Fatalf("CombinedOutput: %v", err)
 	}
@@ -33,7 +50,7 @@ func TestCombinedOutputInterleavesStreams(t *testing.T) {
 }
 
 func TestRunCapturesStreamsSeparately(t *testing.T) {
-	res, err := OS{}.Run(context.Background(), Spec{Name: "sh", Args: []string{"-c", "echo to-out; echo to-err 1>&2"}})
+	res, err := OS{}.Run(context.Background(), helperSpec("streams", "to-out", "to-err"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -49,7 +66,7 @@ func TestRunCapturesStreamsSeparately(t *testing.T) {
 }
 
 func TestNonZeroExitStructuredError(t *testing.T) {
-	out, err := OS{}.Output(context.Background(), Spec{Name: "sh", Args: []string{"-c", "echo boom 1>&2; exit 7"}})
+	out, err := OS{}.Output(context.Background(), helperSpec("fail", "7", "boom"))
 	if err == nil {
 		t.Fatal("expected an error for a non-zero exit")
 	}
@@ -64,13 +81,13 @@ func TestNonZeroExitStructuredError(t *testing.T) {
 	if cmdErr.ExitCode != 7 {
 		t.Fatalf("ExitCode = %d, want 7", cmdErr.ExitCode)
 	}
-	if cmdErr.Name != "sh" {
-		t.Fatalf("Name = %q, want sh", cmdErr.Name)
+	if cmdErr.Name != os.Args[0] {
+		t.Fatalf("Name = %q, want %q", cmdErr.Name, os.Args[0])
 	}
 	if !strings.Contains(string(cmdErr.Output), "boom") {
 		t.Fatalf("captured Output = %q, want it to contain stderr", cmdErr.Output)
 	}
-	if !strings.Contains(cmdErr.Error(), "boom") || !strings.Contains(cmdErr.Error(), "sh") {
+	if !strings.Contains(cmdErr.Error(), "boom") || !strings.Contains(cmdErr.Error(), "TestHelperProcess") {
 		t.Fatalf("Error() = %q, want it to mention the command and output", cmdErr.Error())
 	}
 
@@ -78,6 +95,17 @@ func TestNonZeroExitStructuredError(t *testing.T) {
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) {
 		t.Fatalf("error does not unwrap to *exec.ExitError: %v", err)
+	}
+}
+
+func TestErrorMessageIncludesDir(t *testing.T) {
+	withDir := &Error{Name: "git", Args: []string{"status"}, Dir: "/tmp/work", Err: errors.New("boom")}
+	if got := withDir.Error(); !strings.Contains(got, "/tmp/work") || !strings.Contains(got, "git status") {
+		t.Fatalf("Error() = %q, want it to include the dir and command", got)
+	}
+	noDir := &Error{Name: "git", Args: []string{"status"}, Err: errors.New("boom")}
+	if got := noDir.Error(); strings.Contains(got, "(in ") {
+		t.Fatalf("Error() = %q, want no dir clause when Dir is empty", got)
 	}
 }
 
@@ -100,7 +128,7 @@ func TestContextTimeoutCancelsCommand(t *testing.T) {
 	defer cancel()
 
 	start := time.Now()
-	_, err := OS{}.CombinedOutput(ctx, Spec{Name: "sleep", Args: []string{"10"}})
+	_, err := OS{}.CombinedOutput(ctx, helperSpec("sleep", "10s"))
 	if err == nil {
 		t.Fatal("expected an error when the context times out")
 	}
@@ -113,11 +141,9 @@ func TestContextTimeoutCancelsCommand(t *testing.T) {
 }
 
 func TestOutputCapTruncates(t *testing.T) {
-	out, err := OS{}.Output(context.Background(), Spec{
-		Name:      "sh",
-		Args:      []string{"-c", "printf aaaaaaaaaa"}, // 10 bytes
-		MaxOutput: 4,
-	})
+	s := helperSpec("stdout", "aaaaaaaaaa") // 10 bytes
+	s.MaxOutput = 4
+	out, err := OS{}.Output(context.Background(), s)
 	if err != nil {
 		t.Fatalf("Output: %v", err)
 	}
@@ -127,11 +153,9 @@ func TestOutputCapTruncates(t *testing.T) {
 }
 
 func TestEnvOverride(t *testing.T) {
-	out, err := OS{}.Output(context.Background(), Spec{
-		Name: "sh",
-		Args: []string{"-c", "printf %s \"$CMDRUN_TEST_VAR\""},
-		Env:  map[string]string{"CMDRUN_TEST_VAR": "injected"},
-	})
+	s := helperSpec("echoenv", "CMDRUN_TEST_VAR")
+	s.Env["CMDRUN_TEST_VAR"] = "injected"
+	out, err := OS{}.Output(context.Background(), s)
 	if err != nil {
 		t.Fatalf("Output: %v", err)
 	}
@@ -145,7 +169,9 @@ func TestWorkingDirectory(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "marker.txt"), []byte("in-workdir"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	out, err := OS{}.Output(context.Background(), Spec{Name: "cat", Args: []string{"marker.txt"}, Dir: dir})
+	s := helperSpec("readfile", "marker.txt")
+	s.Dir = dir
+	out, err := OS{}.Output(context.Background(), s)
 	if err != nil {
 		t.Fatalf("Output: %v", err)
 	}
@@ -155,11 +181,11 @@ func TestWorkingDirectory(t *testing.T) {
 }
 
 func TestPackageHelpersUseOSRunner(t *testing.T) {
-	out, err := Output(context.Background(), Spec{Name: "sh", Args: []string{"-c", "printf ok"}})
+	out, err := Output(context.Background(), helperSpec("stdout", "ok"))
 	if err != nil || string(out) != "ok" {
 		t.Fatalf("Output helper = %q, %v", out, err)
 	}
-	if _, err := Run(context.Background(), Spec{Name: "true"}); err != nil {
+	if _, err := Run(context.Background(), helperSpec("stdout", "ignored")); err != nil {
 		t.Fatalf("Run helper: %v", err)
 	}
 }
@@ -191,6 +217,29 @@ func TestFakeRecordsAndScriptsCalls(t *testing.T) {
 	}
 }
 
+func TestFakeRecordsAreDecoupledFromCaller(t *testing.T) {
+	fake := &Fake{}
+	args := []string{"status"}
+	env := map[string]string{"KEY": "before"}
+	if _, err := fake.Run(context.Background(), Spec{Name: "git", Args: args, Env: env}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Mutating the caller's inputs after the call must not change history.
+	args[0] = "push"
+	env["KEY"] = "after"
+	// Mutating a returned copy must not change history either.
+	if got := fake.Calls(); got[0].Args[0] != "status" || got[0].Env["KEY"] != "before" {
+		t.Fatalf("recorded call mutated by caller: %+v", got[0])
+	}
+	got := fake.Calls()
+	got[0].Args[0] = "mutated"
+	got[0].Env["KEY"] = "mutated"
+	if again := fake.Calls(); again[0].Args[0] != "status" || again[0].Env["KEY"] != "before" {
+		t.Fatalf("recorded call mutated via returned copy: %+v", again[0])
+	}
+}
+
 func TestFakeNilHandlerSucceeds(t *testing.T) {
 	fake := &Fake{}
 	if _, err := fake.Run(context.Background(), Spec{Name: "anything"}); err != nil {
@@ -199,4 +248,85 @@ func TestFakeNilHandlerSucceeds(t *testing.T) {
 	if got := fake.Calls(); len(got) != 1 {
 		t.Fatalf("calls = %d, want 1", len(got))
 	}
+}
+
+// TestHelperProcess is not a real test: when CMDRUN_HELPER_PROCESS=1 it is
+// re-executed by helperSpec as a scripted stand-in for an external command,
+// then exits before the test framework prints its own output to the captured
+// streams. During the normal test run the gate is unset and it does nothing.
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv(helperEnv) != "1" {
+		return
+	}
+	args := helperArgs()
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "cmdrun helper: missing command")
+		os.Exit(2)
+	}
+	cmd, rest := args[0], args[1:]
+	switch cmd {
+	case "stdout":
+		fmt.Fprint(os.Stdout, strings.Join(rest, " "))
+	case "streams":
+		if len(rest) != 2 {
+			fmt.Fprintln(os.Stderr, "cmdrun helper: streams needs <stdout> <stderr>")
+			os.Exit(2)
+		}
+		fmt.Fprint(os.Stdout, rest[0])
+		fmt.Fprint(os.Stderr, rest[1])
+	case "fail":
+		if len(rest) != 2 {
+			fmt.Fprintln(os.Stderr, "cmdrun helper: fail needs <code> <stderr>")
+			os.Exit(2)
+		}
+		code, err := strconv.Atoi(rest[0])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "cmdrun helper: bad exit code %q\n", rest[0])
+			os.Exit(2)
+		}
+		fmt.Fprint(os.Stderr, rest[1])
+		os.Exit(code)
+	case "sleep":
+		if len(rest) != 1 {
+			fmt.Fprintln(os.Stderr, "cmdrun helper: sleep needs <duration>")
+			os.Exit(2)
+		}
+		d, err := time.ParseDuration(rest[0])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "cmdrun helper: bad duration %q\n", rest[0])
+			os.Exit(2)
+		}
+		time.Sleep(d)
+	case "echoenv":
+		if len(rest) != 1 {
+			fmt.Fprintln(os.Stderr, "cmdrun helper: echoenv needs <var>")
+			os.Exit(2)
+		}
+		fmt.Fprint(os.Stdout, os.Getenv(rest[0]))
+	case "readfile":
+		if len(rest) != 1 {
+			fmt.Fprintln(os.Stderr, "cmdrun helper: readfile needs <name>")
+			os.Exit(2)
+		}
+		b, err := os.ReadFile(rest[0])
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Stdout.Write(b)
+	default:
+		fmt.Fprintf(os.Stderr, "cmdrun helper: unknown command %q\n", cmd)
+		os.Exit(2)
+	}
+	os.Exit(0)
+}
+
+// helperArgs returns the scripted command arguments passed after "--".
+func helperArgs() []string {
+	for i, a := range os.Args {
+		if a == "--" {
+			return os.Args[i+1:]
+		}
+	}
+	return nil
 }

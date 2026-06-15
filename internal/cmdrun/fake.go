@@ -21,7 +21,7 @@ var _ Runner = (*Fake)(nil)
 
 func (f *Fake) dispatch(s Spec) (Result, error) {
 	f.mu.Lock()
-	f.calls = append(f.calls, s)
+	f.calls = append(f.calls, cloneSpec(s))
 	f.mu.Unlock()
 	if f.Handler == nil {
 		return Result{}, nil
@@ -29,11 +29,34 @@ func (f *Fake) dispatch(s Spec) (Result, error) {
 	return f.Handler(s)
 }
 
-// Calls returns a copy of the recorded invocations in order.
+// Calls returns a copy of the recorded invocations in order. The returned Specs
+// own their Args/Env, so callers may inspect or mutate them without affecting
+// the recorded history.
 func (f *Fake) Calls() []Spec {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]Spec(nil), f.calls...)
+	out := make([]Spec, len(f.calls))
+	for i, s := range f.calls {
+		out[i] = cloneSpec(s)
+	}
+	return out
+}
+
+// cloneSpec deep-copies a Spec's reference fields (Args slice and Env map) so a
+// recorded invocation is decoupled from the caller's inputs (which may be reused
+// or mutated after the call) and from any previously returned copy.
+func cloneSpec(s Spec) Spec {
+	if s.Args != nil {
+		s.Args = append([]string(nil), s.Args...)
+	}
+	if s.Env != nil {
+		env := make(map[string]string, len(s.Env))
+		for k, v := range s.Env {
+			env[k] = v
+		}
+		s.Env = env
+	}
+	return s
 }
 
 func (f *Fake) Run(_ context.Context, s Spec) (Result, error) { return f.dispatch(s) }

@@ -11,7 +11,6 @@
 package cmdrun
 
 import (
-	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -93,12 +92,12 @@ func mergedEnv(overrides map[string]string) []string {
 
 func (OS) Run(ctx context.Context, s Spec) (Result, error) {
 	cmd := s.command(ctx)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	stdout, stderr := &capWriter{max: s.MaxOutput}, &capWriter{max: s.MaxOutput}
+	cmd.Stdout, cmd.Stderr = stdout, stderr
 	err := cmd.Run()
 	res := Result{
-		Stdout:   capBytes(stdout.Bytes(), s.MaxOutput),
-		Stderr:   capBytes(stderr.Bytes(), s.MaxOutput),
+		Stdout:   stdout.Bytes(),
+		Stderr:   stderr.Bytes(),
 		ExitCode: exitCode(cmd, err),
 	}
 	if err != nil {
@@ -113,22 +112,23 @@ func (OS) Run(ctx context.Context, s Spec) (Result, error) {
 
 func (OS) Output(ctx context.Context, s Spec) ([]byte, error) {
 	cmd := s.command(ctx)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	stdout, err := cmd.Output()
-	stdout = capBytes(stdout, s.MaxOutput)
+	stdout, stderr := &capWriter{max: s.MaxOutput}, &capWriter{max: s.MaxOutput}
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	err := cmd.Run()
 	if err != nil {
-		return stdout, s.wrap(capBytes(stderr.Bytes(), s.MaxOutput), exitCode(cmd, err), err)
+		return stdout.Bytes(), s.wrap(stderr.Bytes(), exitCode(cmd, err), err)
 	}
-	return stdout, nil
+	return stdout.Bytes(), nil
 }
 
 func (OS) CombinedOutput(ctx context.Context, s Spec) ([]byte, error) {
 	cmd := s.command(ctx)
-	var buf bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &buf, &buf
+	// A single writer for both streams keeps stdout/stderr interleaved; os/exec
+	// shares one pipe when Stdout == Stderr, so there is no concurrent write.
+	buf := &capWriter{max: s.MaxOutput}
+	cmd.Stdout, cmd.Stderr = buf, buf
 	err := cmd.Run()
-	out := capBytes(buf.Bytes(), s.MaxOutput)
+	out := buf.Bytes()
 	if err != nil {
 		return out, s.wrap(out, exitCode(cmd, err), err)
 	}
@@ -158,16 +158,40 @@ func exitCode(cmd *exec.Cmd, err error) int {
 	return -1
 }
 
-// capBytes truncates b to max bytes (plus a marker) when max > 0 and b is longer.
-func capBytes(b []byte, max int) []byte {
-	if max <= 0 || len(b) <= max {
-		return b
-	}
-	out := make([]byte, 0, max+len(truncationMarker))
-	out = append(out, b[:max]...)
-	out = append(out, truncationMarker...)
-	return out
+// capWriter is an io.Writer that retains only the first max bytes written to it
+// (followed by a single truncationMarker once the limit is exceeded) while still
+// accepting and discarding the rest. Capturing through it keeps memory bounded
+// for chatty commands instead of buffering everything and truncating afterward,
+// while continuing to drain the pipe so the child process never blocks. A max
+// of <= 0 means no limit.
+type capWriter struct {
+	max       int
+	buf       []byte
+	truncated bool
 }
+
+func (w *capWriter) Write(p []byte) (int, error) {
+	if w.max <= 0 {
+		w.buf = append(w.buf, p...)
+		return len(p), nil
+	}
+	if remaining := w.max - len(w.buf); remaining > 0 {
+		if remaining >= len(p) {
+			w.buf = append(w.buf, p...)
+			return len(p), nil
+		}
+		w.buf = append(w.buf, p[:remaining]...)
+	}
+	if !w.truncated {
+		w.buf = append(w.buf, truncationMarker...)
+		w.truncated = true
+	}
+	return len(p), nil
+}
+
+// Bytes returns the retained output (capped, with a trailing marker when the
+// output was truncated).
+func (w *capWriter) Bytes() []byte { return w.buf }
 
 // Package-level helpers run a Spec with the real OS runner. They are the drop-in
 // replacements for one-off exec.Command(...).Output()/.CombinedOutput()/.Run()
