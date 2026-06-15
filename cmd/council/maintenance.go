@@ -4,18 +4,19 @@ package main
 // run reports, scorecards, the batch issue queue, and GitHub helpers.
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/umutarmut38/council/internal/cmdrun"
 	"github.com/umutarmut38/council/internal/config"
 	"github.com/umutarmut38/council/internal/fsperm"
 	"github.com/umutarmut38/council/internal/orchestrate"
@@ -202,9 +203,9 @@ func councilReport(args []string) error {
 	}
 	fmt.Printf("Wrote %s\n", path)
 	if *post > 0 {
-		out, err := exec.Command("gh", "issue", "comment", fmt.Sprint(*post), "--body-file", path).CombinedOutput()
+		_, err := cmdrun.CombinedOutput(context.Background(), cmdrun.Spec{Name: "gh", Args: []string{"issue", "comment", fmt.Sprint(*post), "--body-file", path}})
 		if err != nil {
-			return fmt.Errorf("gh issue comment: %v: %s", err, strings.TrimSpace(string(out)))
+			return fmt.Errorf("gh issue comment: %w", err)
 		}
 		fmt.Printf("Posted report to issue #%d\n", *post)
 	}
@@ -258,13 +259,13 @@ func councilPR(args []string) error {
 	if err != nil {
 		return err
 	}
-	if out, err := exec.Command("git", "push", "-u", "origin", branch).CombinedOutput(); err != nil {
-		return fmt.Errorf("git push %s: %v: %s", branch, err, strings.TrimSpace(string(out)))
+	if _, err := cmdrun.CombinedOutput(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"push", "-u", "origin", branch}}); err != nil {
+		return fmt.Errorf("git push %s: %w", branch, err)
 	}
 	title := fmt.Sprintf("council: %s implementation (run %s)", agentName, ctrl.Run().Stamp)
-	out, err := exec.Command("gh", "pr", "create", "--head", branch, "--title", title, "--body-file", reportPath).CombinedOutput()
+	out, err := cmdrun.CombinedOutput(context.Background(), cmdrun.Spec{Name: "gh", Args: []string{"pr", "create", "--head", branch, "--title", title, "--body-file", reportPath}})
 	if err != nil {
-		return fmt.Errorf("gh pr create: %v: %s", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("gh pr create: %w", err)
 	}
 	fmt.Print(string(out))
 	return nil

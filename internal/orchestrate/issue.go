@@ -1,16 +1,17 @@
 package orchestrate
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/umutarmut38/council/internal/cmdrun"
 	"github.com/umutarmut38/council/internal/config"
 )
 
@@ -154,7 +155,7 @@ func isBinary(data []byte) bool {
 }
 
 func fetchGitHubIssue(number int) (string, error) {
-	out, err := exec.Command("gh", "issue", "view", strconv.Itoa(number), "--json", "title,body").Output()
+	out, err := cmdrun.Output(context.Background(), cmdrun.Spec{Name: "gh", Args: []string{"issue", "view", strconv.Itoa(number), "--json", "title,body"}})
 	if err != nil {
 		return "", fmt.Errorf("gh issue view %d: %w", number, err)
 	}

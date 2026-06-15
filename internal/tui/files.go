@@ -4,14 +4,15 @@ package tui
 // expansion of @path tokens before a message is sent.
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/umutarmut38/council/internal/cmdrun"
 	"github.com/umutarmut38/council/internal/orchestrate"
 )
 
@@ -151,7 +152,7 @@ func (m *Model) acceptFileSuggestion() bool {
 }
 
 func discoverFileChoices() []string {
-	out, err := exec.Command("git", "ls-files", "--cached", "--others", "--exclude-standard").Output()
+	out, err := cmdrun.Output(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"ls-files", "--cached", "--others", "--exclude-standard"}})
 	if err == nil {
 		return cleanFileChoices(strings.Split(string(out), "\n"))
 	}

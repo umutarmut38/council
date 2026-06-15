@@ -3,11 +3,13 @@ package orchestrate
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/umutarmut38/council/internal/cmdrun"
 )
 
 // Worktree is one agent's isolated checkout for a run.
@@ -28,7 +30,7 @@ type Manager struct {
 
 // DetectRepoRoot returns the top-level git directory containing dir.
 func DetectRepoRoot(dir string) (string, error) {
-	out, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Output()
+	out, err := cmdrun.Output(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", dir, "rev-parse", "--show-toplevel"}})
 	if err != nil {
 		return "", fmt.Errorf("not a git repository: %w", err)
 	}
@@ -71,7 +73,7 @@ func (m *Manager) pathFor(agent string) string {
 func (m *Manager) Add(agent, baseRef string) (Worktree, error) {
 	wt := Worktree{Agent: agent, Path: m.pathFor(agent), Branch: m.branch(agent)}
 
-	_ = exec.Command("git", "-C", m.RepoRoot, "worktree", "prune").Run()
+	_, _ = cmdrun.Run(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", m.RepoRoot, "worktree", "prune"}})
 
 	existing, err := m.List()
 	if err != nil {
@@ -98,14 +100,15 @@ func (m *Manager) Add(agent, baseRef string) (Worktree, error) {
 			args = append(args, baseRef)
 		}
 	}
-	if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
-		return wt, fmt.Errorf("git worktree add %s: %v: %s", agent, err, strings.TrimSpace(string(out)))
+	if _, err := cmdrun.CombinedOutput(context.Background(), cmdrun.Spec{Name: "git", Args: args}); err != nil {
+		return wt, fmt.Errorf("git worktree add %s: %w", agent, err)
 	}
 	return wt, nil
 }
 
 func branchExists(repoRoot string, branch string) bool {
-	return exec.Command("git", "-C", repoRoot, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch).Run() == nil
+	_, err := cmdrun.Run(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", repoRoot, "rev-parse", "--verify", "--quiet", "refs/heads/" + branch}})
+	return err == nil
 }
 
 // Reset discards all changes in an agent's worktree, returning it to a pristine
@@ -116,8 +119,8 @@ func (m *Manager) Reset(agent string) error {
 		{"-C", path, "reset", "--hard"},
 		{"-C", path, "clean", "-fd"},
 	} {
-		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
-			return fmt.Errorf("git %s: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+		if _, err := cmdrun.CombinedOutput(context.Background(), cmdrun.Spec{Name: "git", Args: args}); err != nil {
+			return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 		}
 	}
 	return nil
@@ -125,12 +128,12 @@ func (m *Manager) Reset(agent string) error {
 
 // Remove deletes an agent's worktree and its branch.
 func (m *Manager) Remove(wt Worktree) error {
-	if out, err := exec.Command("git", "-C", m.RepoRoot, "worktree", "remove", "--force", wt.Path).CombinedOutput(); err != nil {
-		return fmt.Errorf("git worktree remove %s: %v: %s", wt.Agent, err, strings.TrimSpace(string(out)))
+	if _, err := cmdrun.CombinedOutput(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", m.RepoRoot, "worktree", "remove", "--force", wt.Path}}); err != nil {
+		return fmt.Errorf("git worktree remove %s: %w", wt.Agent, err)
 	}
 	if wt.Branch != "" {
 		// Best effort: the branch may already be gone or checked out elsewhere.
-		_ = exec.Command("git", "-C", m.RepoRoot, "branch", "-D", wt.Branch).Run()
+		_, _ = cmdrun.Run(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", m.RepoRoot, "branch", "-D", wt.Branch}})
 	}
 	m.removeEmptyStampDirs()
 	return nil
@@ -140,7 +143,7 @@ func (m *Manager) Remove(wt Worktree) error {
 // across all runs and including pre-stamp legacy paths. Use ListRun for the
 // worktrees that belong to this manager's run.
 func (m *Manager) List() ([]Worktree, error) {
-	out, err := exec.Command("git", "-C", m.RepoRoot, "worktree", "list", "--porcelain").Output()
+	out, err := cmdrun.Output(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", m.RepoRoot, "worktree", "list", "--porcelain"}})
 	if err != nil {
 		return nil, fmt.Errorf("git worktree list: %w", err)
 	}

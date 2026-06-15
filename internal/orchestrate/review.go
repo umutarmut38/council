@@ -7,13 +7,13 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/umutarmut38/council/internal/cmdrun"
 	"github.com/umutarmut38/council/internal/config"
 	"github.com/umutarmut38/council/internal/fsperm"
 )
@@ -29,7 +29,7 @@ type BuildCheck struct {
 }
 
 func revParse(repoRoot, ref string) (string, error) {
-	out, err := exec.Command("git", "-C", repoRoot, "rev-parse", ref).Output()
+	out, err := cmdrun.Output(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", repoRoot, "rev-parse", ref}})
 	if err != nil {
 		return "", err
 	}
@@ -71,10 +71,10 @@ func (c *Controller) RunBuildChecks() ([]BuildCheck, error) {
 		// are included — a plain `git diff` omits untracked files, which would
 		// hide an implementation that builds a project from scratch. Staging is
 		// best-effort, but a failure here can hide work, so record it.
-		if out, addErr := exec.Command("git", "-C", wt.Path, "add", "-A").CombinedOutput(); addErr != nil {
-			res.Warnings = append(res.Warnings, fmt.Sprintf("git add -A: %v: %s", addErr, strings.TrimSpace(string(out))))
+		if _, addErr := cmdrun.CombinedOutput(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", wt.Path, "add", "-A"}}); addErr != nil {
+			res.Warnings = append(res.Warnings, fmt.Sprintf("git add -A: %v", addErr))
 		}
-		diff, derr := exec.Command("git", "-C", wt.Path, "diff", "--cached", base).Output()
+		diff, derr := cmdrun.Output(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", wt.Path, "diff", "--cached", base}})
 		if derr != nil {
 			res.Warnings = append(res.Warnings, fmt.Sprintf("git diff --cached %s: %v", base, derr))
 		} else if len(strings.TrimSpace(string(diff))) > 0 {
@@ -136,13 +136,11 @@ func (c *Controller) runCheck(dir, agent string) bool {
 func runInDir(dir string, args []string, timeout time.Duration, maxOutput int) (out string, timedOut bool, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-	cmd.Dir = dir
-	raw, err := cmd.CombinedOutput()
-	if len(raw) > maxOutput {
-		raw = append(raw[:maxOutput], []byte("\n[output truncated]\n")...)
-	}
-	return string(raw), ctx.Err() == context.DeadlineExceeded, err
+	raw, err := cmdrun.CombinedOutput(ctx, cmdrun.Spec{Name: args[0], Args: args[1:], Dir: dir, MaxOutput: maxOutput})
+	// Unwrap to the underlying exec error so the per-agent check log keeps its
+	// compact "FAIL: exit status N" line (the captured output is logged
+	// separately).
+	return string(raw), ctx.Err() == context.DeadlineExceeded, errors.Unwrap(err)
 }
 
 // Survivors returns the agents whose implementation changed something and passed.
@@ -412,7 +410,7 @@ func (c *Controller) PlanAdopt(override string) (AdoptPlan, error) {
 	}
 	plan := AdoptPlan{Agent: agentName, DiffPath: diffPath}
 
-	if out, err := exec.Command("git", "-C", c.repoRoot, "apply", "--numstat", diffPath).Output(); err == nil {
+	if out, err := cmdrun.Output(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", c.repoRoot, "apply", "--numstat", diffPath}}); err == nil {
 		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 			fields := strings.Fields(line)
 			if len(fields) >= 3 {
@@ -421,7 +419,7 @@ func (c *Controller) PlanAdopt(override string) (AdoptPlan, error) {
 		}
 	}
 	plan.DirtyFiles = c.DirtyFiles()
-	if out, checkErr := exec.Command("git", "-C", c.repoRoot, "apply", "--check", "--3way", diffPath).CombinedOutput(); checkErr != nil {
+	if out, checkErr := cmdrun.CombinedOutput(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", c.repoRoot, "apply", "--check", "--3way", diffPath}}); checkErr != nil {
 		plan.CheckError = strings.TrimSpace(string(out))
 		if plan.CheckError == "" {
 			plan.CheckError = checkErr.Error()
@@ -432,7 +430,7 @@ func (c *Controller) PlanAdopt(override string) (AdoptPlan, error) {
 
 // DirtyFiles lists uncommitted changes in the repo's working tree.
 func (c *Controller) DirtyFiles() []string {
-	out, err := exec.Command("git", "-C", c.repoRoot, "status", "--porcelain").Output()
+	out, err := cmdrun.Output(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", c.repoRoot, "status", "--porcelain"}})
 	if err != nil {
 		return nil
 	}
@@ -477,8 +475,8 @@ func (c *Controller) Adopt(override string) (adopted string, files []string, err
 	if plan.CheckError != "" {
 		return "", nil, fmt.Errorf("diff for %s does not apply cleanly: %s", plan.Agent, plan.CheckError)
 	}
-	if out, applyErr := exec.Command("git", "-C", c.repoRoot, "apply", "--3way", plan.DiffPath).CombinedOutput(); applyErr != nil {
-		return "", nil, fmt.Errorf("git apply %s: %v: %s", plan.Agent, applyErr, strings.TrimSpace(string(out)))
+	if _, applyErr := cmdrun.CombinedOutput(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", c.repoRoot, "apply", "--3way", plan.DiffPath}}); applyErr != nil {
+		return "", nil, fmt.Errorf("git apply %s: %w", plan.Agent, applyErr)
 	}
 	_ = c.run.RecordAdoption(plan.Agent, plan.Files)
 	return plan.Agent, plan.Files, nil
