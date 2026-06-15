@@ -5,13 +5,15 @@ package orchestrate
 // implementations against each other.
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/umutarmut38/council/internal/cmdrun"
 )
 
 // WorktreePath returns the live worktree directory for an agent's build in
@@ -65,7 +67,7 @@ func (c *Controller) DiffBuilds(agentA, agentB string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	out, err := exec.Command("git", "-C", c.repoRoot, "diff", treeA, treeB).Output()
+	out, err := cmdrun.Output(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", c.repoRoot, "diff", treeA, treeB}})
 	if err != nil {
 		return "", fmt.Errorf("git diff %s..%s: %w", agentA, agentB, err)
 	}
@@ -79,10 +81,10 @@ func (c *Controller) worktreeTree(agent string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("%s's worktree is gone (cleaned?); only the captured diff vs base is available", agent)
 	}
-	if out, err := exec.Command("git", "-C", wt, "add", "-A").CombinedOutput(); err != nil {
-		return "", fmt.Errorf("git add -A in %s: %v: %s", agent, err, strings.TrimSpace(string(out)))
+	if _, err := cmdrun.CombinedOutput(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", wt, "add", "-A"}}); err != nil {
+		return "", fmt.Errorf("git add -A in %s: %w", agent, err)
 	}
-	out, err := exec.Command("git", "-C", wt, "write-tree").Output()
+	out, err := cmdrun.Output(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", wt, "write-tree"}})
 	if err != nil {
 		return "", fmt.Errorf("git write-tree in %s: %w", agent, err)
 	}

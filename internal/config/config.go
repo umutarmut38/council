@@ -1,15 +1,16 @@
 package config
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/umutarmut38/council/internal/cmdrun"
 	"gopkg.in/yaml.v3"
 )
 
@@ -482,7 +483,7 @@ func findLocalConfigFrom(start string) string {
 }
 
 func gitToplevel(dir string) string {
-	out, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Output()
+	out, err := cmdrun.Output(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", dir, "rev-parse", "--show-toplevel"}})
 	if err != nil {
 		return ""
 	}
