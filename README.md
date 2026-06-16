@@ -132,7 +132,9 @@ make build
 | Linux arm64/amd64 | Primary target. |
 | Windows arm64/amd64 | Supported via native pseudo-terminals (ConPTY). Use Windows Terminal for best results; WSL still works if you prefer it. |
 
-See [Requirements](docs/requirements.md) for more detail.
+Windows is supported but still maturing: the build is a required CI check while
+the full Windows test suite is allowed to fail. See [Windows Support](docs/windows.md)
+for the exact stance, and [Requirements](docs/requirements.md) for more detail.
 
 ## Quick Start
 
@@ -186,6 +188,9 @@ Run the council flow from the composer:
 /review
 /adopt
 ```
+
+See the [terminal demo](docs/demo.md) for a recorded walkthrough you can
+regenerate with VHS.
 
 What happens:
 
@@ -254,11 +259,13 @@ The full docs are in `docs/` and can be published with GitHub Pages.
 
 | Page | Contents |
 |---|---|
+| [Demo](docs/demo.md) | A reproducible VHS terminal recording of the orchestration workflow. |
 | [Commands](docs/commands.md) | In-chat commands and CLI subcommands. |
 | [Shortcuts](docs/shortcuts.md) | Keyboard shortcuts for panes, pages, overview, settings, and run browsing. |
 | [Workflows](docs/workflows.md) | Multiplexer use, orchestration, roles, personalities, targeting, resume, artifacts. |
 | [Configuration](docs/configuration.md) | YAML reference for agents, terminal quirks, roles, personalities, and local overrides. |
 | [Requirements](docs/requirements.md) | Platform support and runtime requirements. |
+| [Windows Support](docs/windows.md) | What is supported, experimental, and smoke-tested on Windows; recommended terminal and ConPTY limits. |
 | [Architecture](docs/architecture.md) | Package layout, terminal model, orchestration model, trust boundaries. |
 | [Troubleshooting](docs/troubleshooting.md) | Prompt delivery, rendering, folder trust, npm examples, worktree cleanup. |
 | [Release Guide](docs/release.md) | Tagging, artifacts, release checklist, history cleanup. |
