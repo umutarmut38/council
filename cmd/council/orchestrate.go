@@ -45,6 +45,8 @@ func runOrchestration(command string, args []string) error {
 		return councilQueue(args)
 	case "pr":
 		return councilPR(args)
+	case "artifacts":
+		return councilArtifacts(args)
 	}
 	return fmt.Errorf("unknown orchestration command %q", command)
 }

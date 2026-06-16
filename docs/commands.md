@@ -129,6 +129,7 @@ council status [run]                                     show a run's phase, art
 council report [run] [--post]                            write report.md (--post comments on the issue)
 council pr [run] [agent]                                 open a PR from a build branch (via gh)
 council scorecard                                        agent performance across runs
+council artifacts scan [run] [--all]                     scan run artifacts for likely secrets
 council queue add|list|run|clear                         batch issues through council
 council stack detect|set <go|node|rust|python>           set review.check_command
 council clean [--dry-run] [--yes]                        remove council worktrees + branches

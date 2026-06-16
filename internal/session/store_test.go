@@ -61,6 +61,71 @@ func TestStorePrivatePermissions(t *testing.T) {
 	}
 }
 
+func TestStoreRawPromptAndPhaseAreOwnerOnly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permission bits")
+	}
+	root := t.TempDir()
+	store, err := New(filepath.Join(root, "runs"), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePrompt("do the thing"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Raw PTY log dir holds unredacted output; it must be owner-only (0700).
+	if fi, err := os.Stat(store.RawDir); err != nil {
+		t.Fatal(err)
+	} else if perm := fi.Mode().Perm(); perm != 0o700 {
+		t.Fatalf("raw dir mode = %o, want 0700", perm)
+	}
+	if fi, err := os.Stat(filepath.Join(store.RunDir, "prompt.txt")); err != nil {
+		t.Fatal(err)
+	} else if perm := fi.Mode().Perm(); perm != 0o600 {
+		t.Fatalf("prompt mode = %o, want 0600", perm)
+	}
+
+	// Phase subdirectories (plan/vote/build) must also be owner-only.
+	phase, err := OpenAt(store.RunDir, "plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{phase.TranscriptDir, phase.RawDir} {
+		fi, err := os.Stat(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := fi.Mode().Perm(); perm != 0o700 {
+			t.Fatalf("%s mode = %o, want 0700", dir, perm)
+		}
+	}
+}
+
+func TestScanLocatesSecretsByLine(t *testing.T) {
+	text := strings.Join([]string{
+		"line one is fine",
+		"token ghp_0123456789abcdefghijklmnopqrstuvwxyzAB here",
+		"also fine",
+		"password=hunter2hunter2",
+	}, "\n")
+	findings := Scan(text)
+	if len(findings) < 2 {
+		t.Fatalf("expected at least 2 findings, got %d: %+v", len(findings), findings)
+	}
+	if findings[0].Line != 2 {
+		t.Fatalf("first finding line = %d, want 2 (findings: %+v)", findings[0].Line, findings)
+	}
+	for _, f := range findings {
+		if strings.Contains(f.Kind, "ghp_") || strings.Contains(f.Kind, "hunter2") {
+			t.Fatalf("finding kind leaked a secret value: %q", f.Kind)
+		}
+	}
+	if got := Scan("totally clean text\nno secrets at all"); len(got) != 0 {
+		t.Fatalf("clean text should yield no findings, got %+v", got)
+	}
+}
+
 func TestRedactScrubsCommonSecrets(t *testing.T) {
 	in := strings.Join([]string{
 		"key AKIAIOSFODNN7EXAMPLE in env",

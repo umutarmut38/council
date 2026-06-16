@@ -68,6 +68,7 @@ var cliCommands = []CLI{
 	{Name: "report", Use: `report [run] [--post]`, Summary: "write report.md (--post comments on the issue)", Group: GroupOrchestration, RequiresRepo: true},
 	{Name: "pr", Use: `pr [run] [agent]`, Summary: "open a PR from a build branch (via gh)", Group: GroupOrchestration, RequiresRepo: true},
 	{Name: "scorecard", Use: `scorecard`, Summary: "agent performance across runs", Group: GroupOrchestration, RequiresRepo: true},
+	{Name: "artifacts", Use: `artifacts scan [run] [--all]`, Summary: "scan run artifacts for likely secrets", Group: GroupOrchestration, RequiresRepo: true},
 	{Name: "queue", Use: `queue add|list|run|clear`, Summary: "batch issues through council", Group: GroupOrchestration, RequiresRepo: true},
 	{Name: "stack", Use: `stack detect|set <go|node|rust|python>`, Summary: "set review.check_command", Group: GroupOrchestration, RequiresRepo: true},
 	{Name: "clean", Use: `clean [--dry-run] [--yes]`, Summary: "remove council worktrees + branches", Group: GroupOrchestration, RequiresRepo: true},
