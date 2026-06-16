@@ -5,13 +5,22 @@ COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X github.com/umutarmut38/council/internal/version.Version=$(VERSION) -X github.com/umutarmut38/council/internal/version.Commit=$(COMMIT) -X github.com/umutarmut38/council/internal/version.Date=$(DATE)
 
-.PHONY: test vet build release-snapshot clean demo
+.PHONY: test vet build release-snapshot clean demo generate cover
 
 test:
 	go test ./...
 
+# Run the suite with coverage and print the total (matches CI's coverage job).
+cover:
+	go test ./... -covermode=atomic -coverprofile=coverage.out
+	go tool cover -func=coverage.out | tail -n 1
+
 vet:
 	go vet ./...
+
+# Regenerate the generated regions of the docs (command + config reference).
+generate:
+	go generate ./...
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)

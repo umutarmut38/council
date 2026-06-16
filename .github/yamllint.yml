@@ -1,0 +1,19 @@
+# yamllint configuration for the example config files under examples/, used by
+# the "Validate example configs" job in .github/workflows/quality.yml.
+#
+# Cosmetic rules are relaxed so the hand-written, comment-heavy examples pass;
+# the goal is to catch real problems: invalid syntax, duplicate keys,
+# inconsistent indentation, tabs, trailing whitespace, and missing final
+# newlines.
+extends: default
+
+rules:
+  # Examples are documentation snippets, not standalone streams, so they omit
+  # the "---" document marker and use long explanatory comment lines.
+  document-start: disable
+  line-length: disable
+  comments: disable
+  comments-indentation: disable
+  # Allow plain booleans without flagging mapping keys.
+  truthy:
+    check-keys: false
