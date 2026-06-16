@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/umutarmut38/council/internal/agent"
+	"github.com/umutarmut38/council/internal/command"
 	"github.com/umutarmut38/council/internal/config"
 	"github.com/umutarmut38/council/internal/orchestrate"
 	runstore "github.com/umutarmut38/council/internal/session"
@@ -33,8 +34,7 @@ func mainExitCode(args []string) int {
 
 func run(args []string) error {
 	if len(args) >= 1 {
-		switch args[0] {
-		case "version", "--version", "-v":
+		if c, ok := command.LookupCLI(args[0]); ok && c.Name == "version" {
 			fmt.Println(version.String())
 			return nil
 		}
@@ -52,12 +52,8 @@ func run(args []string) error {
 		return councilTrust(args[1:])
 	}
 
-	if len(args) >= 1 {
-		switch args[0] {
-		case "plan", "vote", "build", "run", "review", "adopt", "clean", "clean-runs",
-			"status", "resume", "report", "stack", "scorecard", "queue", "pr":
-			return runOrchestration(args[0], args[1:])
-		}
+	if len(args) >= 1 && command.IsOrchestration(args[0]) {
+		return runOrchestration(args[0], args[1:])
 	}
 
 	flags := flag.NewFlagSet("council", flag.ContinueOnError)
@@ -199,30 +195,5 @@ func parseAgentList(value string) []string {
 }
 
 func printUsage() {
-	fmt.Println(`Usage:
-  council [--agents claude,codex] [--no-local-config]
-  council [--agents claude,codex] ask "<prompt>"
-  council config init [--force]       write the default (safe) config
-  council config wizard               interactive setup
-  council config add-agent <preset>   add a known agent CLI to the config
-  council doctor                      check config, commands, repo, run dirs
-  council trust [--revoke|--show]     trust this repo's .council.yaml
-  council version
-
-Orchestration (each phase runs in live panes, one git worktree per agent):
-  council plan  "<issue>" | --file issue.md | --issue 123
-  council vote  [run]            tally ranked votes into a winner
-  council build [run]            all agents implement the winning plan
-  council review [run]           gate builds + reviewers pick the best
-  council adopt [run] [agent] [--dry-run] [--yes]
-  council run   "<issue>"        plan -> vote -> build
-  council resume [run]           reopen an older run with fresh agent processes
-  council status [run]           show a run's phase, artifacts, and winners
-  council report [run] [--post]  write report.md (--post comments on the issue)
-  council pr [run] [agent]       open a PR from a build branch (via gh)
-  council scorecard              agent performance across runs
-  council queue add|list|run|clear   batch issues through council
-  council stack detect|set <go|node|rust|python>   set review.check_command
-  council clean [--dry-run] [--yes]  remove council worktrees + branches
-  council clean-runs [--keep N] [--dry-run]  prune old run artifacts`)
+	fmt.Println(command.UsageString())
 }

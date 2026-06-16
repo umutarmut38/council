@@ -7,6 +7,8 @@ package tui
 import (
 	"fmt"
 	"strings"
+
+	"github.com/umutarmut38/council/internal/command"
 )
 
 // paletteMaxRows caps the palette so it never swallows the panes.
@@ -23,14 +25,15 @@ func (m Model) paletteActive() bool {
 
 // paletteMatches returns the commands matching the typed prefix, recommended
 // stage commands first (in stage order), the rest in declaration order.
-func (m Model) paletteMatches() []commandInfo {
+func (m Model) paletteMatches() []command.Composer {
 	prefix := strings.ToLower(strings.TrimPrefix(m.PromptInput, "/"))
-	byName := map[string]commandInfo{}
-	for _, c := range commands {
+	all := command.Composers()
+	byName := map[string]command.Composer{}
+	for _, c := range all {
 		byName[c.Name] = c
 	}
 
-	matches := make([]commandInfo, 0, len(commands))
+	matches := make([]command.Composer, 0, len(all))
 	seen := map[string]bool{}
 	for _, name := range m.stageCommandNames() {
 		c, ok := byName[name]
@@ -40,7 +43,7 @@ func (m Model) paletteMatches() []commandInfo {
 		matches = append(matches, c)
 		seen[name] = true
 	}
-	for _, c := range commands {
+	for _, c := range all {
 		if seen[c.Name] || !strings.HasPrefix(c.Name, prefix) {
 			continue
 		}

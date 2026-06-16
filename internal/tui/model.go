@@ -227,53 +227,6 @@ func (m Model) chromeLines() int {
 	return c
 }
 
-type commandInfo struct {
-	Name string
-	Args string
-	Desc string
-}
-
-// commands drives both /help text and the live suggestion line. Keep it in
-// sync with the cases handled in handleCommand.
-var commands = []commandInfo{
-	{"all", "msg", "send to every agent"},
-	{"send", "agent msg", "send to one agent"},
-	{"direct", "[agent]", "type straight into a pane"},
-	{"zoom", "[agent]", "fullscreen the focused pane"},
-	{"page", "next|prev|n", "switch pane pages"},
-	{"overview", "", "show all agents"},
-	{"settings", "", "adjust layout for this session"},
-	{"runs", "", "browse previous runs"},
-	{"resume", "[run]", "resume an older run"},
-	{"focus", "agent", "focus a pane"},
-	{"target", "all|focus|personality|category", "scope messages AND phases (plan/vote/build)"},
-	{"show", "all|personality|category", "choose displayed personalities"},
-	{"hide", "personality", "hide a personality"},
-	{"clear", "[agent]", "clear pane output"},
-	{"save", "", "save transcripts"},
-	{"plan", "<issue>", "council: each agent drafts a plan"},
-	{"vote", "", "council: agents rank the plans"},
-	{"build", "", "council: stage winning plan in worktrees (no start)"},
-	{"start-build", "", "council: send the build prompt staged by /build"},
-	{"review", "", "council: check + vote the best build"},
-	{"adopt", "[agent]", "council: preview then apply a build (confirm to apply)"},
-	{"preview", "[agent]", "council: show what /adopt would change"},
-	{"compare", "", "council: inspect builds — files, git-style diffs vs base or between builds"},
-	{"judge", "plan|build <agent|letter>", "council: pick a winner yourself"},
-	{"refine", "", "council: winner improves its plan from the vote critiques"},
-	{"artifacts", "", "browse this run's plans/votes/diffs/logs"},
-	{"report", "", "write report.md for the run"},
-	{"restart", "agent", "terminate + relaunch one pane"},
-	{"resend", "agent", "resend the current phase prompt"},
-	{"nudge", "[agent]", "remind agent(s) to write their artifact"},
-	{"attention", "agent [off]", "flag a pane as needing your input"},
-	{"finish", "", "force-collect the current phase now"},
-	{"status", "", "show the active run/phase"},
-	{"clean", "", "preview then remove council worktrees (confirm to remove)"},
-	{"help", "", "list commands"},
-	{"quit", "", "quit council"},
-}
-
 func NewModel(sessions []*agent.Session, store *runstore.Store, maxScrollback int, initialPrompt string, initialPromptDelay time.Duration, launch func(*agent.Session), orch *orchestrate.Controller) Model {
 	return NewModelWithPrompts(sessions, store, maxScrollback, initialPrompt, nil, initialPromptDelay, launch, orch)
 }
