@@ -41,9 +41,21 @@ func runConfigCommand(sub string, args []string) error {
 	}
 }
 
-// runConfigSchema prints the configuration reference as Markdown — the same
-// content generated into docs/configuration.md, so it can be piped or diffed.
-func runConfigSchema(_ []string) error {
+// runConfigSchema prints the configuration reference. By default it emits the
+// Markdown tables generated into docs/configuration.md (so it can be piped or
+// diffed); --json emits a machine-readable JSON Schema (draft 2020-12) for
+// editor integrations.
+func runConfigSchema(args []string) error {
+	flags := flag.NewFlagSet("config schema", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	asJSON := flags.Bool("json", false, "emit a JSON Schema (draft 2020-12) instead of Markdown")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *asJSON {
+		fmt.Println(config.SchemaJSONString())
+		return nil
+	}
 	fmt.Println("# Configuration schema")
 	fmt.Println()
 	fmt.Println(config.SchemaMarkdown())

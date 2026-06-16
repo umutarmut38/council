@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"reflect"
 	"strings"
@@ -191,5 +192,23 @@ func TestRunConfigSchemaPrintsMarkdown(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("config schema output missing %q in:\n%s", want, out)
 		}
+	}
+}
+
+func TestRunConfigSchemaJSON(t *testing.T) {
+	out := captureOutput(t, func() {
+		if err := runConfigCommand("schema", []string{"--json"}); err != nil {
+			t.Fatalf("config schema --json: %v", err)
+		}
+	})
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("config schema --json did not print valid JSON: %v\n%s", err, out)
+	}
+	if doc["$schema"] != "https://json-schema.org/draft/2020-12/schema" {
+		t.Fatalf("schema JSON missing draft 2020-12 $schema: %v", doc["$schema"])
+	}
+	if _, ok := doc["properties"].(map[string]any)["agents"]; !ok {
+		t.Fatalf("schema JSON missing agents property")
 	}
 }

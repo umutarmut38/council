@@ -1,0 +1,71 @@
+package config
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+)
+
+// Validate checks a config for structural problems that would make a run
+// misbehave. Call it on a normalized config (Load and SelectAgents normalize
+// first). It returns the first hard error found, or nil when the config is
+// usable.
+//
+// Validate is deliberately stricter than the lenient coercions in Normalize: it
+// is the gate behind the documented validation examples and `council doctor
+// --fix`, surfacing typos the runtime would otherwise paper over — an unknown
+// policy.mode, an enabled agent with no command, or an unknown terminal
+// renderer/send_mode/pty_size.
+func (c Config) Validate() error {
+	if err := ValidateAgentNames(c); err != nil {
+		return err
+	}
+
+	names := make([]string, 0, len(c.Agents))
+	for name := range c.Agents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		agent := c.Agents[name]
+		if agent.Enabled && len(agent.Command) == 0 {
+			return fmt.Errorf("agent %q is enabled but has no command", name)
+		}
+		if err := validateTerminal(name, agent.Terminal); err != nil {
+			return err
+		}
+	}
+
+	if mode := strings.TrimSpace(c.Policy.Mode); mode != "" && !knownPolicyMode(mode) {
+		return fmt.Errorf("policy.mode %q is unknown (use safe|normal|aggressive)", c.Policy.Mode)
+	}
+	return nil
+}
+
+func knownPolicyMode(mode string) bool {
+	switch strings.ToLower(mode) {
+	case PolicySafe, PolicyNormal, PolicyAggressive:
+		return true
+	default:
+		return false
+	}
+}
+
+func validateTerminal(agent string, t TerminalConfig) error {
+	switch strings.ToLower(strings.TrimSpace(t.Renderer)) {
+	case "", "screen", "transcript":
+	default:
+		return fmt.Errorf("agent %q: unknown terminal.renderer %q (use screen|transcript)", agent, t.Renderer)
+	}
+	switch strings.ToLower(strings.TrimSpace(t.SendMode)) {
+	case "", "type", "paste":
+	default:
+		return fmt.Errorf("agent %q: unknown terminal.send_mode %q (use type|paste)", agent, t.SendMode)
+	}
+	switch strings.ToLower(strings.TrimSpace(t.PTYSize)) {
+	case "", "pane", "fixed":
+	default:
+		return fmt.Errorf("agent %q: unknown terminal.pty_size %q (use pane|fixed)", agent, t.PTYSize)
+	}
+	return nil
+}
