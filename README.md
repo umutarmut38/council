@@ -189,6 +189,9 @@ Run the council flow from the composer:
 /adopt
 ```
 
+See the [terminal demo](docs/demo.md) for a recorded walkthrough you can
+regenerate with VHS.
+
 What happens:
 
 | Phase | Output |
@@ -256,6 +259,7 @@ The full docs are in `docs/` and can be published with GitHub Pages.
 
 | Page | Contents |
 |---|---|
+| [Demo](docs/demo.md) | A reproducible VHS terminal recording of the orchestration workflow. |
 | [Commands](docs/commands.md) | In-chat commands and CLI subcommands. |
 | [Shortcuts](docs/shortcuts.md) | Keyboard shortcuts for panes, pages, overview, settings, and run browsing. |
 | [Workflows](docs/workflows.md) | Multiplexer use, orchestration, roles, personalities, targeting, resume, artifacts. |

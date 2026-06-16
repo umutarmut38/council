@@ -8,6 +8,8 @@ can orchestrate a plan → vote → build → review → adopt workflow.
 
 ## Start Here
 
+- [Demo](demo.md) — a reproducible VHS terminal recording of the full
+  plan → vote → build → review → adopt workflow.
 - [Commands](commands.md) — in-chat commands and CLI subcommands.
 - [Shortcuts](shortcuts.md) — keyboard shortcuts for panes, pages, direct input,
   overview, settings, and run browsing.

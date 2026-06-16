@@ -11,6 +11,7 @@ include:
   - architecture.md
   - commands.md
   - configuration.md
+  - demo.md
   - release.md
   - requirements.md
   - shortcuts.md
