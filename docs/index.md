@@ -17,6 +17,8 @@ can orchestrate a plan → vote → build → review → adopt workflow.
   quirks, orchestration roles, personalities, and per-repo overrides.
 - [Requirements](requirements.md) — supported platforms, build requirements,
   runtime requirements, and agent-specific notes.
+- [Windows Support](windows.md) — what is supported, experimental, and only
+  smoke-tested on Windows, plus recommended terminal and ConPTY limitations.
 - [Architecture](architecture.md) — package layout, terminal model,
   orchestration model, and trust boundaries.
 - [Troubleshooting](troubleshooting.md) — prompt delivery, rendering, folder
