@@ -149,6 +149,10 @@ type Model struct {
 	RunIndex             int
 	DisplayPersonalities map[string]bool
 
+	// recentCommands holds the most-recently dispatched composer command
+	// names, newest first, so the palette can surface them near the top.
+	recentCommands []string
+
 	// setupStatus is the observability snapshot of pre-launch setup/env,
 	// shown by /setup. Nil when no setup/env was configured.
 	setupStatus *setup.Status

@@ -237,6 +237,7 @@ func (m *Model) handleCommand(text string) (bool, tea.Cmd) {
 		m.Status = "unknown command: " + fields[0]
 		return true, nil
 	}
+	m.recordRecentCommand(cmd.Name)
 	rest := strings.TrimSpace(strings.TrimPrefix(text, fields[0]))
 	switch cmd.Name {
 	case "all":

@@ -114,6 +114,10 @@ type Composer struct {
 	// Desc is the short description shown in the palette and the suggestion
 	// line.
 	Desc string
+	// Key is the global keybinding that triggers the same action outside the
+	// composer (e.g. "Ctrl+G"), shown next to the command in the palette.
+	// Empty when the command has no direct shortcut.
+	Key string
 }
 
 // composerCommands drives both /help text and the command palette. Order is
@@ -122,19 +126,19 @@ type Composer struct {
 var composerCommands = []Composer{
 	{Name: "all", Aliases: []string{"broadcast"}, Args: "msg", Desc: "send to every agent"},
 	{Name: "send", Args: "agent msg", Desc: "send to one agent"},
-	{Name: "direct", Aliases: []string{"window"}, Args: "[agent]", Desc: "type straight into a pane"},
-	{Name: "zoom", Aliases: []string{"full"}, Args: "[agent]", Desc: "fullscreen the focused pane"},
-	{Name: "page", Args: "next|prev|n", Desc: "switch pane pages"},
-	{Name: "overview", Aliases: []string{"agents"}, Args: "", Desc: "show all agents"},
+	{Name: "direct", Aliases: []string{"window"}, Args: "[agent]", Desc: "type straight into a pane", Key: "F2"},
+	{Name: "zoom", Aliases: []string{"full"}, Args: "[agent]", Desc: "fullscreen the focused pane", Key: "Ctrl+F"},
+	{Name: "page", Args: "next|prev|n", Desc: "switch pane pages", Key: "Ctrl+N/P"},
+	{Name: "overview", Aliases: []string{"agents"}, Args: "", Desc: "show all agents", Key: "Ctrl+G"},
 	{Name: "settings", Aliases: []string{"prefs"}, Args: "", Desc: "adjust layout for this session"},
 	{Name: "runs", Args: "", Desc: "browse previous runs"},
 	{Name: "resume", Args: "[run]", Desc: "resume an older run"},
 	{Name: "focus", Args: "agent", Desc: "focus a pane"},
-	{Name: "target", Args: "all|focus|personality|category", Desc: "scope messages AND phases (plan/vote/build)"},
+	{Name: "target", Args: "all|focus|personality|category", Desc: "scope messages AND phases (plan/vote/build)", Key: "Ctrl+B"},
 	{Name: "show", Args: "all|personality|category", Desc: "choose displayed personalities"},
 	{Name: "hide", Args: "personality", Desc: "hide a personality"},
 	{Name: "clear", Args: "[agent]", Desc: "clear pane output"},
-	{Name: "save", Args: "", Desc: "save transcripts"},
+	{Name: "save", Args: "", Desc: "save transcripts", Key: "Ctrl+S"},
 	{Name: "plan", Args: "<issue>", Desc: "council: each agent drafts a plan"},
 	{Name: "vote", Args: "", Desc: "council: agents rank the plans"},
 	{Name: "build", Args: "", Desc: "council: stage winning plan in worktrees (no start)"},
@@ -156,7 +160,7 @@ var composerCommands = []Composer{
 	{Name: "setup", Args: "", Desc: "show pre-launch setup/env status"},
 	{Name: "clean", Args: "", Desc: "preview then remove council worktrees (confirm to remove)"},
 	{Name: "help", Args: "", Desc: "list commands"},
-	{Name: "quit", Aliases: []string{"exit"}, Args: "", Desc: "quit council"},
+	{Name: "quit", Aliases: []string{"exit"}, Args: "", Desc: "quit council", Key: "Ctrl+X"},
 }
 
 // Composers returns the ordered in-chat command reference.

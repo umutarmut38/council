@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/umutarmut38/council/internal/agent"
+	"github.com/umutarmut38/council/internal/command"
 	"github.com/umutarmut38/council/internal/config"
 	"github.com/umutarmut38/council/internal/orchestrate"
 )
@@ -340,6 +341,133 @@ func TestStageCommandsFollowThePipeline(t *testing.T) {
 	m.Agents[0].Attention = true
 	if top() != "attention" {
 		t.Fatalf("blocked pane: top = %q, want attention", top())
+	}
+}
+
+func indexOfMatch(matches []command.Composer, name string) int {
+	for i, c := range matches {
+		if c.Name == name {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestRecordRecentCommandDedupesAndCaps(t *testing.T) {
+	m := hudModel(t, "a")
+	m.recordRecentCommand("all")
+	m.recordRecentCommand("send")
+	m.recordRecentCommand("all") // re-used: moves to front, no duplicate
+	if got := strings.Join(m.recentCommands, ","); got != "all,send" {
+		t.Fatalf("recent = %q, want %q", got, "all,send")
+	}
+
+	for _, name := range []string{"a", "b", "c", "d", "e", "f", "g"} {
+		m.recordRecentCommand(name)
+	}
+	if len(m.recentCommands) != 6 {
+		t.Fatalf("recent capped at %d, want 6", len(m.recentCommands))
+	}
+	if m.recentCommands[0] != "g" {
+		t.Fatalf("newest recent = %q, want g", m.recentCommands[0])
+	}
+}
+
+func TestHandleCommandRecordsRecentCanonical(t *testing.T) {
+	m := hudModel(t, "a")
+	m.handleCommand("/help")
+	if len(m.recentCommands) == 0 || m.recentCommands[0] != "help" {
+		t.Fatalf("recent after /help = %v, want help first", m.recentCommands)
+	}
+	// An alias is recorded under its canonical name.
+	m.handleCommand("/exit")
+	if m.recentCommands[0] != "quit" {
+		t.Fatalf("recent after /exit = %v, want quit first", m.recentCommands)
+	}
+	// Unknown commands are not recorded.
+	m.handleCommand("/nope")
+	if m.recentCommands[0] != "quit" {
+		t.Fatalf("unknown command polluted recents: %v", m.recentCommands)
+	}
+}
+
+func TestPaletteOrdersRecentAfterRecommended(t *testing.T) {
+	m := hudModel(t, "a")
+	m.recordRecentCommand("quit") // declared last, never stage-recommended
+	m.PromptInput = "/"
+
+	matches := m.paletteMatches()
+	if matches[0].Name != "plan" {
+		t.Fatalf("recommended should stay first, got %q", matches[0].Name)
+	}
+	quitAt := indexOfMatch(matches, "quit")
+	sendAt := indexOfMatch(matches, "send")
+	if quitAt == -1 || sendAt == -1 {
+		t.Fatalf("expected both quit and send in matches (quit=%d send=%d)", quitAt, sendAt)
+	}
+	if quitAt >= sendAt {
+		t.Fatalf("recent /quit (%d) should sort ahead of declaration-order /send (%d)", quitAt, sendAt)
+	}
+}
+
+func TestCommandDisabledReasonMirrorsGuards(t *testing.T) {
+	m := hudModel(t, "a") // orch == nil
+
+	if got := m.commandDisabledReason("build"); got != "needs a git repo" {
+		t.Fatalf("build disabled = %q, want needs a git repo", got)
+	}
+	if got := m.commandDisabledReason("start-build"); got != "run /build first" {
+		t.Fatalf("start-build disabled = %q", got)
+	}
+	if got := m.commandDisabledReason("finish"); got != "no phase in progress" {
+		t.Fatalf("finish disabled = %q", got)
+	}
+	for _, always := range []string{"help", "runs", "settings"} {
+		if got := m.commandDisabledReason(always); got != "" {
+			t.Fatalf("%s should never be disabled, got %q", always, got)
+		}
+	}
+
+	// Preconditions met: the reasons clear.
+	m.phase = "vote"
+	if got := m.commandDisabledReason("finish"); got != "" {
+		t.Fatalf("finish in a phase should be enabled, got %q", got)
+	}
+	m.pendingBuild = map[string]string{"a": "do it"}
+	if got := m.commandDisabledReason("start-build"); got != "" {
+		t.Fatalf("start-build with staged work should be enabled, got %q", got)
+	}
+}
+
+func TestPaletteNextHintFollowsProgress(t *testing.T) {
+	m := hudModel(t, "a")
+	if hint := m.paletteNextHint(); !strings.Contains(hint, "/plan") {
+		t.Fatalf("idle next hint = %q, want /plan", hint)
+	}
+	m.progress = &runProgress{Next: "/vote"}
+	if hint := m.paletteNextHint(); !strings.Contains(hint, "/vote") {
+		t.Fatalf("running next hint = %q, want /vote", hint)
+	}
+}
+
+func TestPaletteRendersKeysReasonsAndNext(t *testing.T) {
+	m := hudModel(t, "a")
+
+	m.PromptInput = "/"
+	if joined := strings.Join(m.renderPalette(), "\n"); !strings.Contains(joined, "recommended next:") {
+		t.Fatalf("palette header missing recommended next:\n%s", joined)
+	}
+
+	// A command with a keybinding shows it.
+	m.PromptInput = "/overview"
+	if joined := strings.Join(m.renderPalette(), "\n"); !strings.Contains(joined, "Ctrl+G") {
+		t.Fatalf("palette should show the /overview keybinding:\n%s", joined)
+	}
+
+	// A command that can't run yet is shown with its reason.
+	m.PromptInput = "/build"
+	if joined := strings.Join(m.renderPalette(), "\n"); !strings.Contains(joined, "disabled — needs a git repo") {
+		t.Fatalf("palette should explain why /build is disabled:\n%s", joined)
 	}
 }
 
