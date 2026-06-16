@@ -169,6 +169,7 @@ func launchTUIWithTranscripts(sessions []*agent.Session, store *runstore.Store, 
 	}
 
 	model := tui.NewModelWithConfig(sessions, store, cfg, initialPrompt, initialPrompts, time.Duration(cfg.UI.InitialPromptDelayMs)*time.Millisecond, launch, orch)
+	model.SetSetupStatus(setupStatus)
 	model.LoadTranscripts(transcripts)
 	// 120 FPS (bubbletea's max): agent PTYs stream constantly, and the default
 	// frame budget makes scrolling output feel choppy.

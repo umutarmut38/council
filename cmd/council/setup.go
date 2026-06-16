@@ -8,7 +8,9 @@ package main
 // the command is, is entirely the user's choice.
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -17,21 +19,31 @@ import (
 	"time"
 
 	"github.com/umutarmut38/council/internal/config"
+	"github.com/umutarmut38/council/internal/setup"
 )
+
+// bgProc pairs a supervised background process with its observability handle so
+// teardown can record the result.
+type bgProc struct {
+	cmd *exec.Cmd
+	h   *setup.Handle
+}
 
 // setupSession tracks the background processes started for a council session
 // so they can be torn down on exit.
 type setupSession struct {
-	background []*exec.Cmd
+	background []bgProc
 }
 
 // One council invocation runs setup at most once, regardless of how many agent
 // phases it drives (the interactive multiplexer, or `council run` chaining
 // plan→vote→build). stopSetup() tears the background processes down; main()
-// calls it once on exit.
+// calls it once on exit. setupStatus is the observability snapshot the TUI
+// renders via /setup.
 var (
-	setupState *setupSession
-	setupDone  bool
+	setupState  *setupSession
+	setupStatus *setup.Status
+	setupDone   bool
 )
 
 // ensureSetup runs cfg.Setup before agents launch, exactly once per process.
@@ -42,6 +54,14 @@ func ensureSetup(cfg config.Config) error {
 		return nil
 	}
 	setupDone = true
+	// Surface the exported env keys (never values) even when no setup commands
+	// run, so /setup can show what agents inherit.
+	if len(cfg.Env) == 0 && len(cfg.Setup) == 0 {
+		return nil
+	}
+	status := setup.New()
+	status.SetEnvKeys(cfg.Env)
+	setupStatus = status
 	if len(cfg.Setup) == 0 {
 		return nil
 	}
@@ -49,40 +69,58 @@ func ensureSetup(cfg config.Config) error {
 	setupState = sess
 
 	for _, sc := range cfg.Setup {
+		kind := setup.KindOneShot
+		if sc.Background {
+			kind = setup.KindBackground
+		}
+		h := status.Begin(sc.Label(), sc.Command, kind, sc.WaitForPort)
+
 		if len(sc.Command) == 0 {
+			h.Failed(errors.New("command is required"))
 			sess.stop()
 			return fmt.Errorf("setup %q: command is required", sc.Label())
 		}
 		if _, lookErr := exec.LookPath(sc.Command[0]); lookErr != nil {
+			h.Failed(fmt.Errorf("%s not found in PATH", sc.Command[0]))
 			sess.stop()
 			return fmt.Errorf("setup %q: %s not found in PATH", sc.Label(), sc.Command[0])
 		}
 
+		// Keep setup output visible off the TUI (stderr) and capture it for
+		// /setup. One MultiWriter feeds both streams to keep them interleaved.
+		out := io.MultiWriter(os.Stderr, h.Writer())
+
 		if sc.Background {
 			fmt.Fprintf(os.Stderr, "council: starting %q\n", sc.Label())
 			cmd := exec.Command(sc.Command[0], sc.Command[1:]...)
-			cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr // visible, off the TUI
+			cmd.Stdout, cmd.Stderr = out, out
 			if startErr := cmd.Start(); startErr != nil {
+				h.Failed(startErr)
 				sess.stop()
 				return fmt.Errorf("setup %q: %w", sc.Label(), startErr)
 			}
-			sess.background = append(sess.background, cmd)
+			h.Running(cmd.Process.Pid)
+			sess.background = append(sess.background, bgProc{cmd: cmd, h: h})
 			if sc.WaitForPort > 0 {
 				if waitErr := waitForPort(sc.WaitForPort, 10*time.Second); waitErr != nil {
+					h.Failed(waitErr)
 					sess.stop()
 					return fmt.Errorf("setup %q: %w", sc.Label(), waitErr)
 				}
+				h.Ready()
 			}
 			continue
 		}
 
 		fmt.Fprintf(os.Stderr, "council: running %q\n", sc.Label())
 		cmd := exec.Command(sc.Command[0], sc.Command[1:]...)
-		cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
+		cmd.Stdout, cmd.Stderr = out, out
 		if runErr := cmd.Run(); runErr != nil {
+			h.Failed(runErr)
 			sess.stop()
 			return fmt.Errorf("setup %q failed: %w", sc.Label(), runErr)
 		}
+		h.Succeeded()
 	}
 	return nil
 }
@@ -101,23 +139,25 @@ func stopSetup() {
 func (s *setupSession) stop() {
 	const grace = 800 * time.Millisecond
 	var wg sync.WaitGroup
-	for _, cmd := range s.background {
-		if cmd.Process == nil {
+	for _, bp := range s.background {
+		if bp.cmd.Process == nil {
 			continue
 		}
-		_ = cmd.Process.Signal(os.Interrupt)
+		_ = bp.cmd.Process.Signal(os.Interrupt)
 		wg.Add(1)
-		go func(c *exec.Cmd) {
+		go func(bp bgProc) {
 			defer wg.Done()
 			done := make(chan error, 1)
-			go func() { done <- c.Wait() }()
+			go func() { done <- bp.cmd.Wait() }()
 			select {
 			case <-done: // exited within the grace period
+				bp.h.Stopped(nil)
 			case <-time.After(grace):
-				_ = c.Process.Kill()
+				_ = bp.cmd.Process.Kill()
 				<-done // reap the killed process
+				bp.h.Stopped(errors.New("killed after grace period"))
 			}
-		}(cmd)
+		}(bp)
 	}
 	wg.Wait()
 	s.background = nil

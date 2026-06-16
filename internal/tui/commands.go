@@ -12,6 +12,7 @@ import (
 
 	"github.com/umutarmut38/council/internal/agent"
 	"github.com/umutarmut38/council/internal/command"
+	"github.com/umutarmut38/council/internal/setup"
 )
 
 func (m *Model) handlePageCommand(fields []string) {
@@ -333,6 +334,8 @@ func (m *Model) handleCommand(text string) (bool, tea.Cmd) {
 		m.finishPhase()
 	case "status":
 		m.cmdStatus()
+	case "setup":
+		m.cmdSetup()
 	case "clean":
 		m.cmdClean(rest)
 	case "save":
@@ -583,6 +586,25 @@ func (m Model) recipientViewsForCategory(category string) []*agentView {
 		}
 	}
 	return views
+}
+
+// SetSetupStatus attaches the pre-launch setup/env observability snapshot so
+// /setup can render it. A nil status disables the command's output.
+func (m *Model) SetSetupStatus(s *setup.Status) {
+	m.setupStatus = s
+}
+
+// cmdSetup opens the pre-launch setup/env status (command labels, PIDs,
+// lifecycle, readiness, captured output, and exported env keys) in the pager.
+func (m *Model) cmdSetup() {
+	if m.setupStatus == nil {
+		m.Status = "no pre-launch setup or env configured"
+		return
+	}
+	report := m.setupStatus.Snapshot()
+	m.openArtifactText("setup status", report.Render())
+	count := len(report.Commands)
+	m.Status = fmt.Sprintf("setup status — %d command(s), %d exported env key(s)", count, len(report.EnvKeys))
 }
 
 func (m *Model) clearScreens(target string) {

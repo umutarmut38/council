@@ -15,6 +15,7 @@ import (
 	"github.com/umutarmut38/council/internal/config"
 	"github.com/umutarmut38/council/internal/orchestrate"
 	runstore "github.com/umutarmut38/council/internal/session"
+	"github.com/umutarmut38/council/internal/setup"
 )
 
 type TargetMode int
@@ -147,6 +148,10 @@ type Model struct {
 	Runs                 []orchestrate.RunSummary
 	RunIndex             int
 	DisplayPersonalities map[string]bool
+
+	// setupStatus is the observability snapshot of pre-launch setup/env,
+	// shown by /setup. Nil when no setup/env was configured.
+	setupStatus *setup.Status
 
 	// orchestration
 	orch         *orchestrate.Controller

@@ -152,6 +152,7 @@ var composerCommands = []Composer{
 	{Name: "attention", Args: "agent [off]", Desc: "flag a pane as needing your input"},
 	{Name: "finish", Args: "", Desc: "force-collect the current phase now"},
 	{Name: "status", Args: "", Desc: "show the active run/phase"},
+	{Name: "setup", Args: "", Desc: "show pre-launch setup/env status"},
 	{Name: "clean", Args: "", Desc: "preview then remove council worktrees (confirm to remove)"},
 	{Name: "help", Args: "", Desc: "list commands"},
 	{Name: "quit", Aliases: []string{"exit"}, Args: "", Desc: "quit council"},

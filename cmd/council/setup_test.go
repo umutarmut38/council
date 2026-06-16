@@ -12,6 +12,7 @@ import (
 func resetSetup() {
 	setupDone = false
 	setupState = nil
+	setupStatus = nil
 }
 
 func TestEnsureSetupRunsOneShotAndIsIdempotent(t *testing.T) {
@@ -84,7 +85,7 @@ func TestEnsureSetupBackgroundWaitsForPortAndStops(t *testing.T) {
 	if setupState == nil || len(setupState.background) != 1 {
 		t.Fatalf("background process not tracked: %+v", setupState)
 	}
-	cmd := setupState.background[0]
+	cmd := setupState.background[0].cmd
 	stopSetup() // must terminate AND reap the supervised sleeper
 
 	// stop() Waits on each process, so once it returns the sleeper is reaped:
