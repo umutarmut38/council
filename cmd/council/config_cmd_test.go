@@ -176,3 +176,20 @@ func loadGlobalConfig(t *testing.T) config.Config {
 	}
 	return cfg
 }
+
+func TestRunConfigSchemaPrintsMarkdown(t *testing.T) {
+	out := captureOutput(t, func() {
+		if err := runConfigCommand("schema", nil); err != nil {
+			t.Fatalf("config schema: %v", err)
+		}
+	})
+	for _, want := range []string{
+		"# Configuration schema",
+		"### `agents.<name>`",
+		"| `enabled` | bool | `false` | Launch this agent. |",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("config schema output missing %q in:\n%s", want, out)
+		}
+	}
+}

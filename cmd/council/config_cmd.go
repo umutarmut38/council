@@ -34,9 +34,20 @@ func runConfigCommand(sub string, args []string) error {
 		return configWizard()
 	case "add-agent":
 		return configAddAgent(args)
+	case "schema":
+		return runConfigSchema(args)
 	default:
-		return fmt.Errorf("unknown config command %q (init | wizard | add-agent)", sub)
+		return fmt.Errorf("unknown config command %q (init | wizard | add-agent | schema)", sub)
 	}
+}
+
+// runConfigSchema prints the configuration reference as Markdown — the same
+// content generated into docs/configuration.md, so it can be piped or diffed.
+func runConfigSchema(_ []string) error {
+	fmt.Println("# Configuration schema")
+	fmt.Println()
+	fmt.Println(config.SchemaMarkdown())
+	return nil
 }
 
 func initConfig(args []string) error {
