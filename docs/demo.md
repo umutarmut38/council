@@ -3,15 +3,16 @@
 A short terminal recording explains the **plan → vote → build → review → adopt**
 flow faster than static diagrams. The recording is scripted with
 [VHS](https://github.com/charmbracelet/vhs) so it stays reproducible: the script
-is committed to the repo and anyone can regenerate the GIF from source.
+is committed to the repo and anyone can regenerate the recording from source.
 
 <!--
-Once the GIF has been recorded and committed, embed it here:
+Once the MP4 has been recorded and committed, embed it here with a video tag
+(GitHub renders an uploaded .mp4 inline; plain Markdown image syntax does not):
 
-![council orchestration demo](assets/council-demo.gif)
+<video src="assets/council-demo.mp4" controls></video>
 -->
 
-> The recorded GIF (`docs/assets/council-demo.gif`) is generated locally and is
+> The recorded MP4 (`docs/assets/council-demo.mp4`) is generated locally and is
 > not committed, because it requires live agent CLIs to produce. Run the tape
 > (below) to create it.
 
@@ -52,19 +53,20 @@ approximate and is the long pole of the recording; tune it to your
 hardware/agents/models.
 
 Because real runs are minutes long (build most of all), the resulting recording
-is long. To tighten it for sharing you can:
+is long. The tape writes an `.mp4` (a scrubbable, compact video is the sensible
+choice for a multi-minute live demo). To tighten it for sharing you can:
 
 - Lower the fallback build `Sleep` and the `@timeout` ceilings to match your
   machine once you know how long a run actually takes.
 - Add `Set PlaybackSpeed 2` (or higher) near the top of the tape to play the
   recording back faster without re-running the agents.
-- Trim or split the output afterwards, or change the `Output` line to `.mp4` /
-  `.webm` for a smaller, scrubbable file.
+- Trim or split the output afterwards, or change the `Output` line to `.gif` /
+  `.webm` for a different format.
 
 ## Regenerating The Recording
 
 The tape lives at [`council-demo.tape`](assets/council-demo.tape) and writes its
-output to `docs/assets/council-demo.gif`.
+output to `docs/assets/council-demo.mp4`.
 
 1. **Install VHS** — `brew install vhs`, or see the
    [VHS install guide](https://github.com/charmbracelet/vhs#installation).
@@ -86,9 +88,9 @@ output to `docs/assets/council-demo.gif`.
    vhs docs/assets/council-demo.tape
    ```
 
-This produces `docs/assets/council-demo.gif`. To preview without writing a file,
+This produces `docs/assets/council-demo.mp4`. To preview without writing a file,
 use `vhs --publish docs/assets/council-demo.tape`, or change the `Output` line in
-the tape to `.mp4`/`.webm`/`.txt` for a different format.
+the tape to `.gif`/`.webm`/`.txt` for a different format.
 
 The `Wait` timeouts in the tape are safety ceilings; the one fixed `Sleep`
 (build work) is approximate. Tune both to your machine and agents so each phase

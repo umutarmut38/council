@@ -1,7 +1,7 @@
 # council — plan → vote → build → review → adopt demo (live agents)
 #
 # Regenerate with:  vhs docs/assets/council-demo.tape   (from the council repo root)
-# Produces:         docs/assets/council-demo.gif
+# Produces:         docs/assets/council-demo.mp4
 #
 # What it shows:
 #   A full council run driven against the self-contained playground in poc/.
@@ -35,15 +35,15 @@
 #   Optional: poc's headroom proxy only starts if poc sets
 #   experimental.setup_env: true (off by default, so agents run directly).
 
-Output docs/assets/council-demo.gif
+Output docs/assets/council-demo.mp4
 
 # Fail fast if council is not installed rather than recording an error.
 Require council
 
 Set Shell "bash"
 Set FontSize 16
-Set Width 1280
-Set Height 720
+Set Width 1920
+Set Height 1080
 Set Padding 24
 Set Theme "Dracula"
 Set TypingSpeed 60ms
@@ -51,7 +51,9 @@ Set PlaybackSpeed 1.0
 
 # --- Enter the poc/ playground ---------------------------------------------
 # Run from the council repo root; cd so council picks up poc/.council.yaml and
-# @TASK.md resolves to poc/TASK.md.
+# @TASK.md resolves to poc/TASK.md. The repo root has NO .council.yaml or
+# TASK.md, so skipping this cd makes council load no config and /plan @TASK.md
+# reference a nonexistent file — the demo only works from inside poc/.
 Type "cd poc"
 Sleep 500ms
 Enter
@@ -61,18 +63,33 @@ Sleep 1s
 Type "council"
 Enter
 # Block until the TUI has painted its header rail (always shows "Agents: …").
-# Ceiling only: covers council startup and — if poc enables
-# experimental.setup_env — the headroom proxy's wait_for_port gate.
+# Doubles as a fail-fast: if council errored on startup, the marker never shows
+# and the recording stops at the ceiling instead of typing into a dead shell.
+# Ceiling also covers — if poc enables experimental.setup_env — the headroom
+# proxy's wait_for_port gate.
 Wait+Screen@1m /Agents:/
+# "Agents:" paints the instant the TUI draws, BEFORE the claude and codex panes
+# have booted their CLIs and the composer has settled. Give both agent CLIs time
+# to come up so the /plan command below lands in a ready composer. (This is
+# distinct from poc's ui.initial_prompt_delay_ms: 8000, which council enforces
+# itself after /plan relaunches the panes, before the first prompt reaches them.)
+Sleep 10s
 
 # --- Plan: workers draft proposals from poc/TASK.md ------------------------
-Type "/plan @TASK.md"
+# "@TASK.md" opens council's @file picker. The TRAILING SPACE after it dismisses
+# that picker so the single Enter below SUBMITS the command. Without the space,
+# the first Enter is swallowed to ACCEPT the file suggestion (see
+# internal/tui/keys.go acceptFileSuggestion) and the command is never sent —
+# that was the original recording failure (/plan left sitting in the composer).
+# Keep the trailing space.
+Type "/plan @TASK.md "
 Sleep 1s
 Enter
-# poc sets ui.initial_prompt_delay_ms: 8000 before the first prompt lands, then
-# both agents draft a full plan. Block on the plan-complete status, which reads
-# "collected N plan(s) — type /vote". Ceiling only — real drafting is usually
-# tens of seconds to a couple of minutes.
+# poc sets ui.initial_prompt_delay_ms: 8000, so council waits 8s after relaunching
+# the panes before the plan prompt reaches each agent; both then draft a full
+# plan. Block on the plan-complete status, which reads "collected N plan(s) —
+# type /vote". Ceiling only — real drafting is usually tens of seconds to a
+# couple of minutes.
 Wait+Screen@5m /collected .+ plan/
 
 # --- Vote: reviewers rank the anonymized plans (self-votes excluded) -------
@@ -80,8 +97,10 @@ Type "/vote"
 Sleep 1s
 Enter
 # Block until the tally announces the winner ("winner: <agent> (Plan X) — type
-# /build"). Ceiling only — a vote is a short model round-trip per reviewer.
-Wait+Screen@4m /winner: .+ Plan/
+# /build"). The agent name sits between "winner: " and "(Plan", so the regex
+# escapes the literal "(" — a bare " Plan" would never match the real text.
+# Ceiling only — a vote is a short model round-trip per reviewer.
+Wait+Screen@4m /winner: .+ \(Plan/
 
 # --- Build: stage one git worktree per worker, then send the prompt --------
 Type "/build"
