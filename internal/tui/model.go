@@ -475,14 +475,13 @@ func (m Model) targetCycle() []targetStep {
 // currentTargetIndex finds the active target in the cycle, or -1 when the target
 // was set off-cycle (e.g. a /target personality while grouping by category).
 func (m Model) currentTargetIndex(cycle []targetStep) int {
+	// Compare the name for every step (it is "" for all/focused): a stale
+	// TargetName left on an all/focused target then reads as off-cycle, so the
+	// next toggle re-applies a clean step instead of carrying the stale name.
 	for i, s := range cycle {
-		if s.mode != m.Target {
-			continue
+		if s.mode == m.Target && s.name == m.TargetName {
+			return i
 		}
-		if (s.mode == TargetPersonality || s.mode == TargetCategory) && s.name != m.TargetName {
-			continue
-		}
-		return i
 	}
 	return -1
 }

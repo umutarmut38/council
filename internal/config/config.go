@@ -1023,25 +1023,34 @@ func (c *Config) resolveAgentInheritance() {
 
 // resolveAgentOne resolves a single agent, recursing into its base first so a
 // multi-level chain (c inherits b inherits a) resolves fully. visiting tracks
-// the active chain for cycle detection within this resolution.
-func (c *Config) resolveAgentOne(name string, visiting map[string]bool) AgentConfig {
+// the active chain for cycle detection. The bool result reports whether the
+// agent was fully resolved; an unresolvable agent (self-reference, a base
+// already in the active chain — i.e. a direct or indirect cycle, an unknown
+// base, or an over-deep chain) is left untouched with `inherit` intact for
+// Validate to report, and the false result stops a caller from overlaying a
+// half-resolved base onto itself.
+func (c *Config) resolveAgentOne(name string, visiting map[string]bool) (AgentConfig, bool) {
 	agent := c.Agents[name]
 	if agent.Inherit == "" {
-		return agent
+		return agent, true
 	}
-	if len(visiting) >= maxInheritDepth || visiting[name] || agent.Inherit == name {
-		return agent // cycle / self / too deep: leave as-is for Validate
+	base := agent.Inherit
+	if base == name || visiting[name] || visiting[base] || len(visiting) >= maxInheritDepth {
+		return agent, false
 	}
-	if _, ok := c.Agents[agent.Inherit]; !ok {
-		return agent // unknown base: leave as-is for Validate
+	if _, ok := c.Agents[base]; !ok {
+		return agent, false // unknown base
 	}
 	visiting[name] = true
-	base := c.resolveAgentOne(agent.Inherit, visiting)
+	resolvedBase, ok := c.resolveAgentOne(base, visiting)
 	delete(visiting, name)
+	if !ok {
+		return agent, false // base unresolvable: leave this agent as-is too
+	}
 
-	merged := overlayAgent(base, agent)
+	merged := overlayAgent(resolvedBase, agent)
 	c.Agents[name] = merged
-	return merged
+	return merged, true
 }
 
 // overlayAgent returns base with child's explicitly-set fields applied on top.

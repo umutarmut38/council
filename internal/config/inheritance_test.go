@@ -331,6 +331,30 @@ agents:
 	}
 }
 
+// TestInheritIndirectCycleLeavesAgentsUntouched: an indirect cycle (a→b→a) must
+// not partially overlay its members — each keeps only its own fields, so the
+// effective config isn't silently mutated before Validate reports the cycle.
+func TestInheritIndirectCycleLeavesAgentsUntouched(t *testing.T) {
+	cfg := Config{Agents: map[string]AgentConfig{
+		"a": {Inherit: "b", Command: []string{"a-cmd"}}, // no Color
+		"b": {Inherit: "a", Color: "99"},                // no Command
+	}}
+	cfg.ResolveInheritance()
+
+	if got := cfg.Agents["a"].Color; got != "" {
+		t.Fatalf("a.Color = %q, want untouched empty (cycle member was overlaid)", got)
+	}
+	if got := cfg.Agents["b"].Command; len(got) != 0 {
+		t.Fatalf("b.Command = %v, want untouched nil (cycle member was overlaid)", got)
+	}
+	if cfg.Agents["a"].Inherit != "b" || cfg.Agents["b"].Inherit != "a" {
+		t.Fatalf("inherit not preserved for Validate")
+	}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "circular") {
+		t.Fatalf("want circular error, got %v", err)
+	}
+}
+
 // TestValidateRejectsTooDeepInheritChain: a chain deeper than the resolution cap
 // is reported by Validate instead of being silently left half-resolved.
 func TestValidateRejectsTooDeepInheritChain(t *testing.T) {

@@ -387,6 +387,17 @@ func TestToggleTargetGroupByNone(t *testing.T) {
 	})
 }
 
+func TestToggleTargetSelfHealsStaleName(t *testing.T) {
+	model := personalityTestModel() // group_by: category
+	// An inconsistent state: an all-target carrying a leftover group name.
+	model.Target = TargetAll
+	model.TargetName = "stale"
+	model.toggleTarget()
+	if model.Target != TargetAll || model.TargetName != "" {
+		t.Fatalf("toggle from stale all: target = %v %q, want all with empty name", model.Target, model.TargetName)
+	}
+}
+
 func TestToggleTargetFromOffCycle(t *testing.T) {
 	model := personalityTestModel() // group_by: category
 	// A personality target set via /target is off-cycle when grouping by
