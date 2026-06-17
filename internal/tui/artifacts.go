@@ -246,6 +246,18 @@ func (m *Model) handleArtifactsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// transcriptPrivacyNote explains, in the artifacts browser, how the listed
+// transcripts relate to the raw PTY logs: transcripts honor sessions.redact and
+// are what the browser shows, while raw PTY logs are kept separately (under
+// raw/) and are never redacted. It makes the privacy boundary explicit so a
+// user doesn't assume the listed artifacts are scrubbed.
+func transcriptPrivacyNote(redact bool) string {
+	if redact {
+		return "transcripts here are redacted (sessions.redact on); raw PTY logs are stored separately and are NOT redacted"
+	}
+	return "transcripts here are NOT redacted (set sessions.redact); raw PTY logs are stored separately and are never redacted"
+}
+
 // colorDiffLine renders one unified-diff line with git-style colors.
 func colorDiffLine(line string, width int) string {
 	text := fitText(line, width)
@@ -307,6 +319,7 @@ func (m Model) renderArtifacts(bodyHeight int) []string {
 	}
 
 	lines = append(lines, headingStyle.Render(fitText("Run artifacts", m.Width)))
+	lines = append(lines, faintStyle.Render(fitText(transcriptPrivacyNote(m.Config.Sessions.Redact), m.Width)))
 	start := 0
 	visible := bodyHeight - 1
 	if visible > 0 && m.ArtifactIndex >= visible {

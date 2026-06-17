@@ -1,0 +1,122 @@
+name: Quality
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  markdown-links:
+    name: Markdown link check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check links
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: "--verbose --no-progress --config .github/lychee.toml -- './**/*.md'"
+          fail: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  shellcheck:
+    name: Shellcheck shell scripts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run shellcheck
+        shell: bash
+        run: |
+          shopt -s globstar nullglob
+          files=(packaging/**/*.sh scripts/**/*.sh)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No shell scripts under packaging/ or scripts/; nothing to check."
+            exit 0
+          fi
+          printf 'Checking: %s\n' "${files[@]}"
+          shellcheck "${files[@]}"
+
+  examples:
+    name: Validate example configs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install yamllint
+        run: pipx install yamllint
+
+      - name: Lint example YAML
+        run: yamllint -c .github/yamllint.yml examples/
+
+  docs-drift:
+    name: Docs drift
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Regenerate generated docs
+        run: go generate ./...
+
+      - name: Verify docs are up to date
+        run: |
+          if ! git diff --exit-code; then
+            echo "::error::Generated docs are stale. Run 'go generate ./...' and commit the result."
+            exit 1
+          fi
+
+  coverage:
+    name: Coverage summary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test with coverage
+        run: go test ./... -covermode=atomic -coverprofile=coverage.out
+
+      - name: Write coverage summary
+        shell: bash
+        run: |
+          go tool cover -html=coverage.out -o coverage.html
+          total="$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')"
+          {
+            echo "## Test coverage"
+            echo
+            echo "**Total:** ${total}"
+            echo
+            echo "<details><summary>Per-function coverage</summary>"
+            echo
+            echo '```'
+            go tool cover -func=coverage.out
+            echo '```'
+            echo
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage
+          path: |
+            coverage.out
+            coverage.html

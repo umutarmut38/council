@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/umutarmut38/council/internal/command"
 	"github.com/umutarmut38/council/internal/config"
 )
 
@@ -114,8 +115,9 @@ func (m Model) suggestionBlock() []string {
 func (m Model) suggestionLine() string {
 	if strings.HasPrefix(m.PromptInput, "/") {
 		prefix := strings.ToLower(strings.TrimPrefix(strings.Fields(m.PromptInput + " ")[0], "/"))
-		parts := make([]string, 0, len(commands))
-		for _, c := range commands {
+		all := command.Composers()
+		parts := make([]string, 0, len(all))
+		for _, c := range all {
 			if strings.HasPrefix(c.Name, prefix) {
 				entry := "/" + c.Name
 				if c.Args != "" {

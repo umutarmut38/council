@@ -1,0 +1,24 @@
+# Configuration for the markdown link checker (lychee), used by the
+# "Markdown link check" job in .github/workflows/quality.yml.
+# Reference: https://lychee.cli.rs/usage/config/
+
+# Treat these HTTP status codes as success (429 = rate limited, still alive).
+accept = ["200", "206", "429"]
+
+# Retry transient network failures before declaring a link dead.
+max_retries = 3
+retry_wait_time = 2
+
+# Some hosts reject non-browser user agents; present a common one.
+user_agent = "Mozilla/5.0 (compatible; lychee link checker)"
+
+# Skip loopback/localhost addresses that appear in example snippets
+# (e.g. the headroom proxy at http://127.0.0.1:8787).
+exclude_loopback = true
+
+# Exclude the project's own GitHub URLs: the repository and its release/blob
+# pages may be private or not yet published, which would make link checking
+# flaky. Relative links between docs are still validated against the filesystem.
+exclude = [
+  '^https://github\.com/umutarmut38/',
+]

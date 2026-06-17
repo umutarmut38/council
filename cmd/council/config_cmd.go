@@ -34,9 +34,32 @@ func runConfigCommand(sub string, args []string) error {
 		return configWizard()
 	case "add-agent":
 		return configAddAgent(args)
+	case "schema":
+		return runConfigSchema(args)
 	default:
-		return fmt.Errorf("unknown config command %q (init | wizard | add-agent)", sub)
+		return fmt.Errorf("unknown config command %q (init | wizard | add-agent | schema)", sub)
 	}
+}
+
+// runConfigSchema prints the configuration reference. By default it emits the
+// Markdown tables generated into docs/configuration.md (so it can be piped or
+// diffed); --json emits a machine-readable JSON Schema (draft 2020-12) for
+// editor integrations.
+func runConfigSchema(args []string) error {
+	flags := flag.NewFlagSet("config schema", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	asJSON := flags.Bool("json", false, "emit a JSON Schema (draft 2020-12) instead of Markdown")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if *asJSON {
+		fmt.Println(config.SchemaJSONString())
+		return nil
+	}
+	fmt.Println("# Configuration schema")
+	fmt.Println()
+	fmt.Println(config.SchemaMarkdown())
+	return nil
 }
 
 func initConfig(args []string) error {

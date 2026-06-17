@@ -815,10 +815,22 @@ func (c Config) PromptForAgent(agentName string, prompt string) string {
 	return prefix + "\n\n" + strings.TrimLeft(prompt, "\n")
 }
 
+// Normalize fills defaults and resolves the experimental gate so every
+// downstream consumer sees a consistent config. It is split into focused,
+// individually-tested helpers: UI defaults, session defaults, per-agent
+// fallbacks, and the env/setup experimental gate.
 func (c *Config) Normalize() {
 	if c.Agents == nil {
 		c.Agents = map[string]AgentConfig{}
 	}
+	c.normalizeUI()
+	c.normalizeSessions()
+	c.normalizeAgentDefaults()
+	c.applyExperimentalGate()
+}
+
+// normalizeUI fills the UI defaults and canonicalizes its enum-like fields.
+func (c *Config) normalizeUI() {
 	// "paged-grid" appeared in older example configs; the paged grid is the
 	// only layout, so both names mean the same thing. Unknown values are left
 	// as-is for doctor to flag.
@@ -848,79 +860,102 @@ func (c *Config) Normalize() {
 	if c.UI.InitialPromptDelayMs <= 0 {
 		c.UI.InitialPromptDelayMs = 3000
 	}
+}
+
+// normalizeSessions fills the session defaults.
+func (c *Config) normalizeSessions() {
 	if c.Sessions.RootDir == "" {
 		c.Sessions.RootDir = ".council/runs"
 	}
-	// The experimental env/setup hooks are off unless explicitly enabled. When
-	// off, env is dropped here (terminalEnv is the only injector) and setup is
-	// dropped below, so every downstream consumer sees the feature as absent.
-	setupEnvOn := c.SetupEnvEnabled()
-	if setupEnvOn {
-		c.ExperimentalIgnored = false
-	}
-	var droppedAgentEnv bool
-	// Only tool-agnostic fallbacks live here. Per-agent behavior (how to type,
-	// how to submit, paste vs raw, delays, etc.) is configured entirely from
-	// ~/.council.yaml so new agents can be supported without code changes.
+}
+
+// normalizeAgentDefaults applies the tool-agnostic per-agent fallbacks. Only
+// generic fallbacks live here: per-agent behavior (how to type, how to submit,
+// paste vs raw, delays, etc.) is configured entirely from ~/.council.yaml so
+// new agents can be supported without code changes.
+func (c *Config) normalizeAgentDefaults() {
 	for name, agentCfg := range c.Agents {
 		if agentCfg.CWD == "" {
 			agentCfg.CWD = "."
 		}
-		if agentCfg.Terminal.Renderer == "" {
-			agentCfg.Terminal.Renderer = "screen"
-		}
-		if agentCfg.Terminal.PTYSize == "" {
-			agentCfg.Terminal.PTYSize = "pane"
-		}
-		if agentCfg.Terminal.Cols <= 0 {
-			agentCfg.Terminal.Cols = 120
-		}
-		if agentCfg.Terminal.Rows <= 0 {
-			agentCfg.Terminal.Rows = 40
-		}
-		if agentCfg.Terminal.SendMode == "" {
-			agentCfg.Terminal.SendMode = "type"
-		}
-		if agentCfg.Terminal.SubmitSequence == "" {
-			agentCfg.Terminal.SubmitSequence = "cr"
-		}
-		if agentCfg.Terminal.Resize == nil {
-			value := agentCfg.Terminal.PTYSize != "fixed"
-			agentCfg.Terminal.Resize = &value
-		}
-		if agentCfg.Terminal.Color == nil {
-			value := true
-			agentCfg.Terminal.Color = &value
-		}
-		// Fold the global env into each agent (the agent's own env wins), so
-		// the launch path only has to read one map — but only when the
-		// experimental gate is on. When off, drop the agent's env entirely.
-		if setupEnvOn {
-			if len(c.Env) > 0 || len(agentCfg.Env) > 0 {
-				merged := make(map[string]string, len(c.Env)+len(agentCfg.Env))
-				for k, v := range c.Env {
-					merged[k] = v
-				}
-				for k, v := range agentCfg.Env {
-					merged[k] = v
-				}
-				agentCfg.Env = merged
-			}
-		} else if len(agentCfg.Env) > 0 {
-			droppedAgentEnv = true
-			agentCfg.Env = nil
-		}
+		normalizeTerminal(&agentCfg.Terminal)
 		c.Agents[name] = agentCfg
 	}
+}
 
-	// Gate the experimental env/setup hooks: when off, drop global env and
-	// setup too, and record that we did so (if anything was configured) so
-	// SelectAgents can warn once.
-	if !setupEnvOn {
-		if len(c.Env) > 0 || len(c.Setup) > 0 || droppedAgentEnv {
-			c.ExperimentalIgnored = true
-		}
-		c.Env = nil
-		c.Setup = nil
+// normalizeTerminal fills the generic terminal-delivery defaults.
+func normalizeTerminal(t *TerminalConfig) {
+	if t.Renderer == "" {
+		t.Renderer = "screen"
 	}
+	if t.PTYSize == "" {
+		t.PTYSize = "pane"
+	}
+	if t.Cols <= 0 {
+		t.Cols = 120
+	}
+	if t.Rows <= 0 {
+		t.Rows = 40
+	}
+	if t.SendMode == "" {
+		t.SendMode = "type"
+	}
+	if t.SubmitSequence == "" {
+		t.SubmitSequence = "cr"
+	}
+	if t.Resize == nil {
+		value := t.PTYSize != "fixed"
+		t.Resize = &value
+	}
+	if t.Color == nil {
+		value := true
+		t.Color = &value
+	}
+}
+
+// applyExperimentalGate resolves the experimental env/setup feature. When it is
+// enabled, the global env is folded into each agent (the agent's own env wins),
+// so the launch path only reads one map. When it is off (the default), env and
+// setup are dropped entirely and ExperimentalIgnored records that something was
+// configured but ignored, so SelectAgents can warn once.
+func (c *Config) applyExperimentalGate() {
+	if c.SetupEnvEnabled() {
+		c.ExperimentalIgnored = false
+		for name, agentCfg := range c.Agents {
+			agentCfg.Env = mergeEnv(c.Env, agentCfg.Env)
+			c.Agents[name] = agentCfg
+		}
+		return
+	}
+
+	droppedAgentEnv := false
+	for name, agentCfg := range c.Agents {
+		if len(agentCfg.Env) > 0 {
+			droppedAgentEnv = true
+			agentCfg.Env = nil
+			c.Agents[name] = agentCfg
+		}
+	}
+	if len(c.Env) > 0 || len(c.Setup) > 0 || droppedAgentEnv {
+		c.ExperimentalIgnored = true
+	}
+	c.Env = nil
+	c.Setup = nil
+}
+
+// mergeEnv overlays over onto base (over wins on conflicts) and returns the
+// combined map. When both are empty it returns over unchanged, so an agent
+// with no env keeps a nil map instead of gaining an empty one.
+func mergeEnv(base, over map[string]string) map[string]string {
+	if len(base) == 0 && len(over) == 0 {
+		return over
+	}
+	merged := make(map[string]string, len(base)+len(over))
+	for k, v := range base {
+		merged[k] = v
+	}
+	for k, v := range over {
+		merged[k] = v
+	}
+	return merged
 }

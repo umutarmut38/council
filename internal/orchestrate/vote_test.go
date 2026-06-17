@@ -1,6 +1,8 @@
 package orchestrate
 
 import (
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -30,6 +32,33 @@ func TestAnonymizePlansAssignsLetters(t *testing.T) {
 	}
 	if refs[1].Agent != "codex" || refs[1].Path != "codex.md" {
 		t.Fatalf("ref[1] = %+v", refs[1])
+	}
+}
+
+func TestShufflePlanNamesReturnsCopiedPermutation(t *testing.T) {
+	planned := []string{"claude", "codex", "cursor", "copilot"}
+	original := append([]string(nil), planned...)
+
+	shuffled := shufflePlanNames(planned)
+	if !reflect.DeepEqual(planned, original) {
+		t.Fatalf("shufflePlanNames mutated input: got %v, want %v", planned, original)
+	}
+	if len(shuffled) != len(original) {
+		t.Fatalf("shuffled len = %d, want %d", len(shuffled), len(original))
+	}
+	if len(shuffled) > 0 {
+		beforeAliasCheck := append([]string(nil), shuffled...)
+		shuffled[0] = "modified"
+		if planned[0] == "modified" {
+			t.Fatal("shufflePlanNames returned a slice aliasing the input")
+		}
+		shuffled = beforeAliasCheck
+	}
+
+	sort.Strings(shuffled)
+	sort.Strings(original)
+	if !reflect.DeepEqual(shuffled, original) {
+		t.Fatalf("shuffled names = %v, want permutation of %v", shuffled, original)
 	}
 }
 

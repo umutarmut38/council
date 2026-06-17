@@ -16,6 +16,9 @@ type presetInfo struct {
 	// autoApprove is the phase command (with auto-approval flags) users can
 	// opt into for unattended plan/vote/build phases. Never applied by default.
 	autoApprove []string
+	// install is a best-effort command for installing the agent CLI, shown by
+	// `council doctor` when the binary is missing from PATH.
+	install string
 }
 
 var agentPresets = map[string]presetInfo{
@@ -32,6 +35,7 @@ var agentPresets = map[string]presetInfo{
 			},
 		},
 		autoApprove: []string{"claude", "--dangerously-skip-permissions"},
+		install:     "npm i -g @anthropic-ai/claude-code",
 	},
 	"codex": {
 		agent: AgentConfig{
@@ -48,6 +52,7 @@ var agentPresets = map[string]presetInfo{
 			},
 		},
 		autoApprove: []string{"codex", "--full-auto"},
+		install:     "npm i -g @openai/codex",
 	},
 	"cursor": {
 		agent: AgentConfig{
@@ -62,6 +67,7 @@ var agentPresets = map[string]presetInfo{
 			},
 		},
 		autoApprove: []string{"cursor-agent", "--force"},
+		install:     "curl https://cursor.com/install -fsS | bash",
 	},
 	"copilot": {
 		agent: AgentConfig{
@@ -78,6 +84,7 @@ var agentPresets = map[string]presetInfo{
 			Orchestration: OrchestrationConfig{ExcludeBuild: true},
 		},
 		autoApprove: []string{"copilot", "--allow-all-tools"},
+		install:     "npm i -g @github/copilot",
 	},
 	"opencode": {
 		agent: AgentConfig{
@@ -90,6 +97,7 @@ var agentPresets = map[string]presetInfo{
 				SubmitSequence: "cr",
 			},
 		},
+		install: "npm i -g opencode-ai",
 	},
 }
 
@@ -122,6 +130,17 @@ func PresetAutoApproveCommand(name string) []string {
 		return nil
 	}
 	return append([]string(nil), info.autoApprove...)
+}
+
+// PresetInstallHint returns a best-effort install command for a known agent
+// CLI, or "" when none is recorded. It powers `council doctor`'s missing-CLI
+// hints.
+func PresetInstallHint(name string) string {
+	info, ok := agentPresets[strings.ToLower(strings.TrimSpace(name))]
+	if !ok {
+		return ""
+	}
+	return info.install
 }
 
 // riskyFlags are command flags that bypass tool/permission prompts. They are

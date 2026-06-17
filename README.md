@@ -1,6 +1,23 @@
-# council
+<h1 align="center">council</h1>
 
-> _I subscribed to all of them. Might as well make them earn it._
+<p align="center">
+  <em>I subscribed to all of them. Might as well make them earn it.</em>
+</p>
+
+<p align="center">
+  <a href="https://github.com/umutarmut38/council/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/umutarmut38/council/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/umutarmut38/council/actions/workflows/quality.yml"><img alt="Quality" src="https://github.com/umutarmut38/council/actions/workflows/quality.yml/badge.svg"></a>
+  <a href="go.mod"><img alt="Go 1.23" src="https://img.shields.io/badge/Go-1.23-00ADD8?logo=go&logoColor=white"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/council-demo-simple-hello.gif" width="800" alt="Broadcasting one prompt to every council agent at once">
+</p>
+
+<p align="center">
+  <em>Broadcast one prompt to every agent at once.</em>
+</p>
 
 At some point I had Claude Code, Codex, Copilot, Cursor, and a growing list of
 agent CLIs all authenticated on my machine, each with their own opinions, their
@@ -15,7 +32,24 @@ orchestrates a structured **plan → vote → build → review → adopt** workf
 top. Your agents propose, judge each other's work, build the winner, and you
 adopt the diff. Maximum leverage, maximum token waste, zero regret.
 
-![Council terminal grid](docs/assets/council-grid.svg)
+## Table of Contents
+
+- [Why](#why)
+- [Features](#features)
+- [Install](#install)
+- [Requirements](#requirements)
+- [Quick Start](#quick-start)
+- [Demo](#demo)
+- [Orchestration Workflow](#orchestration-workflow)
+- [Roles and Personalities](#roles-and-personalities)
+- [Resume](#resume)
+- [Documentation](#documentation)
+- [Examples](#examples)
+- [Config Skill](#config-skill)
+- [Configuration Notes](#configuration-notes)
+- [Development](#development)
+- [Security](#security)
+- [License](#license)
 
 ## Why
 
@@ -132,7 +166,9 @@ make build
 | Linux arm64/amd64 | Primary target. |
 | Windows arm64/amd64 | Supported via native pseudo-terminals (ConPTY). Use Windows Terminal for best results; WSL still works if you prefer it. |
 
-See [Requirements](docs/requirements.md) for more detail.
+Windows is supported but still maturing: the build is a required CI check while
+the full Windows test suite is allowed to fail. See [Windows Support](docs/windows.md)
+for the exact stance, and [Requirements](docs/requirements.md) for more detail.
 
 ## Quick Start
 
@@ -169,6 +205,24 @@ Inside the app:
 - Press `F2` to type directly into the focused agent; `Esc` returns.
 - Press `Ctrl+G` for overview.
 - Press `Ctrl+X` to quit.
+
+## Demo
+
+A full run, end to end: the agents draft plans, vote on each other's work
+(self-votes excluded), build the winner in an isolated git worktree, and you
+adopt the resulting diff.
+
+<p align="center">
+  <img src="docs/assets/council-demo.gif" width="800" alt="Council orchestration: plan, vote, build, review, adopt">
+</p>
+
+<p align="center">
+  <em>plan → vote → build → review → adopt, end to end.</em>
+</p>
+
+The recording is a reproducible [VHS](https://github.com/charmbracelet/vhs)
+capture — see the [terminal demo](docs/demo.md) to regenerate it from the
+committed tape.
 
 ## Orchestration Workflow
 
@@ -254,11 +308,13 @@ The full docs are in `docs/` and can be published with GitHub Pages.
 
 | Page | Contents |
 |---|---|
+| [Demo](docs/demo.md) | A reproducible VHS terminal recording of the orchestration workflow. |
 | [Commands](docs/commands.md) | In-chat commands and CLI subcommands. |
 | [Shortcuts](docs/shortcuts.md) | Keyboard shortcuts for panes, pages, overview, settings, and run browsing. |
 | [Workflows](docs/workflows.md) | Multiplexer use, orchestration, roles, personalities, targeting, resume, artifacts. |
 | [Configuration](docs/configuration.md) | YAML reference for agents, terminal quirks, roles, personalities, and local overrides. |
 | [Requirements](docs/requirements.md) | Platform support and runtime requirements. |
+| [Windows Support](docs/windows.md) | What is supported, experimental, and smoke-tested on Windows; recommended terminal and ConPTY limits. |
 | [Architecture](docs/architecture.md) | Package layout, terminal model, orchestration model, trust boundaries. |
 | [Troubleshooting](docs/troubleshooting.md) | Prompt delivery, rendering, folder trust, npm examples, worktree cleanup. |
 | [Release Guide](docs/release.md) | Tagging, artifacts, release checklist, history cleanup. |
@@ -273,6 +329,23 @@ The example issue can be used directly:
 ```text
 /plan @examples/issues/retry-backoff.md
 ```
+
+## Config Skill
+
+Don't want to hand-write `.council.yaml`? `council-config` is an
+[Agent Skill](skills/README.md) that interviews you about your council
+(members, roles, personalities, the review gate, UI) and writes a repo-local
+overlay — excluded from git via `.git/info/exclude`, never committed. It works
+across Claude Code, Codex CLI, Cursor, GitHub Copilot, and OpenCode. Install it
+into whichever CLIs you use:
+
+```bash
+scripts/install-skill.sh --all        # or --target claude,codex,cursor
+make install-skill                    # same thing, via Make
+```
+
+See [skills/README.md](skills/README.md) for the per-tool skill paths and
+installer options.
 
 ## Configuration Notes
 

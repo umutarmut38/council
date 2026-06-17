@@ -11,6 +11,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/umutarmut38/council/internal/agent"
+	"github.com/umutarmut38/council/internal/command"
+	"github.com/umutarmut38/council/internal/setup"
 )
 
 func (m *Model) handlePageCommand(fields []string) {
@@ -156,7 +158,7 @@ func (m *Model) completeCommand() bool {
 		return false
 	}
 	prefix := strings.ToLower(strings.TrimPrefix(m.PromptInput, "/"))
-	for _, c := range commands {
+	for _, c := range command.Composers() {
 		if strings.HasPrefix(c.Name, prefix) {
 			m.PromptInput = "/" + c.Name + " "
 			m.Status = "/" + c.Name + " — " + c.Desc
@@ -229,10 +231,16 @@ func (m *Model) handleCommand(text string) (bool, tea.Cmd) {
 		return true, nil
 	}
 
-	command := strings.TrimPrefix(strings.ToLower(fields[0]), "/")
+	word := strings.TrimPrefix(strings.ToLower(fields[0]), "/")
+	cmd, ok := command.LookupComposer(word)
+	if !ok {
+		m.Status = "unknown command: " + fields[0]
+		return true, nil
+	}
+	m.recordRecentCommand(cmd.Name)
 	rest := strings.TrimSpace(strings.TrimPrefix(text, fields[0]))
-	switch command {
-	case "all", "broadcast":
+	switch cmd.Name {
+	case "all":
 		if rest == "" {
 			m.Status = "usage: /all message"
 			return true, nil
@@ -253,14 +261,14 @@ func (m *Model) handleCommand(text string) (bool, tea.Cmd) {
 			return true, nil
 		}
 		m.focusByName(fields[1])
-	case "direct", "window":
+	case "direct":
 		if len(fields) >= 2 {
 			m.focusByName(fields[1])
 		}
 		m.InputMode = InputDirect
 		m.PromptInput = ""
 		m.Status = "direct input to " + m.focusedName()
-	case "zoom", "full":
+	case "zoom":
 		if len(fields) >= 2 {
 			m.focusByName(fields[1])
 			if m.Zoomed {
@@ -274,9 +282,9 @@ func (m *Model) handleCommand(text string) (bool, tea.Cmd) {
 		}
 	case "page":
 		m.handlePageCommand(fields)
-	case "overview", "agents":
+	case "overview":
 		m.openOverview()
-	case "settings", "prefs":
+	case "settings":
 		m.ScreenMode = ScreenSettings
 		m.InputMode = InputComposer
 		m.PromptInput = ""
@@ -297,7 +305,7 @@ func (m *Model) handleCommand(text string) (bool, tea.Cmd) {
 		return true, m.cmdVote()
 	case "build":
 		return true, m.cmdBuild()
-	case "start-build", "startbuild":
+	case "start-build":
 		return true, m.cmdStartBuild()
 	case "review":
 		return true, m.cmdReview()
@@ -327,6 +335,8 @@ func (m *Model) handleCommand(text string) (bool, tea.Cmd) {
 		m.finishPhase()
 	case "status":
 		m.cmdStatus()
+	case "setup":
+		m.cmdSetup()
 	case "clean":
 		m.cmdClean(rest)
 	case "save":
@@ -337,12 +347,13 @@ func (m *Model) handleCommand(text string) (bool, tea.Cmd) {
 		}
 	case "clear":
 		m.clearScreens(rest)
-	case "quit", "exit":
+	case "quit":
 		m.terminateAgents()
 		m.Status = "quit with Ctrl+X"
 	case "help":
-		names := make([]string, 0, len(commands))
-		for _, c := range commands {
+		all := command.Composers()
+		names := make([]string, 0, len(all))
+		for _, c := range all {
 			names = append(names, "/"+c.Name)
 		}
 		m.Status = "commands: " + strings.Join(names, " ") + "  |  @agent msg, Tab completes"
@@ -576,6 +587,25 @@ func (m Model) recipientViewsForCategory(category string) []*agentView {
 		}
 	}
 	return views
+}
+
+// SetSetupStatus attaches the pre-launch setup/env observability snapshot so
+// /setup can render it. A nil status disables the command's output.
+func (m *Model) SetSetupStatus(s *setup.Status) {
+	m.setupStatus = s
+}
+
+// cmdSetup opens the pre-launch setup/env status (command labels, PIDs,
+// lifecycle, readiness, captured output, and exported env keys) in the pager.
+func (m *Model) cmdSetup() {
+	if m.setupStatus == nil {
+		m.Status = "no pre-launch setup or env configured"
+		return
+	}
+	report := m.setupStatus.Snapshot()
+	m.openArtifactText("setup status", report.Render())
+	count := len(report.Commands)
+	m.Status = fmt.Sprintf("setup status — %d command(s), %d exported env key(s)", count, len(report.EnvKeys))
 }
 
 func (m *Model) clearScreens(target string) {

@@ -197,6 +197,7 @@ func councilReport(args []string) error {
 	if err != nil {
 		return err
 	}
+	warnArtifactSecrets(run.Dir)
 	path, err := orchestrate.WriteReport(run)
 	if err != nil {
 		return err
@@ -253,6 +254,8 @@ func councilPR(args []string) error {
 		}
 	}
 	branch := fmt.Sprintf("council/%s/%s", agentName, ctrl.Run().Stamp)
+
+	warnArtifactSecrets(ctrl.Run().Dir)
 
 	// Make sure the report exists; it becomes the PR body.
 	reportPath, err := orchestrate.WriteReport(ctrl.Run())
