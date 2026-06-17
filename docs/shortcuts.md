@@ -11,7 +11,7 @@ Shortcuts depend on which screen/mode you're in. The default screen is the
 | `↑` / `↓` | Navigate the command palette (after typing `/`) or @file suggestions. |
 | `Tab` | Focus the next pane — or complete the `/command` you're typing. |
 | `Shift+Tab` | Focus the previous pane. |
-| `Ctrl+B` | Cycle the input target (all ↔ focused). |
+| `Ctrl+B` | Cycle the input target: all → each group → focused. Groups follow `ui.group_by` (personality or category); with `group_by: none` it's all ↔ focused. |
 | `Ctrl+F` | Zoom / un-zoom the focused pane (full screen). |
 | `Ctrl+G` | Open the **overview** of all agents. |
 | `Ctrl+N` | Next page of panes. |
