@@ -173,8 +173,13 @@ func SchemaMarkdown() string {
 		b.WriteString("| Key | Type | Default | Description |\n")
 		b.WriteString("|---|---|---|---|\n")
 		for _, f := range sec.Fields {
-			b.WriteString("| `" + f.Key + "` | " + f.Type + " | " + f.Default + " | " + f.Description + " |\n")
+			b.WriteString("| `" + markdownTableCell(f.Key) + "` | " + markdownTableCell(f.Type) + " | " + markdownTableCell(f.Default) + " | " + markdownTableCell(f.Description) + " |\n")
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+func markdownTableCell(value string) string {
+	value = strings.ReplaceAll(value, "\n", "<br>")
+	return strings.ReplaceAll(value, "|", `\|`)
 }

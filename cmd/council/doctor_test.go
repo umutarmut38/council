@@ -125,6 +125,37 @@ func TestDoctorFixTightensArtifactPerms(t *testing.T) {
 	}
 }
 
+func TestDoctorFixSkipsArtifactSymlinks(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, ".council", "runs", "20260101-000000")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(dir, "outside.txt")
+	if err := os.WriteFile(outside, []byte("outside"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(outside, 0o666); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "link.txt")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	changed, err := tightenArtifactPerms(filepath.Join(dir, ".council", "runs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed != 0 {
+		t.Fatalf("changed %d paths, want 0", changed)
+	}
+	if fi, err := os.Stat(outside); err != nil {
+		t.Fatal(err)
+	} else if fi.Mode().Perm() != 0o666 {
+		t.Fatalf("symlink target perm = %o, want 666", fi.Mode().Perm())
+	}
+}
+
 // TestDoctorReadOnlyLeavesPermsUntouched: the default run never changes perms.
 func TestDoctorReadOnlyLeavesPermsUntouched(t *testing.T) {
 	setTempHome(t)

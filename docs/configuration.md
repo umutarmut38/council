@@ -438,7 +438,7 @@ Limits for `@path` file-reference expansion in prompts and issues.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `mode` | string | `normal` | `safe` | `normal` | `aggressive` — the automation risk posture. |
+| `mode` | string | `normal` | `safe` \| `normal` \| `aggressive` — the automation risk posture. |
 
 ### `personality_categories.<name>`
 

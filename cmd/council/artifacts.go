@@ -35,7 +35,8 @@ func councilArtifacts(args []string) error {
 func councilArtifactsScan(args []string) error {
 	fs, noLocal := newOrchFlagSet("council artifacts scan")
 	all := fs.Bool("all", false, "scan every run under the sessions root, not just one")
-	if err := fs.Parse(args); err != nil {
+	positional, err := parseWithTrailingFlags(fs, args)
+	if err != nil {
 		return err
 	}
 	cfg, err := loadConfig(*noLocal)
@@ -59,7 +60,14 @@ func councilArtifactsScan(args []string) error {
 			return nil
 		}
 	} else {
-		run, err := orchestrate.OpenRun(rootDir, fs.Arg(0))
+		if len(positional) > 1 {
+			return fmt.Errorf("usage: council artifacts scan [run] [--all]")
+		}
+		runArg := ""
+		if len(positional) == 1 {
+			runArg = positional[0]
+		}
+		run, err := orchestrate.OpenRun(rootDir, runArg)
 		if err != nil {
 			return err
 		}

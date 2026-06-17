@@ -101,6 +101,32 @@ func TestCouncilArtifactsScanCleanRun(t *testing.T) {
 	}
 }
 
+func TestCouncilArtifactsScanAllAllowsTrailingFlag(t *testing.T) {
+	setTempHome(t)
+	dir := t.TempDir()
+	chdir(t, dir)
+	cfgPath, _ := config.DefaultPath()
+	if err := config.WriteDefault(cfgPath, false); err != nil {
+		t.Fatal(err)
+	}
+	runDir := filepath.Join(dir, ".council", "runs", "20260101-000000")
+	if err := os.MkdirAll(runDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(runDir, "issue.md"), []byte("clean\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out := captureOutput(t, func() {
+		if err := councilArtifacts([]string{"scan", "missing-run", "--all"}); err != nil {
+			t.Fatalf("trailing --all should scan all runs instead of opening the positional run: %v", err)
+		}
+	})
+	if !strings.Contains(out, "No potential secrets") {
+		t.Fatalf("scan --all output = %q, want no findings", out)
+	}
+}
+
 func TestCouncilArtifactsUnknownSubcommand(t *testing.T) {
 	err := councilArtifacts([]string{"frobnicate"})
 	if err == nil || !strings.Contains(err.Error(), "unknown artifacts command") {

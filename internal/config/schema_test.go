@@ -77,6 +77,7 @@ func TestSchemaMarkdownRendersTables(t *testing.T) {
 		"| Key | Type | Default | Description |",
 		"|---|---|---|---|",
 		"| `enabled` | bool | `false` | Launch this agent. |",
+		"| `mode` | string | `normal` | `safe` \\| `normal` \\| `aggressive` — the automation risk posture. |",
 		"### `policy`",
 	} {
 		if !strings.Contains(md, want) {

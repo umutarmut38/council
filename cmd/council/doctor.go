@@ -342,6 +342,9 @@ func tightenArtifactPerms(rootDir string) (int, error) {
 		if walkErr != nil {
 			return nil // skip unreadable entries; never abort the walk
 		}
+		if d.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
 		info, ierr := d.Info()
 		if ierr != nil {
 			return nil
