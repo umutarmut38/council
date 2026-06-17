@@ -83,7 +83,27 @@ list. Current preset commands (from `internal/config/presets.go`):
 
 > The same CLI can appear multiple times under different names (e.g.
 > `codex-worker` and `codex-reviewer`) with different roles, models, or
-> personalities.
+> personalities. To avoid repeating the shared `command`/`terminal`/`env`,
+> give one member an `inherit: <other-agent>` key: it copies that agent's whole
+> definition (a preset, a global agent, or another local agent) and overrides
+> the keys you set. A field overrides only when you set a non-zero value, so an
+> inherited non-zero scalar or orchestration flag can't be reset to its zero
+> value (e.g. you can't add `exclude_build: false` to undo a base's `true`); only
+> `terminal.resize`/`terminal.color` are tri-state. `enabled` is never inherited
+> — declare it per member — and `inherit` chains are allowed. Example:
+>
+> ```yaml
+> agents:
+>   codex-worker:
+>     enabled: true
+>     command: ["codex", "--model", "gpt-5.4-mini"]
+>     role: [worker]
+>     terminal: { send_mode: paste, before_send_sequence: ctrl+u }
+>   codex-reviewer:
+>     inherit: codex-worker   # same command + terminal
+>     enabled: true
+>     role: [reviewer]        # only the role differs
+> ```
 
 **b. Role per member.** `role: [worker]` (plans + builds), `role: [reviewer]`
 (votes + reviews), or both / omitted (all phases). A useful council has at least

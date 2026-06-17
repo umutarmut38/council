@@ -64,6 +64,13 @@ agents:
   alpha:
     enabled: false
 `,
+		"inherit a preset, override role": `
+agents:
+  my-claude:
+    inherit: claude
+    enabled: true
+    role: ["reviewer"]
+`,
 	}
 	for name, src := range examples {
 		t.Run(name, func(t *testing.T) {
@@ -133,6 +140,37 @@ agents:
       renderer: fancy
 `,
 			want: "terminal.renderer",
+		},
+		{
+			name: "inherit from an unknown base",
+			src: `
+agents:
+  child:
+    inherit: nope
+    enabled: true
+    command: ["x"]
+`,
+			want: "unknown agent",
+		},
+		{
+			name: "inherit from itself",
+			src: `
+agents:
+  loop:
+    inherit: loop
+`,
+			want: "itself",
+		},
+		{
+			name: "inherit cycle",
+			src: `
+agents:
+  a:
+    inherit: b
+  b:
+    inherit: a
+`,
+			want: "circular",
 		},
 	}
 	for _, tc := range examples {

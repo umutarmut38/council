@@ -171,6 +171,49 @@ func (m Model) allUsedPersonalities() map[string]bool {
 	return out
 }
 
+// orderedUsedPersonalities lists the personalities that have at least one agent,
+// sorted by configured Order then name — the order Ctrl+B cycles through them.
+func (m Model) orderedUsedPersonalities() []string {
+	used := m.allUsedPersonalities()
+	names := make([]string, 0, len(used))
+	for name := range used {
+		names = append(names, name)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		li := m.Config.Personalities[names[i]]
+		lj := m.Config.Personalities[names[j]]
+		if li.Order != lj.Order {
+			return li.Order < lj.Order
+		}
+		return names[i] < names[j]
+	})
+	return names
+}
+
+// orderedUsedCategories lists the categories that have at least one agent (via
+// their personalities), sorted by configured Order then name.
+func (m Model) orderedUsedCategories() []string {
+	seen := map[string]bool{}
+	for personality := range m.allUsedPersonalities() {
+		if name, _, ok := m.Config.CategoryForPersonality(personality); ok {
+			seen[name] = true
+		}
+	}
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		li := m.Config.PersonalityCategories[names[i]]
+		lj := m.Config.PersonalityCategories[names[j]]
+		if li.Order != lj.Order {
+			return li.Order < lj.Order
+		}
+		return names[i] < names[j]
+	})
+	return names
+}
+
 func (m *Model) sortAgents() {
 	if len(m.Agents) < 2 || m.groupByLabel() == "none" {
 		return

@@ -27,6 +27,17 @@ type configSources struct {
 	LocalSkip  string // local config that was found but not applied, with reason
 }
 
+// finalize resolves `inherit` and normalizes a config that is about to be used.
+// Inheritance is resolved here — once, after any repo-local overlay — so a child
+// reflects the final (possibly locally-overridden) base; Normalize then fills
+// per-agent defaults. The global config is loaded raw (LoadRaw) precisely so
+// this single resolution sees the merged agent map.
+func finalize(cfg config.Config) config.Config {
+	cfg.ResolveInheritance()
+	cfg.Normalize()
+	return cfg
+}
+
 // loadEffectiveConfig loads the global config and overlays a repo-local
 // .council.yaml only when it is trusted (or the user trusts it interactively).
 // A repo-local config can change which commands council executes, so an
@@ -38,7 +49,10 @@ func loadEffectiveConfig(noLocal bool) (config.Config, configSources, error) {
 	if err != nil {
 		return config.Config{}, sources, err
 	}
-	cfg, rawGlobal, err := config.Load(cfgPath)
+	// Load the global config RAW (unresolved): a local overlay may change a base
+	// an inheriting agent depends on, so inheritance is resolved later, once, on
+	// the merged map (see finalize).
+	cfg, rawGlobal, err := config.LoadRaw(cfgPath)
 	if err != nil {
 		return config.Config{}, sources, err
 	}
@@ -46,11 +60,11 @@ func loadEffectiveConfig(noLocal bool) (config.Config, configSources, error) {
 	sources.GlobalRaw = rawGlobal
 
 	if noLocal {
-		return cfg, sources, nil
+		return finalize(cfg), sources, nil
 	}
 	localPath := config.FindLocalConfig()
 	if localPath == "" {
-		return cfg, sources, nil
+		return finalize(cfg), sources, nil
 	}
 	rawLocal, err := os.ReadFile(localPath)
 	if err != nil {
@@ -62,12 +76,12 @@ func loadEffectiveConfig(noLocal bool) (config.Config, configSources, error) {
 	case config.TrustChanged:
 		if !confirmTrust(localPath, rawLocal, "has CHANGED since you last trusted it") {
 			sources.LocalSkip = localPath
-			return cfg, sources, nil
+			return finalize(cfg), sources, nil
 		}
 	default: // TrustUnknown
 		if !confirmTrust(localPath, rawLocal, "is not trusted yet") {
 			sources.LocalSkip = localPath
-			return cfg, sources, nil
+			return finalize(cfg), sources, nil
 		}
 	}
 
@@ -75,11 +89,10 @@ func loadEffectiveConfig(noLocal bool) (config.Config, configSources, error) {
 	if err != nil {
 		return cfg, sources, fmt.Errorf("%s: %w", localPath, err)
 	}
-	merged.Normalize()
 	sources.LocalPath = localPath
 	sources.LocalRaw = rawLocal
 	fmt.Fprintf(os.Stderr, "Using repo config %s\n", localPath)
-	return merged, sources, nil
+	return finalize(merged), sources, nil
 }
 
 // applyRuntimeConfig wires config-driven runtime behavior (artifact privacy,

@@ -42,13 +42,9 @@ func (m *Model) handleTargetCommand(fields []string) {
 	}
 	switch strings.ToLower(fields[1]) {
 	case "all":
-		m.Target = TargetAll
-		m.TargetName = ""
-		m.Status = "input targets all agents"
+		m.applyTarget(targetStep{mode: TargetAll})
 	case "focus", "focused":
-		m.Target = TargetFocused
-		m.TargetName = ""
-		m.Status = "input targets " + m.focusedName()
+		m.applyTarget(targetStep{mode: TargetFocused})
 	case "personality", "p":
 		if len(fields) < 3 {
 			m.Status = "usage: /target personality name"
@@ -59,9 +55,7 @@ func (m *Model) handleTargetCommand(fields []string) {
 			m.Status = "unknown personality: " + fields[2]
 			return
 		}
-		m.Target = TargetPersonality
-		m.TargetName = name
-		m.Status = "input targets personality " + m.personalityLabel(name)
+		m.applyTarget(targetStep{mode: TargetPersonality, name: name})
 	case "category", "c":
 		if len(fields) < 3 {
 			m.Status = "usage: /target category name"
@@ -72,9 +66,7 @@ func (m *Model) handleTargetCommand(fields []string) {
 			m.Status = "unknown category: " + fields[2]
 			return
 		}
-		m.Target = TargetCategory
-		m.TargetName = name
-		m.Status = "input targets category " + m.categoryLabel(name)
+		m.applyTarget(targetStep{mode: TargetCategory, name: name})
 	default:
 		m.Status = "usage: /target all|focus|personality name|category name"
 	}

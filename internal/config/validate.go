@@ -20,6 +20,9 @@ func (c Config) Validate() error {
 	if err := ValidateAgentNames(c); err != nil {
 		return err
 	}
+	if err := validateAgentInheritance(c); err != nil {
+		return err
+	}
 
 	names := make([]string, 0, len(c.Agents))
 	for name := range c.Agents {
@@ -38,6 +41,44 @@ func (c Config) Validate() error {
 
 	if mode := strings.TrimSpace(c.Policy.Mode); mode != "" && !knownPolicyMode(mode) {
 		return fmt.Errorf("policy.mode %q is unknown (use safe|normal|aggressive)", c.Policy.Mode)
+	}
+	return nil
+}
+
+// validateAgentInheritance reports a broken `inherit` graph: a base that does
+// not exist, an agent that inherits from itself, or a cycle. Resolution leaves
+// `inherit` in place, so the graph is still walkable here.
+func validateAgentInheritance(c Config) error {
+	names := make([]string, 0, len(c.Agents))
+	for name := range c.Agents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		seen := map[string]bool{name: true}
+		cur := name
+		for depth := 0; ; depth++ {
+			base := c.Agents[cur].Inherit
+			if base == "" {
+				break
+			}
+			if base == cur {
+				return fmt.Errorf("agent %q cannot inherit from itself", cur)
+			}
+			if _, ok := c.Agents[base]; !ok {
+				return fmt.Errorf("agent %q inherits from unknown agent %q", cur, base)
+			}
+			if seen[base] {
+				return fmt.Errorf("agent %q has a circular inherit chain", name)
+			}
+			// Resolution stops after maxInheritDepth levels; report an over-deep
+			// (but acyclic) chain rather than leaving it silently half-resolved.
+			if depth >= maxInheritDepth {
+				return fmt.Errorf("agent %q has an inherit chain deeper than %d", name, maxInheritDepth)
+			}
+			seen[base] = true
+			cur = base
+		}
 	}
 	return nil
 }

@@ -340,6 +340,75 @@ func TestTargetPersonalityAndCategoryRecipients(t *testing.T) {
 	}
 }
 
+// assertTargetCycle drives toggleTarget through the expected sequence of steps.
+func assertTargetCycle(t *testing.T, model *Model, want []targetStep) {
+	t.Helper()
+	for i, w := range want {
+		model.toggleTarget()
+		if model.Target != w.mode || model.TargetName != w.name {
+			t.Fatalf("step %d: target = %v %q, want %v %q", i, model.Target, model.TargetName, w.mode, w.name)
+		}
+	}
+}
+
+func TestToggleTargetCyclesCategories(t *testing.T) {
+	model := personalityTestModel() // group_by: category
+	model.applyTarget(targetStep{mode: TargetAll})
+	assertTargetCycle(t, &model, []targetStep{
+		{mode: TargetCategory, name: "strategy"},       // Order 10
+		{mode: TargetCategory, name: "implementation"}, // Order 20
+		{mode: TargetFocused},
+		{mode: TargetAll}, // wraps
+		{mode: TargetCategory, name: "strategy"},
+	})
+}
+
+func TestToggleTargetCyclesPersonalities(t *testing.T) {
+	model := personalityTestModel()
+	model.Config.UI.GroupBy = "personality"
+	model.applyTarget(targetStep{mode: TargetAll})
+	assertTargetCycle(t, &model, []targetStep{
+		{mode: TargetPersonality, name: "architect"}, // Order 10
+		{mode: TargetPersonality, name: "builder"},   // Order 20
+		{mode: TargetFocused},
+		{mode: TargetAll}, // wraps
+	})
+}
+
+func TestToggleTargetGroupByNone(t *testing.T) {
+	model := personalityTestModel()
+	model.Config.UI.GroupBy = "none"
+	model.applyTarget(targetStep{mode: TargetAll})
+	// No groups: stays all <-> focused, the unchanged baseline.
+	assertTargetCycle(t, &model, []targetStep{
+		{mode: TargetFocused},
+		{mode: TargetAll},
+		{mode: TargetFocused},
+	})
+}
+
+func TestToggleTargetSelfHealsStaleName(t *testing.T) {
+	model := personalityTestModel() // group_by: category
+	// An inconsistent state: an all-target carrying a leftover group name.
+	model.Target = TargetAll
+	model.TargetName = "stale"
+	model.toggleTarget()
+	if model.Target != TargetAll || model.TargetName != "" {
+		t.Fatalf("toggle from stale all: target = %v %q, want all with empty name", model.Target, model.TargetName)
+	}
+}
+
+func TestToggleTargetFromOffCycle(t *testing.T) {
+	model := personalityTestModel() // group_by: category
+	// A personality target set via /target is off-cycle when grouping by
+	// category; advancing lands on broadcast-to-all rather than getting stuck.
+	model.applyTarget(targetStep{mode: TargetPersonality, name: "architect"})
+	model.toggleTarget()
+	if model.Target != TargetAll || model.TargetName != "" {
+		t.Fatalf("off-cycle toggle: target = %v %q, want all", model.Target, model.TargetName)
+	}
+}
+
 func TestShowPersonalityFiltersDisplayedPanes(t *testing.T) {
 	model := personalityTestModel()
 	model.Width = 80

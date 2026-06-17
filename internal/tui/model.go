@@ -445,16 +445,69 @@ func (v *agentView) appendTranscript(chunk string, maxScrollback int) {
 	}
 }
 
-func (m *Model) toggleTarget() {
-	if m.Target == TargetAll {
-		m.Target = TargetFocused
-		m.TargetName = ""
-		m.Status = "input targets " + m.focusedName()
-		return
+// targetStep is one stop in the Ctrl+B broadcast-target cycle. For the group
+// modes, name is the personality or category name.
+type targetStep struct {
+	mode TargetMode
+	name string
+}
+
+// targetCycle is the ordered list Ctrl+B walks: broadcast-to-all, then each
+// group of the active ui.group_by (personality or category groups that have
+// agents, in configured order), then the focused agent. With group_by: none
+// there are no groups, so it stays all <-> focused.
+func (m Model) targetCycle() []targetStep {
+	steps := []targetStep{{mode: TargetAll}}
+	switch m.groupByLabel() {
+	case "personality":
+		for _, name := range m.orderedUsedPersonalities() {
+			steps = append(steps, targetStep{mode: TargetPersonality, name: name})
+		}
+	case "category":
+		for _, name := range m.orderedUsedCategories() {
+			steps = append(steps, targetStep{mode: TargetCategory, name: name})
+		}
 	}
-	m.Target = TargetAll
-	m.TargetName = ""
-	m.Status = "input targets all agents"
+	steps = append(steps, targetStep{mode: TargetFocused})
+	return steps
+}
+
+// currentTargetIndex finds the active target in the cycle, or -1 when the target
+// was set off-cycle (e.g. a /target personality while grouping by category).
+func (m Model) currentTargetIndex(cycle []targetStep) int {
+	// Compare the name for every step (it is "" for all/focused): a stale
+	// TargetName left on an all/focused target then reads as off-cycle, so the
+	// next toggle re-applies a clean step instead of carrying the stale name.
+	for i, s := range cycle {
+		if s.mode == m.Target && s.name == m.TargetName {
+			return i
+		}
+	}
+	return -1
+}
+
+// applyTarget sets the active input target and the matching status line.
+func (m *Model) applyTarget(s targetStep) {
+	m.Target = s.mode
+	m.TargetName = s.name
+	switch s.mode {
+	case TargetPersonality:
+		m.Status = "input targets personality " + m.personalityLabel(s.name)
+	case TargetCategory:
+		m.Status = "input targets category " + m.categoryLabel(s.name)
+	case TargetFocused:
+		m.Status = "input targets " + m.focusedName()
+	default:
+		m.Status = "input targets all agents"
+	}
+}
+
+// toggleTarget advances the input target one step through targetCycle (wrapping).
+// Advancing from an off-cycle target lands on broadcast-to-all.
+func (m *Model) toggleTarget() {
+	cycle := m.targetCycle()
+	next := (m.currentTargetIndex(cycle) + 1) % len(cycle)
+	m.applyTarget(cycle[next])
 }
 
 func (m *Model) toggleZoom() {

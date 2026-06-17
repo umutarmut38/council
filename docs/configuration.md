@@ -331,6 +331,7 @@ A map of agent name to config; the name labels the pane and artifacts.
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `enabled` | bool | `false` | Launch this agent. |
+| `inherit` | string | — | Reuse another agent's definition by name (a preset, global, or local agent), then override the keys set here. A field overrides only when set to a non-zero value, so an inherited non-zero scalar or orchestration flag can't be reset to its zero value (e.g. you can't set `exclude_build: false` to undo a base's `true`); only `terminal.resize`/`terminal.color` are tri-state. `enabled` is never inherited; chains are allowed. |
 | `command` | list | — | argv used to start the interactive agent. |
 | `cwd` | string | `"."` | Working directory for the process. |
 | `color` | string | — | 256-color index (`"212"`) or hex (`"#ff5f87"`) tinting the pane border; falls back to the personality color. |
