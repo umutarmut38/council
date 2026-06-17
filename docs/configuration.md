@@ -18,6 +18,12 @@ personalities: { … }          # optional: behavioral personas
 The generated default config ships every agent preset **disabled** and without
 auto-approval flags — enable what you use, or run `council config wizard`.
 
+> **Prefer a guided setup for a repo?** The
+> [`council-config` Agent Skill](../skills/README.md) interviews you and writes a
+> repo-local `.council.yaml` overlay (git-excluded via `.git/info/exclude`). It
+> installs into Claude Code, Codex CLI, Cursor, GitHub Copilot, and OpenCode via
+> `scripts/install-skill.sh`.
+
 ---
 
 ## `agents`

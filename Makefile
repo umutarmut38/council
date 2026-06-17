@@ -5,7 +5,7 @@ COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w -X github.com/umutarmut38/council/internal/version.Version=$(VERSION) -X github.com/umutarmut38/council/internal/version.Commit=$(COMMIT) -X github.com/umutarmut38/council/internal/version.Date=$(DATE)
 
-.PHONY: test vet build release-snapshot clean demo generate cover
+.PHONY: test vet build release-snapshot clean demo generate cover install-skill
 
 test:
 	go test ./...
@@ -24,6 +24,12 @@ generate:
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) $(CMD)
+
+# Install the council-config Agent Skill into your AI CLIs. Override the targets
+# with TARGETS=..., e.g. `make install-skill TARGETS="--target claude,codex"`.
+TARGETS ?= --all
+install-skill:
+	scripts/install-skill.sh $(TARGETS)
 
 # Record the terminal demo GIF (docs/assets/council-demo.gif). Requires vhs and
 # a configured council on PATH; see docs/demo.md.

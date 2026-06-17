@@ -45,6 +45,7 @@ adopt the diff. Maximum leverage, maximum token waste, zero regret.
 - [Resume](#resume)
 - [Documentation](#documentation)
 - [Examples](#examples)
+- [Config Skill](#config-skill)
 - [Configuration Notes](#configuration-notes)
 - [Development](#development)
 - [Security](#security)
@@ -328,6 +329,23 @@ The example issue can be used directly:
 ```text
 /plan @examples/issues/retry-backoff.md
 ```
+
+## Config Skill
+
+Don't want to hand-write `.council.yaml`? `council-config` is an
+[Agent Skill](skills/README.md) that interviews you about your council
+(members, roles, personalities, the review gate, UI) and writes a repo-local
+overlay — excluded from git via `.git/info/exclude`, never committed. It works
+across Claude Code, Codex CLI, Cursor, GitHub Copilot, and OpenCode. Install it
+into whichever CLIs you use:
+
+```bash
+scripts/install-skill.sh --all        # or --target claude,codex,cursor
+make install-skill                    # same thing, via Make
+```
+
+See [skills/README.md](skills/README.md) for the per-tool skill paths and
+installer options.
 
 ## Configuration Notes
 

@@ -24,7 +24,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
   shellcheck:
-    name: Shellcheck packaging scripts
+    name: Shellcheck shell scripts
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -34,9 +34,9 @@ jobs:
         shell: bash
         run: |
           shopt -s globstar nullglob
-          files=(packaging/**/*.sh)
+          files=(packaging/**/*.sh scripts/**/*.sh)
           if [ ${#files[@]} -eq 0 ]; then
-            echo "No shell scripts under packaging/; nothing to check."
+            echo "No shell scripts under packaging/ or scripts/; nothing to check."
             exit 0
           fi
           printf 'Checking: %s\n' "${files[@]}"
