@@ -4,10 +4,22 @@ All notable changes will be documented here.
 
 This project follows semantic versioning once `v0.1.0` is tagged.
 
-## Unreleased
+## v0.4.0 - 2026-06-17
+
+Agent inheritance and keyboard-driven broadcast targeting, plus config schema
+tooling, generated docs, artifact secret scanning, and quality automation.
 
 ### Added
 
+- **Agent inheritance (`inherit:`).** An agent can reuse another agent's whole
+  definition by name — a preset, a global agent, or another local agent,
+  resolved against the fully-merged config — and override only the keys it
+  declares, so worker/reviewer variants of the same CLI no longer repeat shared
+  `command`/`terminal`/`env` blocks. A field overrides only when set to a
+  non-zero value (terminal `resize`/`color` are tri-state); `env` merges per
+  key; `enabled` is never inherited; chains are allowed. Resolution runs once on
+  the fully-merged agent map, and `council doctor`/validation reports a dangling
+  base, a self-reference, or a cycle.
 - **Pre-launch `setup` commands and agent `env` (experimental, opt-in).**
   Council can export environment variables to agents (top-level `env` +
   per-agent `agents.<name>.env`) and run commands before any agent launches
@@ -20,9 +32,26 @@ This project follows semantic versioning once `v0.1.0` is tagged.
   `council doctor` warns. `setup` from a repo-local config is additionally
   gated by the trust store; `council doctor` lists the env keys and setup
   commands when enabled.
+- **`council config schema` and a shared command registry.** Config and command
+  documentation is generated from the source structs and a single command
+  registry, so CLI help, TUI command metadata, palette suggestions, and the docs
+  stay aligned; `council config schema` prints the reference (with JSON Schema
+  output), and a CI job fails on generated-doc drift.
+- **Artifact secret scanning.** `council artifacts scan [run] [--all]` flags
+  likely secrets in run artifacts, with pre-warnings before `report`/`pr`
+  sharing (raw PTY logs are never redacted).
+- **`/setup` observability.** Shows each setup command's lifecycle, readiness,
+  captured output, and exported env keys.
+- **`council-config` skill and a multi-CLI installer** for scaffolding a
+  repo-local `.council.yaml` interactively.
 
 ### Changed
 
+- **`Ctrl+B` cycles the broadcast target through groups.** It now walks
+  all → each group of the active `ui.group_by` (personality or category, in
+  configured order) → focused, instead of only toggling all ↔ focused — so
+  broadcasting to a personality/category group is reachable from the keyboard
+  (previously only via `/target`). With `group_by: none` it stays all ↔ focused.
 - **Approval-prompt detection reworked (now marked experimental).** The old
   detector matched substrings anywhere in the output stream and latched
   forever, so codex's greeting "What do you want to work on?" lit up
@@ -31,6 +60,17 @@ This project follows semantic versioning once `v0.1.0` is tagged.
   has been quiet for ~2s; the auto-flag clears itself when output resumes
   (manual `/attention` flags stick). New `ui.detect_approval_prompts: false`
   disables it.
+- **A deeper `council doctor --fix`**: next-action guidance, stack detection,
+  and safer, symlink-skipping artifact-permission repair.
+- Centralized command execution behind `internal/cmdrun` (context timeouts,
+  output caps, structured errors, and a fakeable runner), and added hermetic
+  CLI-layer tests for the `cmd/council` command and config/maintenance flows.
+
+### Quality / CI
+
+- New jobs for generated-doc drift, markdown link checking, YAML example
+  linting, and shellcheck, plus a coverage summary artifact — alongside the
+  existing race detector and Windows cross-build smoke.
 
 ## v0.3.0 - 2026-06-11
 
