@@ -1,11 +1,14 @@
 package orchestrate
 
 import (
+	cryptorand "crypto/rand"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
 	"os"
+	"time"
 
 	"github.com/umutarmut38/council/internal/config"
 )
@@ -59,8 +62,7 @@ func (c *Controller) VotePrompts() (map[string]string, error) {
 	} else {
 		// Randomize the letter assignment per run so position carries no signal
 		// about who wrote which plan.
-		shuffled := append([]string(nil), planned...)
-		rand.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+		shuffled := shufflePlanNames(planned)
 		c.refs = AnonymizePlans(shuffled, c.run.PlanPath)
 		if err := c.run.SaveVoteRefs(c.refs); err != nil {
 			return nil, err
@@ -91,6 +93,18 @@ func (c *Controller) VotePrompts() (map[string]string, error) {
 		prompts[voter] = VotePrompt(issue, excludeOwnRefs(c.refs, voter), planPaths, c.run.VotePath(voter))
 	}
 	return prompts, nil
+}
+
+func shufflePlanNames(planned []string) []string {
+	shuffled := append([]string(nil), planned...)
+	var seedBytes [8]byte
+	seed := time.Now().UnixNano()
+	if _, err := cryptorand.Read(seedBytes[:]); err == nil {
+		seed = int64(binary.LittleEndian.Uint64(seedBytes[:]))
+	}
+	rng := rand.New(rand.NewSource(seed))
+	rng.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+	return shuffled
 }
 
 func excludeOwnRefs(refs []PlanRef, voter string) []PlanRef {

@@ -117,12 +117,33 @@ dest_for() {
 same_as_source() {
   dest="$1"
   [ -d "$dest" ] || return 1
-  # Any source file missing or differing in the destination => not identical.
+  src_list=$(mktemp) || return 1
+  dest_list=$(mktemp) || {
+    rm -f "$src_list"
+    return 1
+  }
+
+  (cd "$src_dir" && find . -type f | sed 's|^\./||' | sort) >"$src_list"
+  (cd "$dest" && find . -type f | sed 's|^\./||' | sort) >"$dest_list"
+
+  # Source and destination file lists must match exactly; otherwise stale
+  # destination files would survive and violate the "copied verbatim" promise.
+  if ! cmp -s "$src_list" "$dest_list"; then
+    rm -f "$src_list" "$dest_list"
+    return 1
+  fi
+
+  # Any source file differing in the destination => not identical.
+  same=1
   while IFS= read -r rel; do
-    cmp -s "${src_dir}/${rel}" "${dest}/${rel}" || return 1
-  done <<EOF
-$(cd "$src_dir" && find . -type f | sed 's|^\./||')
-EOF
+    if ! cmp -s "${src_dir}/${rel}" "${dest}/${rel}"; then
+      same=0
+      break
+    fi
+  done <"$src_list"
+
+  rm -f "$src_list" "$dest_list"
+  [ "$same" -eq 1 ] || return 1
   return 0
 }
 
