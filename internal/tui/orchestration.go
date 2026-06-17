@@ -342,16 +342,58 @@ func firstLine(s string) string {
 	return s
 }
 
+// cmdStatus opens a persistent full-screen snapshot of the run: the phase rail
+// (with the pinned winner), live counts, and — reusing the same section builders as
+// /report — the plan vote breakdown (winner, Borda tally, per-voter ballots) and the
+// build/review/adopt outcome. It works the same in every phase because empty sections
+// are simply omitted.
 func (m *Model) cmdStatus() {
 	if m.orch == nil || m.orch.Run() == nil {
 		m.Status = "no active run"
 		return
 	}
+	run := m.orch.Run()
 	phase := m.phase
 	if phase == "" {
 		phase = "idle"
 	}
-	m.Status = "run " + m.orch.Run().Stamp + " · phase " + phase
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Status — run %s · phase %s\n\n", run.Stamp, phase)
+	if m.progress != nil {
+		b.WriteString(m.progress.phaseRail())
+		fmt.Fprintf(&b, "\n\nPlans %d · Votes %d · Diffs %d · Reviews %d\n",
+			m.progress.Plans, m.progress.Votes, m.progress.Diffs, m.progress.Reviews)
+	}
+	if working := m.buildingAgents(); len(working) > 0 {
+		fmt.Fprintf(&b, "\nBuilding: %s\n", strings.Join(working, ", "))
+	}
+
+	if summary, err := orchestrate.SummarizeRun(run.RootDir, run.Stamp); err == nil {
+		b.WriteString(orchestrate.StatusReport(run, summary))
+	}
+
+	m.openArtifactText("status: "+run.Stamp, b.String())
+	m.Status = "status — run " + run.Stamp + " · phase " + phase
+}
+
+// buildingAgents lists build participants whose pane is still running, so /status can
+// show live build activity. Returns nil outside the build phase.
+func (m Model) buildingAgents() []string {
+	if m.phase != "build" || m.orch == nil {
+		return nil
+	}
+	building := map[string]bool{}
+	for _, name := range m.orch.AgentsForPhase(config.PhaseBuild) {
+		building[name] = true
+	}
+	var out []string
+	for _, v := range m.Agents {
+		if building[v.Session.Name] && !v.Session.Done {
+			out = append(out, v.Session.Name)
+		}
+	}
+	return out
 }
 
 // cmdClean is a two-step removal: the first call previews the worktrees and

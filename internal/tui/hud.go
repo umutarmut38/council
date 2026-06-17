@@ -44,9 +44,10 @@ type runProgress struct {
 	Diffs   int
 	Reviews int
 
-	PlanWinner  string
-	BuildWinner string
-	Adopted     string
+	PlanWinner       string
+	PlanWinnerLetter string
+	BuildWinner      string
+	Adopted          string
 }
 
 // refreshProgress recomputes the cached run progress from disk. Call it on
@@ -68,6 +69,7 @@ func (m *Model) computeProgress() *runProgress {
 		return nil
 	}
 	p.PlanWinner = summary.Winner
+	p.PlanWinnerLetter = run.ResultLetter()
 	p.BuildWinner = m.buildWinnerQuiet()
 	p.Plans, p.Votes, p.Diffs, p.Reviews = len(summary.Plans), len(summary.Votes), len(summary.Diffs), len(summary.Reviews)
 	if adopted, ok := run.Adoption(); ok {
@@ -188,6 +190,24 @@ func (p *runProgress) phaseRail() string {
 		default:
 			seg += " ○"
 		}
+		// Pin the outcome to the rail so the winner survives across phases. On a
+		// narrow terminal fitText drops this tail first, which is acceptable.
+		if ph.State == phaseDone {
+			switch ph.Label {
+			case "Vote":
+				if p.PlanWinner != "" {
+					if p.PlanWinnerLetter != "" {
+						seg += fmt.Sprintf(" %s(%s)", shortAgent(p.PlanWinner), p.PlanWinnerLetter)
+					} else {
+						seg += " " + shortAgent(p.PlanWinner)
+					}
+				}
+			case "Review":
+				if p.BuildWinner != "" {
+					seg += " " + shortAgent(p.BuildWinner)
+				}
+			}
+		}
 		parts = append(parts, seg)
 	}
 	rail := strings.Join(parts, "  ")
@@ -249,6 +269,15 @@ func capitalize(s string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// shortAgent trims a role suffix (e.g. "codex-worker" -> "codex") for the compact
+// rail winner tag. Display only; /status shows the full name.
+func shortAgent(name string) string {
+	if i := strings.IndexByte(name, '-'); i > 0 {
+		return name[:i]
+	}
+	return name
 }
 
 // railPhase returns the rail segment for the currently active phase.

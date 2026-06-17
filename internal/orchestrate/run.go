@@ -194,6 +194,23 @@ func resultWinner(path string) string {
 	return payload.Winner
 }
 
+// ResultLetter returns the winning plan's anonymized ballot letter from result.json,
+// or "" when no vote result exists yet. Kept here so the TUI never parses result.json
+// itself.
+func (r *Run) ResultLetter() string {
+	data, err := os.ReadFile(r.ResultPath())
+	if err != nil {
+		return ""
+	}
+	var payload struct {
+		Letter string `json:"winner_letter"`
+	}
+	if json.Unmarshal(data, &payload) != nil {
+		return ""
+	}
+	return payload.Letter
+}
+
 func markdownNames(dir string) []string {
 	return suffixNames(dir, ".md")
 }
