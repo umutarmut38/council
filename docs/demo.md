@@ -5,16 +5,27 @@ flow faster than static diagrams. The recording is scripted with
 [VHS](https://github.com/charmbracelet/vhs) so it stays reproducible: the script
 is committed to the repo and anyone can regenerate the recording from source.
 
-<!--
-Once the MP4 has been recorded and committed, embed it here with a video tag
-(GitHub renders an uploaded .mp4 inline; plain Markdown image syntax does not):
+## Broadcasting To Every Agent
 
-<video src="assets/council-demo.mp4" controls></video>
--->
+The simplest thing council does is fan a single prompt out to every agent pane
+at once: type in the composer, press `Enter`, and all agents receive it
+simultaneously.
 
-> The recorded MP4 (`docs/assets/council-demo.mp4`) is generated locally and is
-> not committed, because it requires live agent CLIs to produce. Run the tape
-> (below) to create it.
+<p align="center">
+  <img src="assets/council-demo-simple-hello.gif" width="800" alt="Broadcasting one prompt to every council agent at once">
+</p>
+
+## The Full Orchestration Run
+
+The full run drives **plan → vote → build → review → adopt** end to end against
+the playground in [`poc/`](../poc).
+
+<p align="center">
+  <img src="assets/council-demo.gif" width="800" alt="Council orchestration: plan, vote, build, review, adopt">
+</p>
+
+The recording is generated locally from the committed tape (below), because it
+requires live agent CLIs to produce.
 
 ## What The Demo Shows
 
@@ -53,20 +64,20 @@ approximate and is the long pole of the recording; tune it to your
 hardware/agents/models.
 
 Because real runs are minutes long (build most of all), the resulting recording
-is long. The tape writes an `.mp4` (a scrubbable, compact video is the sensible
-choice for a multi-minute live demo). To tighten it for sharing you can:
+is long. The tape writes a `.gif` so it embeds inline in the README and these
+docs with plain Markdown image syntax. To tighten it for sharing you can:
 
 - Lower the fallback build `Sleep` and the `@timeout` ceilings to match your
   machine once you know how long a run actually takes.
 - Add `Set PlaybackSpeed 2` (or higher) near the top of the tape to play the
   recording back faster without re-running the agents.
-- Trim or split the output afterwards, or change the `Output` line to `.gif` /
+- Trim or split the output afterwards, or change the `Output` line to `.mp4` /
   `.webm` for a different format.
 
 ## Regenerating The Recording
 
 The tape lives at [`council-demo.tape`](assets/council-demo.tape) and writes its
-output to `docs/assets/council-demo.mp4`.
+output to `docs/assets/council-demo.gif`.
 
 1. **Install VHS** — `brew install vhs`, or see the
    [VHS install guide](https://github.com/charmbracelet/vhs#installation).
@@ -88,9 +99,9 @@ output to `docs/assets/council-demo.mp4`.
    vhs docs/assets/council-demo.tape
    ```
 
-This produces `docs/assets/council-demo.mp4`. To preview without writing a file,
+This produces `docs/assets/council-demo.gif`. To preview without writing a file,
 use `vhs --publish docs/assets/council-demo.tape`, or change the `Output` line in
-the tape to `.gif`/`.webm`/`.txt` for a different format.
+the tape to `.mp4`/`.webm`/`.txt` for a different format.
 
 The `Wait` timeouts in the tape are safety ceilings; the one fixed `Sleep`
 (build work) is approximate. Tune both to your machine and agents so each phase

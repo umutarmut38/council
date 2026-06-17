@@ -1,6 +1,23 @@
-# council
+<h1 align="center">council</h1>
 
-> _I subscribed to all of them. Might as well make them earn it._
+<p align="center">
+  <em>I subscribed to all of them. Might as well make them earn it.</em>
+</p>
+
+<p align="center">
+  <a href="https://github.com/umutarmut38/council/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/umutarmut38/council/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/umutarmut38/council/actions/workflows/quality.yml"><img alt="Quality" src="https://github.com/umutarmut38/council/actions/workflows/quality.yml/badge.svg"></a>
+  <a href="go.mod"><img alt="Go 1.23" src="https://img.shields.io/badge/Go-1.23-00ADD8?logo=go&logoColor=white"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/council-demo-simple-hello.gif" width="800" alt="Broadcasting one prompt to every council agent at once">
+</p>
+
+<p align="center">
+  <em>Broadcast one prompt to every agent at once.</em>
+</p>
 
 At some point I had Claude Code, Codex, Copilot, Cursor, and a growing list of
 agent CLIs all authenticated on my machine, each with their own opinions, their
@@ -16,6 +33,24 @@ top. Your agents propose, judge each other's work, build the winner, and you
 adopt the diff. Maximum leverage, maximum token waste, zero regret.
 
 ![Council terminal grid](docs/assets/council-grid.svg)
+
+## Table of Contents
+
+- [Why](#why)
+- [Features](#features)
+- [Install](#install)
+- [Requirements](#requirements)
+- [Quick Start](#quick-start)
+- [Demo](#demo)
+- [Orchestration Workflow](#orchestration-workflow)
+- [Roles and Personalities](#roles-and-personalities)
+- [Resume](#resume)
+- [Documentation](#documentation)
+- [Examples](#examples)
+- [Configuration Notes](#configuration-notes)
+- [Development](#development)
+- [Security](#security)
+- [License](#license)
 
 ## Why
 
@@ -172,6 +207,24 @@ Inside the app:
 - Press `Ctrl+G` for overview.
 - Press `Ctrl+X` to quit.
 
+## Demo
+
+A full run, end to end: the agents draft plans, vote on each other's work
+(self-votes excluded), build the winner in an isolated git worktree, and you
+adopt the resulting diff.
+
+<p align="center">
+  <img src="docs/assets/council-demo.gif" width="800" alt="Council orchestration: plan, vote, build, review, adopt">
+</p>
+
+<p align="center">
+  <em>plan → vote → build → review → adopt, end to end.</em>
+</p>
+
+The recording is a reproducible [VHS](https://github.com/charmbracelet/vhs)
+capture — see the [terminal demo](docs/demo.md) to regenerate it from the
+committed tape.
+
 ## Orchestration Workflow
 
 > _Democracy, but for code. What could go wrong._
@@ -188,9 +241,6 @@ Run the council flow from the composer:
 /review
 /adopt
 ```
-
-See the [terminal demo](docs/demo.md) for a recorded walkthrough you can
-regenerate with VHS.
 
 What happens:
 

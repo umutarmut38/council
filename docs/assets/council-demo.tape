@@ -1,7 +1,7 @@
 # council — plan → vote → build → review → adopt demo (live agents)
 #
 # Regenerate with:  vhs docs/assets/council-demo.tape   (from the council repo root)
-# Produces:         docs/assets/council-demo.mp4
+# Produces:         docs/assets/council-demo.gif
 #
 # What it shows:
 #   A full council run driven against the self-contained playground in poc/.
@@ -35,7 +35,7 @@
 #   Optional: poc's headroom proxy only starts if poc sets
 #   experimental.setup_env: true (off by default, so agents run directly).
 
-Output docs/assets/council-demo.mp4
+Output docs/assets/council-demo.gif
 
 # Fail fast if council is not installed rather than recording an error.
 Require council
