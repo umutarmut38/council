@@ -18,7 +18,7 @@ simultaneously.
 ## The Full Orchestration Run
 
 The full run drives **plan → vote → build → review → adopt** end to end against
-the playground in [`poc/`](../poc).
+the playground in `poc/`.
 
 <p align="center">
   <img src="assets/council-demo.gif" width="800" alt="Council orchestration: plan, vote, build, review, adopt">
@@ -30,7 +30,7 @@ requires live agent CLIs to produce.
 ## What The Demo Shows
 
 The tape runs a complete council workflow inside the self-contained playground
-in [`poc/`](../poc). It `cd`s into `poc/` first, so council loads the
+in `poc/`. It `cd`s into `poc/` first, so council loads the
 playground's own (locally git-excluded) `poc/.council.yaml` and `@TASK.md`
 resolves to `poc/TASK.md` — the "Build a Local-First Dependency Kanban" task.
 `poc` enables two agents, `claude` and `codex` (each acting as both worker and

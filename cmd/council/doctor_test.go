@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -91,6 +92,9 @@ func TestDoctorFixWritesDefaultConfig(t *testing.T) {
 // TestDoctorFixTightensArtifactPerms: --fix resets broadened run-artifact perms
 // back to owner-only.
 func TestDoctorFixTightensArtifactPerms(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits are not meaningful on Windows")
+	}
 	setTempHome(t)
 	dir := t.TempDir()
 	chdir(t, dir)
@@ -126,6 +130,9 @@ func TestDoctorFixTightensArtifactPerms(t *testing.T) {
 }
 
 func TestDoctorFixSkipsArtifactSymlinks(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink chmod behavior is not meaningful on Windows")
+	}
 	dir := t.TempDir()
 	root := filepath.Join(dir, ".council", "runs", "20260101-000000")
 	if err := os.MkdirAll(root, 0o700); err != nil {
