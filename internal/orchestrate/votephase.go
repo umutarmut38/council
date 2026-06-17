@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/umutarmut38/council/internal/config"
+	"github.com/umutarmut38/council/internal/fsperm"
 )
 
 // PlanPrompts returns one prompt per planning agent. Plan/vote phases run in
@@ -79,7 +80,7 @@ func (c *Controller) VotePrompts() (map[string]string, error) {
 			if !ok {
 				return nil, fmt.Errorf("missing plan for assignment %s (%s)", ref.Letter, ref.Agent)
 			}
-			if err := os.WriteFile(dest, []byte(body), 0o644); err != nil {
+			if err := os.WriteFile(dest, []byte(body), fsperm.File()); err != nil {
 				return nil, fmt.Errorf("write anonymized plan %s: %w", ref.Letter, err)
 			}
 		}

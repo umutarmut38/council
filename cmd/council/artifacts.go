@@ -118,6 +118,11 @@ func scanArtifactDir(runDir string) ([]fileFindings, error) {
 		if walkErr != nil || d.IsDir() {
 			return nil
 		}
+		// Skip symlinks so scanning stays scoped to the run's own artifacts
+		// and can't be redirected to arbitrary files outside the run tree.
+		if d.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
 		data, rerr := os.ReadFile(path)
 		if rerr != nil || isBinary(data) {
 			return nil

@@ -150,8 +150,9 @@ func (s *setupSession) stop() {
 			done := make(chan error, 1)
 			go func() { done <- bp.cmd.Wait() }()
 			select {
-			case <-done: // exited within the grace period
-				bp.h.Stopped(nil)
+			case werr := <-done: // exited within the grace period
+				// Surface a non-zero/early exit instead of reporting a clean stop.
+				bp.h.Stopped(werr)
 			case <-time.After(grace):
 				_ = bp.cmd.Process.Kill()
 				<-done // reap the killed process
