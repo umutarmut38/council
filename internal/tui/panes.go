@@ -143,10 +143,17 @@ func (m Model) displayAgentIndexes() []int {
 }
 
 func (m Model) displayPositionForAgent(agentIndex int) int {
-	for pos, idx := range m.displayAgentIndexes() {
-		if idx == agentIndex {
+	// Single pass: count displayed agents up to agentIndex instead of
+	// allocating displayAgentIndexes(), since this is on a UI hot path.
+	pos := 0
+	for i, view := range m.Agents {
+		if !m.agentIsDisplayed(view.Session.Name) {
+			continue
+		}
+		if i == agentIndex {
 			return pos
 		}
+		pos++
 	}
 	return -1
 }
