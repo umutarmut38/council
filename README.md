@@ -32,8 +32,6 @@ orchestrates a structured **plan → vote → build → review → adopt** workf
 top. Your agents propose, judge each other's work, build the winner, and you
 adopt the diff. Maximum leverage, maximum token waste, zero regret.
 
-![Council terminal grid](docs/assets/council-grid.svg)
-
 ## Table of Contents
 
 - [Why](#why)

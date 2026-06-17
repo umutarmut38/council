@@ -4,8 +4,6 @@
 It gives each agent a live PTY pane, lets you broadcast or direct prompts, and
 can orchestrate a plan → vote → build → review → adopt workflow.
 
-![Council terminal grid](assets/council-grid.svg)
-
 ## Start Here
 
 - [Demo](demo.md) — a reproducible VHS terminal recording of the full
