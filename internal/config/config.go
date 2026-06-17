@@ -443,6 +443,11 @@ func LoadRaw(path string) (Config, []byte, error) {
 // path a global ~/.council.yaml takes when no repo-local overlay is merged onto
 // it. Inheritance is resolved before Normalize so a child inherits its base's
 // terminal settings before generic defaults fill the gaps.
+//
+// Load is for runtime use; its result is resolved and normalized and so is NOT
+// suitable for round-tripping (re-marshaling expands inherited fields and bakes
+// defaults). Code that loads a config to write it back out, or that merges a
+// repo-local overlay, should use LoadRaw and resolve/normalize itself.
 func Load(path string) (Config, []byte, error) {
 	cfg, raw, err := LoadRaw(path)
 	if err != nil {
@@ -990,16 +995,20 @@ func mergeEnv(base, over map[string]string) map[string]string {
 // Validate to report.
 const maxInheritDepth = 32
 
-// ResolveInheritance resolves every agent's `inherit` chain in place. Load
-// resolves internally before normalizing; this is the entry point for callers
-// that merge configs outside Load (the run path and `doctor`), which must
-// resolve on the fully-merged agent map — before Normalize, so a child inherits
-// its base's terminal settings before generic defaults fill the gaps.
+// ResolveInheritance resolves every agent's `inherit` chain in place. It must
+// run once on the fully-merged agent map, before Normalize, so a child inherits
+// its base's terminal settings before generic defaults fill the gaps. The run
+// path and `doctor` load the global config with LoadRaw, apply the repo-local
+// overlay, then call this — resolving the global config first (as Load does for
+// standalone use) would bake a global child and stop a local override of its
+// base from reaching it.
 //
-// Resolution is idempotent: overlaying a resolved child onto an unchanged base
-// is a no-op, so the run path can call this after Load has already resolved the
-// global agents. `inherit` is left in place (not cleared) so Validate can still
-// report a dangling base or a cycle and so config.effective.yaml shows intent.
+// Resolution is idempotent only while the agent map is unchanged: re-running it
+// on an unmodified map is a no-op, but once a base changes you must re-resolve
+// from the unresolved children to pick the change up (hence LoadRaw + resolve
+// once after overlays). `inherit` is left in place (not cleared) so Validate can
+// still report a dangling base or a cycle and so config.effective.yaml shows
+// intent.
 func (c *Config) ResolveInheritance() { c.resolveAgentInheritance() }
 
 // resolveAgentInheritance overlays each agent that sets `inherit` onto a copy of
