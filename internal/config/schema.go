@@ -32,6 +32,7 @@ func Schema() []SchemaSection {
 			Intro: "A map of agent name to config; the name labels the pane and artifacts.",
 			Fields: []SchemaField{
 				{"enabled", "bool", "`false`", "Launch this agent."},
+				{"inherit", "string", "—", "Reuse another agent's definition by name (a preset, global, or local agent), then override only the keys set here. `enabled` is never inherited; chains are allowed."},
 				{"command", "list", "—", "argv used to start the interactive agent."},
 				{"cwd", "string", "`\".\"`", "Working directory for the process."},
 				{"color", "string", "—", "256-color index (`\"212\"`) or hex (`\"#ff5f87\"`) tinting the pane border; falls back to the personality color."},

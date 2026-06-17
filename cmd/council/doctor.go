@@ -76,6 +76,7 @@ func doctor(args []string) error {
 			case merr != nil:
 				fail("repo config %s: %v", localPath, merr)
 			case config.LocalConfigTrust(localPath, raw) == config.Trusted:
+				merged.ResolveInheritance()
 				merged.Normalize()
 				cfg = merged
 				ok("repo config %s applied (trusted)", localPath)

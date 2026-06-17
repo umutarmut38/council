@@ -32,6 +32,7 @@ names unique after case-folding.
 | Key            | Type        | Default              | Notes |
 |----------------|-------------|----------------------|-------|
 | `enabled`      | bool        | `false`              | Include in default runs. |
+| `inherit`      | str         | —                    | Reuse another agent's definition by name (preset, global, or local), then override only the keys set here. `enabled` is never inherited; chains allowed. |
 | `command`      | list[str]   | —                    | argv to launch the CLI, e.g. `["claude"]`. |
 | `cwd`          | str         | `"."`                | Working dir. |
 | `color`        | str         | —                    | 256-color index (`"212"`) or hex (`"#ff5f87"`) tinting the pane border; falls back to the personality color. |

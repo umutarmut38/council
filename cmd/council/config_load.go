@@ -75,6 +75,9 @@ func loadEffectiveConfig(noLocal bool) (config.Config, configSources, error) {
 	if err != nil {
 		return cfg, sources, fmt.Errorf("%s: %w", localPath, err)
 	}
+	// Resolve `inherit` on the fully-merged map (so a local agent can inherit a
+	// global/preset base) before Normalize fills per-agent defaults.
+	merged.ResolveInheritance()
 	merged.Normalize()
 	sources.LocalPath = localPath
 	sources.LocalRaw = rawLocal
