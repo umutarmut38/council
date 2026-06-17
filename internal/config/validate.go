@@ -57,7 +57,7 @@ func validateAgentInheritance(c Config) error {
 	for _, name := range names {
 		seen := map[string]bool{name: true}
 		cur := name
-		for {
+		for depth := 0; ; depth++ {
 			base := c.Agents[cur].Inherit
 			if base == "" {
 				break
@@ -70,6 +70,11 @@ func validateAgentInheritance(c Config) error {
 			}
 			if seen[base] {
 				return fmt.Errorf("agent %q has a circular inherit chain", name)
+			}
+			// Resolution stops after maxInheritDepth levels; report an over-deep
+			// (but acyclic) chain rather than leaving it silently half-resolved.
+			if depth >= maxInheritDepth {
+				return fmt.Errorf("agent %q has an inherit chain deeper than %d", name, maxInheritDepth)
 			}
 			seen[base] = true
 			cur = base

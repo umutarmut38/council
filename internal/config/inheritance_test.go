@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -283,5 +284,69 @@ func TestInheritDepthLimitDoesNotHang(t *testing.T) {
 	cfg.ResolveInheritance() // must return, not blow the stack
 	if got := cfg.Agents["a1"].Command; len(got) == 0 || got[0] != "root" {
 		t.Fatalf("a1 command = %v, want resolved root", got)
+	}
+}
+
+// TestInheritCrossLayerBaseOverride: the global config defines BOTH a base and a
+// child that inherits it, and a local overlay changes the base. The run path
+// loads the global RAW (LoadRaw) and resolves once after the overlay, so the
+// child must reflect the LOCAL base — not the value it would have inherited if
+// the global were resolved before the overlay.
+func TestInheritCrossLayerBaseOverride(t *testing.T) {
+	globalPath := filepath.Join(t.TempDir(), "global.yaml")
+	if err := os.WriteFile(globalPath, []byte(`
+agents:
+  base:
+    command: ["old"]
+    terminal:
+      submit_delay_ms: 100
+  child:
+    inherit: base
+    enabled: true
+    role: [worker]
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := LoadRaw(globalPath) // raw: child stays unresolved
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged, err := ApplyLocalOverride(cfg, []byte(`
+agents:
+  base:
+    command: ["new", "--x"]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	merged.ResolveInheritance()
+	merged.Normalize()
+
+	child := merged.Agents["child"]
+	if !reflect.DeepEqual(child.Command, []string{"new", "--x"}) {
+		t.Fatalf("child command = %v, want local base [new --x]", child.Command)
+	}
+	if child.Terminal.SubmitDelayMs != 100 {
+		t.Fatalf("child submit_delay = %d, want inherited 100", child.Terminal.SubmitDelayMs)
+	}
+}
+
+// TestValidateRejectsTooDeepInheritChain: a chain deeper than the resolution cap
+// is reported by Validate instead of being silently left half-resolved.
+func TestValidateRejectsTooDeepInheritChain(t *testing.T) {
+	cfg := Config{Agents: map[string]AgentConfig{}}
+	const n = maxInheritDepth + 5
+	for i := 0; i <= n; i++ {
+		ac := AgentConfig{}
+		if i == 0 {
+			ac.Command = []string{"root"}
+		} else {
+			ac.Inherit = fmt.Sprintf("a%d", i-1)
+		}
+		cfg.Agents[fmt.Sprintf("a%d", i)] = ac
+	}
+	err := cfg.Validate()
+	if err == nil || !strings.Contains(err.Error(), "deeper than") {
+		t.Fatalf("want too-deep inherit error, got %v", err)
 	}
 }

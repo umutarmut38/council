@@ -419,7 +419,13 @@ func Default() Config {
 	}
 }
 
-func Load(path string) (Config, []byte, error) {
+// LoadRaw reads and decodes a config into the defaults but does NOT resolve
+// `inherit` or normalize. Callers that merge a repo-local overlay use this so
+// inheritance is resolved exactly once on the fully-merged agent map (see
+// ResolveInheritance): resolving the global config first would bake a global
+// child's inherited fields and stop a local override of its base from reaching
+// the child.
+func LoadRaw(path string) (Config, []byte, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return Config{}, nil, err
@@ -430,9 +436,18 @@ func Load(path string) (Config, []byte, error) {
 		return Config{}, nil, fmt.Errorf("load config: %w", err)
 	}
 	mergeDefaultAgentOrchestration(&cfg, raw, Default().Agents)
-	// Resolve `inherit` before normalizing so a child copies its base's terminal
-	// settings before generic defaults fill them in. The run path re-resolves on
-	// the merged map (a no-op for these already-resolved agents).
+	return cfg, raw, nil
+}
+
+// Load reads, resolves inheritance, and normalizes a standalone config — the
+// path a global ~/.council.yaml takes when no repo-local overlay is merged onto
+// it. Inheritance is resolved before Normalize so a child inherits its base's
+// terminal settings before generic defaults fill the gaps.
+func Load(path string) (Config, []byte, error) {
+	cfg, raw, err := LoadRaw(path)
+	if err != nil {
+		return Config{}, nil, err
+	}
 	cfg.resolveAgentInheritance()
 	cfg.Normalize()
 	return cfg, raw, nil

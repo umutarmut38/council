@@ -44,14 +44,16 @@ func doctor(args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg, _, err := config.Load(cfgPath)
+	// Load raw (unresolved): a trusted local overlay may change a base, so
+	// inheritance is resolved once below, after the overlay.
+	cfg, _, err := config.LoadRaw(cfgPath)
 	if errors.Is(err, os.ErrNotExist) && *fix {
 		if werr := config.WriteDefault(cfgPath, false); werr != nil {
 			fail("could not write default config %s: %v", cfgPath, werr)
 			return errors.New("doctor found problems")
 		}
 		fixed("wrote default config %s (all agents disabled; enable some or run `council config wizard`)", cfgPath)
-		cfg, _, err = config.Load(cfgPath)
+		cfg, _, err = config.LoadRaw(cfgPath)
 	}
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -76,8 +78,6 @@ func doctor(args []string) error {
 			case merr != nil:
 				fail("repo config %s: %v", localPath, merr)
 			case config.LocalConfigTrust(localPath, raw) == config.Trusted:
-				merged.ResolveInheritance()
-				merged.Normalize()
 				cfg = merged
 				ok("repo config %s applied (trusted)", localPath)
 			case config.LocalConfigTrust(localPath, raw) == config.TrustChanged:
@@ -89,6 +89,11 @@ func doctor(args []string) error {
 	} else {
 		ok("no repo-local config")
 	}
+
+	// Resolve `inherit` once on the final (merged or global-only) map, then
+	// normalize, before validating and inspecting agents below.
+	cfg.ResolveInheritance()
+	cfg.Normalize()
 
 	if err := cfg.Validate(); err != nil {
 		fail("config: %v", err)
