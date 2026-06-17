@@ -15,7 +15,13 @@ import (
 )
 
 type AgentConfig struct {
-	Enabled bool     `yaml:"enabled"`
+	Enabled bool `yaml:"enabled"`
+	// Inherit names another agent whose definition this agent reuses: every
+	// field is copied from the base, then the keys set here override it (see
+	// ResolveInheritance). The base is resolved against the fully-merged config,
+	// so it may be a preset, a global agent, or another local agent. `enabled`
+	// is never inherited — each agent declares its own.
+	Inherit string   `yaml:"inherit,omitempty"`
 	Command []string `yaml:"command"`
 	CWD     string   `yaml:"cwd"`
 	// Color tints this agent's pane border and title (a 256-color code such
@@ -424,6 +430,10 @@ func Load(path string) (Config, []byte, error) {
 		return Config{}, nil, fmt.Errorf("load config: %w", err)
 	}
 	mergeDefaultAgentOrchestration(&cfg, raw, Default().Agents)
+	// Resolve `inherit` before normalizing so a child copies its base's terminal
+	// settings before generic defaults fill them in. The run path re-resolves on
+	// the merged map (a no-op for these already-resolved agents).
+	cfg.resolveAgentInheritance()
 	cfg.Normalize()
 	return cfg, raw, nil
 }
@@ -958,4 +968,173 @@ func mergeEnv(base, over map[string]string) map[string]string {
 		merged[k] = v
 	}
 	return merged
+}
+
+// maxInheritDepth bounds an `inherit` chain so a cycle or a pathological config
+// can't blow the stack; a chain longer than this is left unresolved for
+// Validate to report.
+const maxInheritDepth = 32
+
+// ResolveInheritance resolves every agent's `inherit` chain in place. Load
+// resolves internally before normalizing; this is the entry point for callers
+// that merge configs outside Load (the run path and `doctor`), which must
+// resolve on the fully-merged agent map — before Normalize, so a child inherits
+// its base's terminal settings before generic defaults fill the gaps.
+//
+// Resolution is idempotent: overlaying a resolved child onto an unchanged base
+// is a no-op, so the run path can call this after Load has already resolved the
+// global agents. `inherit` is left in place (not cleared) so Validate can still
+// report a dangling base or a cycle and so config.effective.yaml shows intent.
+func (c *Config) ResolveInheritance() { c.resolveAgentInheritance() }
+
+// resolveAgentInheritance overlays each agent that sets `inherit` onto a copy of
+// its fully-resolved base, so the child reuses the base's definition and only
+// the keys it declares win. It is tolerant: an unknown base, a self-reference,
+// a cycle, or an over-deep chain leaves the child as-is (with `inherit` intact)
+// for Validate to flag, rather than erroring on the run path.
+func (c *Config) resolveAgentInheritance() {
+	if len(c.Agents) == 0 {
+		return
+	}
+	names := make([]string, 0, len(c.Agents))
+	for name := range c.Agents {
+		names = append(names, name)
+	}
+	sort.Strings(names) // deterministic order; resolution is independent of it
+	for _, name := range names {
+		c.resolveAgentOne(name, map[string]bool{})
+	}
+}
+
+// resolveAgentOne resolves a single agent, recursing into its base first so a
+// multi-level chain (c inherits b inherits a) resolves fully. visiting tracks
+// the active chain for cycle detection within this resolution.
+func (c *Config) resolveAgentOne(name string, visiting map[string]bool) AgentConfig {
+	agent := c.Agents[name]
+	if agent.Inherit == "" {
+		return agent
+	}
+	if len(visiting) >= maxInheritDepth || visiting[name] || agent.Inherit == name {
+		return agent // cycle / self / too deep: leave as-is for Validate
+	}
+	if _, ok := c.Agents[agent.Inherit]; !ok {
+		return agent // unknown base: leave as-is for Validate
+	}
+	visiting[name] = true
+	base := c.resolveAgentOne(agent.Inherit, visiting)
+	delete(visiting, name)
+
+	merged := overlayAgent(base, agent)
+	c.Agents[name] = merged
+	return merged
+}
+
+// overlayAgent returns base with child's explicitly-set fields applied on top.
+// Enabled is taken from the child unconditionally so inheriting a base never
+// silently activates (or deactivates) the child. A child cannot reset an
+// inherited non-zero scalar back to its zero value (the terminal *bool fields
+// are the tri-state exception); overriding to a different value always works.
+func overlayAgent(base, child AgentConfig) AgentConfig {
+	out := base
+	out.Enabled = child.Enabled
+	out.Inherit = child.Inherit
+	if len(child.Command) > 0 {
+		out.Command = child.Command
+	}
+	if child.CWD != "" {
+		out.CWD = child.CWD
+	}
+	if child.Color != "" {
+		out.Color = child.Color
+	}
+	if child.Personality != "" {
+		out.Personality = child.Personality
+	}
+	if len(child.Role) > 0 {
+		out.Role = child.Role
+	}
+	out.Env = mergeEnv(base.Env, child.Env)
+	out.Terminal = overlayTerminal(base.Terminal, child.Terminal)
+	out.Orchestration = overlayOrchestration(base.Orchestration, child.Orchestration)
+	return out
+}
+
+// overlayTerminal merges child's set terminal fields over base's. The *bool
+// fields (Resize, Color) are tri-state: nil inherits, non-nil overrides — so a
+// child can override an inherited true back to false.
+func overlayTerminal(base, child TerminalConfig) TerminalConfig {
+	out := base
+	if child.Renderer != "" {
+		out.Renderer = child.Renderer
+	}
+	if child.PTYSize != "" {
+		out.PTYSize = child.PTYSize
+	}
+	if child.Cols != 0 {
+		out.Cols = child.Cols
+	}
+	if child.Rows != 0 {
+		out.Rows = child.Rows
+	}
+	if child.SendMode != "" {
+		out.SendMode = child.SendMode
+	}
+	if child.BeforeSendSequence != "" {
+		out.BeforeSendSequence = child.BeforeSendSequence
+	}
+	if child.SubmitSequence != "" {
+		out.SubmitSequence = child.SubmitSequence
+	}
+	if child.AfterSubmitSequence != "" {
+		out.AfterSubmitSequence = child.AfterSubmitSequence
+	}
+	if child.SubmitDelayMs != 0 {
+		out.SubmitDelayMs = child.SubmitDelayMs
+	}
+	if child.Resize != nil {
+		out.Resize = child.Resize
+	}
+	if child.Color != nil {
+		out.Color = child.Color
+	}
+	return out
+}
+
+// overlayOrchestration merges child's orchestration over base's. Exclusions and
+// prompt-in-command flags are OR-ed (a child can add an exclusion but, by the
+// zero-value rule, cannot remove one it inherits); phase commands override when
+// the child sets them.
+func overlayOrchestration(base, child OrchestrationConfig) OrchestrationConfig {
+	out := base
+	if child.Exclude {
+		out.Exclude = true
+	}
+	if child.ExcludePlan {
+		out.ExcludePlan = true
+	}
+	if child.ExcludeVote {
+		out.ExcludeVote = true
+	}
+	if child.ExcludeBuild {
+		out.ExcludeBuild = true
+	}
+	if len(child.PlanCommand) > 0 {
+		out.PlanCommand = child.PlanCommand
+	}
+	if len(child.VoteCommand) > 0 {
+		out.VoteCommand = child.VoteCommand
+	}
+	if len(child.BuildCommand) > 0 {
+		out.BuildCommand = child.BuildCommand
+	}
+	if child.PlanPromptInCommand {
+		out.PlanPromptInCommand = true
+	}
+	if child.VotePromptInCommand {
+		out.VotePromptInCommand = true
+	}
+	if child.BuildPromptInCommand {
+		out.BuildPromptInCommand = true
+	}
+	return out
 }
