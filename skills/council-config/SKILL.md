@@ -86,8 +86,11 @@ list. Current preset commands (from `internal/config/presets.go`):
 > personalities. To avoid repeating the shared `command`/`terminal`/`env`,
 > give one member an `inherit: <other-agent>` key: it copies that agent's whole
 > definition (a preset, a global agent, or another local agent) and overrides
-> only the keys you set. `enabled` is never inherited — declare it per member —
-> and `inherit` chains are allowed. Example:
+> the keys you set. A field overrides only when you set a non-zero value, so an
+> inherited non-zero scalar or orchestration flag can't be reset to its zero
+> value (e.g. you can't add `exclude_build: false` to undo a base's `true`); only
+> `terminal.resize`/`terminal.color` are tri-state. `enabled` is never inherited
+> — declare it per member — and `inherit` chains are allowed. Example:
 >
 > ```yaml
 > agents:

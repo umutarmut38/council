@@ -32,7 +32,7 @@ names unique after case-folding.
 | Key            | Type        | Default              | Notes |
 |----------------|-------------|----------------------|-------|
 | `enabled`      | bool        | `false`              | Include in default runs. |
-| `inherit`      | str         | —                    | Reuse another agent's definition by name (preset, global, or local), then override only the keys set here. `enabled` is never inherited; chains allowed. |
+| `inherit`      | str         | —                    | Reuse another agent's definition by name (preset, global, or local), then override the keys set here. A field overrides only when set to a non-zero value, so an inherited non-zero scalar/orchestration flag can't be reset to its zero value (e.g. no `exclude_build: false` to undo a base's `true`); only `terminal.resize`/`terminal.color` are tri-state. `enabled` is never inherited; chains allowed. |
 | `command`      | list[str]   | —                    | argv to launch the CLI, e.g. `["claude"]`. |
 | `cwd`          | str         | `"."`                | Working dir. |
 | `color`        | str         | —                    | 256-color index (`"212"`) or hex (`"#ff5f87"`) tinting the pane border; falls back to the personality color. |
