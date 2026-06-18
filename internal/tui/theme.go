@@ -241,15 +241,14 @@ func sgrLeavesDefaultBackground(seq string) bool {
 // roster stays readable while themed.
 var evaPaneColors = []int{anim.NervOrange, anim.DataGreen, anim.WireCyan, anim.EvaViolet}
 
-// evaPaneStyle is the EVA-mode pane-border style: every pane takes its full,
-// bright palette accent, cycling per index so the roster clearly alternates
-// colors. This overrides any configured agent color while themed; the focused
-// pane is the same accent in bold (the ">" marker and bold title also mark it).
+// evaPaneStyle is the EVA-mode pane-border style. Unfocused panes take their
+// full, bright palette accent, cycling per index so the roster clearly
+// alternates colors (overriding any configured agent color while themed). The
+// focused pane is the EVA red — a color absent from the unfocused cycle
+// (orange/green/cyan/violet) — bold, so focus reads at a glance.
 func evaPaneStyle(index int, focused bool) lipgloss.Style {
-	accent := evaPaneColors[index%len(evaPaneColors)]
-	style := lipgloss.NewStyle().Foreground(idxColor(accent))
 	if focused {
-		style = style.Bold(true)
+		return lipgloss.NewStyle().Bold(true).Foreground(idxColor(anim.EvaRed))
 	}
-	return style
+	return lipgloss.NewStyle().Foreground(idxColor(evaPaneColors[index%len(evaPaneColors)]))
 }
