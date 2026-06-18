@@ -344,14 +344,16 @@ func TestCtrlCConfirmsBeforeInterrupt(t *testing.T) {
 		t.Fatalf("status should prompt for confirmation, got %q", model.Status)
 	}
 
-	// Second Ctrl+C within the window interrupts and disarms.
+	// Second Ctrl+C within the window attempts the interrupt and disarms. The
+	// test session has no live PTY, so the write reports failure — either way the
+	// status reflects an interrupt attempt rather than the arm prompt.
 	updated, _ = model.handleKey(keyMsg("ctrl+c"))
 	model = updated.(Model)
 	if model.interruptArmed != "" {
 		t.Fatalf("second ctrl+c should disarm, got %q", model.interruptArmed)
 	}
-	if !strings.Contains(model.Status, "interrupted a") {
-		t.Fatalf("status should report interrupt, got %q", model.Status)
+	if !strings.Contains(model.Status, "interrupt") || strings.Contains(model.Status, "again") {
+		t.Fatalf("status should report an interrupt attempt, got %q", model.Status)
 	}
 }
 
@@ -370,6 +372,10 @@ func TestCtrlCDisarmsOnOtherKey(t *testing.T) {
 	model = updated.(Model)
 	if model.interruptArmed != "" {
 		t.Fatalf("other key should disarm, got %q", model.interruptArmed)
+	}
+	// The stale confirmation prompt must not linger after disarming.
+	if strings.Contains(model.Status, "press Ctrl+C again") {
+		t.Fatalf("disarm should clear the stale prompt, got %q", model.Status)
 	}
 
 	// A subsequent Ctrl+C re-arms instead of interrupting.

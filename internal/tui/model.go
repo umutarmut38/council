@@ -170,7 +170,9 @@ type Model struct {
 
 	// interruptArmed holds the agent name for which a Ctrl+C interrupt is armed;
 	// a second Ctrl+C within interruptArmWindow actually sends \x03. Cleared by
-	// any other key (see handleKey) or when the window lapses. Empty = disarmed.
+	// any other key (see handleKey). There is no timer-driven disarm: the window
+	// is re-checked on the next Ctrl+C, which re-arms (rather than interrupting)
+	// once interruptArmWindow has elapsed. Empty = disarmed.
 	interruptArmed   string
 	interruptArmedAt time.Time
 

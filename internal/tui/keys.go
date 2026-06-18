@@ -10,10 +10,21 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// interruptArmStatus is the confirmation prompt shown while a Ctrl+C interrupt
+// is armed for the named agent.
+func interruptArmStatus(name string) string {
+	return "press Ctrl+C again to interrupt " + name
+}
+
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Any key other than Ctrl+C cancels a pending interrupt arm (see the ctrl+c
 	// branch below). handleKey is a value receiver, so this persists across keys.
-	if msg.String() != "ctrl+c" {
+	if msg.String() != "ctrl+c" && m.interruptArmed != "" {
+		// Drop the now-stale "press Ctrl+C again…" prompt if it's still showing;
+		// leave any other status (a handler below may set its own) intact.
+		if m.Status == interruptArmStatus(m.interruptArmed) {
+			m.Status = "interrupt cancelled"
+		}
 		m.interruptArmed = ""
 	}
 
@@ -100,14 +111,17 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// window actually sends \x03. Guards against accidentally interrupting
 		// the focused pane from the composer.
 		if m.interruptArmed == session.Name && time.Since(m.interruptArmedAt) <= interruptArmWindow {
-			_ = session.WriteString("\x03")
 			m.interruptArmed = ""
-			m.Status = "interrupted " + session.Name
+			if err := session.WriteString("\x03"); err != nil {
+				m.Status = "interrupt failed: " + err.Error()
+			} else {
+				m.Status = "interrupted " + session.Name
+			}
 			return m, nil
 		}
 		m.interruptArmed = session.Name
 		m.interruptArmedAt = time.Now()
-		m.Status = "press Ctrl+C again to interrupt " + session.Name
+		m.Status = interruptArmStatus(session.Name)
 		return m, nil
 	case "ctrl+d":
 		if m.PromptInput == "" {
