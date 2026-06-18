@@ -108,17 +108,17 @@ const (
 	crtFlickerN = 31  // rare flicker cadence (frames) — an occasional blip, not a pulse
 )
 
-// applyCRT lays a faint retro-CRT texture over the whole composed screen, built
+// applyCRT lays a faint retro-CRT texture over the screen's chrome rows, built
 // entirely from zero-width indexed-256 backgrounds so every line keeps its exact
-// visible width. The scanlines and sweep cross the agent panes too, for the full
-// in-console feel — crtRowBG preserves any background the agent set itself (only
-// default-background spans pick up the phosphor tint), so live terminal content
-// and cursors stay intact. Four low-contrast layers combine per row: gentle
-// scanlines (a lit row barely lifted over a near-black gap), a soft refresh bar
-// that sweeps downward with a short trailing glow above it, a vignette that
-// darkens the top and bottom edges, and a rare, faint whole-field flicker every
-// crtFlickerN frames — a shimmer rather than a flash.
-func applyCRT(screen string, frame int) string {
+// visible width. The body rows [bodyTop, bodyBottom) — the agent panes — are
+// skipped: they carry their own accent-toned scanline tint (see evaInteriorBG in
+// renderPane), so the CRT crosses the whole console while each window keeps its
+// NERV hue, and the gray scanline never overrides the per-pane wash. Four
+// low-contrast layers combine per chrome row: gentle scanlines (a lit row barely
+// lifted over a near-black gap), a soft refresh bar that sweeps downward with a
+// short trailing glow above it, a vignette that darkens the top and bottom
+// edges, and a rare, faint whole-field flicker every crtFlickerN frames.
+func applyCRT(screen string, frame, bodyTop, bodyBottom int) string {
 	lines := strings.Split(screen, "\n")
 	n := len(lines)
 	if n == 0 {
@@ -130,6 +130,10 @@ func applyCRT(screen string, frame int) string {
 		dim = 1
 	}
 	for i, line := range lines {
+		// The panes carry their own accent CRT (evaInteriorBG); only paint chrome.
+		if i >= bodyTop && i < bodyBottom {
+			continue
+		}
 		// Scanlines: lit phosphor row over a darker gap row.
 		bg := crtLineBG
 		if i%2 == 1 {
@@ -241,16 +245,43 @@ func sgrLeavesDefaultBackground(seq string) bool {
 // roster stays readable while themed.
 var evaPaneColors = []int{anim.NervOrange, anim.DataGreen, anim.WireCyan}
 
-// evaPaneStyle is the EVA-mode pane-border style: the focused pane is full
-// orange, the rest cycle across the NERV accents and are muted (a computed
-// darker index, never SGR faint) while unfocused.
-func evaPaneStyle(index int, focused bool) lipgloss.Style {
+// evaPaneAccent is a pane's NERV accent color index: the focused pane is always
+// orange; the rest cycle across orange/green/cyan so the roster stays distinct.
+func evaPaneAccent(index int, focused bool) int {
 	if focused {
-		return lipgloss.NewStyle().Bold(true).Foreground(idxColor(anim.NervOrange))
+		return anim.NervOrange
 	}
-	accent := evaPaneColors[index%len(evaPaneColors)]
+	return evaPaneColors[index%len(evaPaneColors)]
+}
+
+// evaPaneStyle is the EVA-mode pane-border style: the focused pane is full
+// orange, the rest are their accent, muted (a computed darker index, never SGR
+// faint) while unfocused.
+func evaPaneStyle(index int, focused bool) lipgloss.Style {
+	accent := evaPaneAccent(index, focused)
+	if focused {
+		return lipgloss.NewStyle().Bold(true).Foreground(idxColor(accent))
+	}
 	if _, muted, ok := paneBorderColors(strconv.Itoa(accent)); ok {
 		return lipgloss.NewStyle().Foreground(muted)
 	}
 	return lipgloss.NewStyle().Foreground(idxColor(accent))
+}
+
+// evaInteriorBG is the faint, flat background wash for a pane's interior in EVA
+// mode — a dark tone of the pane's own hue, so each window reads as a tinted NERV
+// console without bold stripes. Kept to the cube's darkest hue so agent text
+// stays legible; agent output that sets its own background keeps it (crtRowBG
+// preserves explicit backgrounds).
+func evaInteriorBG(accent int) int {
+	switch accent {
+	case anim.DataGreen:
+		return 22 // dark green
+	case anim.WireCyan:
+		return 23 // dark teal
+	case anim.AlarmRed:
+		return 52 // dark red
+	default:
+		return 94 // dark orange (NervOrange / focused)
+	}
 }

@@ -544,10 +544,14 @@ func (m Model) View() string {
 	}
 	screen := lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
 	if m.evaThemed() {
-		// CRT scanline overlay across the whole screen — panes included — for the
-		// full in-console look. Zero-width SGR keeps the exact dimensions, and
-		// crtRowBG leaves any agent-set background intact.
-		screen = applyCRT(screen, m.animFrame)
+		// CRT scanline overlay on the chrome; the panes carry their own
+		// accent-toned scanline tint (renderPane), so the texture crosses the
+		// whole console while each window keeps its NERV hue. Zero-width SGR keeps
+		// the exact dimensions.
+		headerN := strings.Count(header, "\n") + 1
+		footerN := strings.Count(footer, "\n") + 1
+		total := strings.Count(screen, "\n") + 1
+		screen = applyCRT(screen, m.animFrame, headerN, total-footerN)
 	}
 	return screen
 }
