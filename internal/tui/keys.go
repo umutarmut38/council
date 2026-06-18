@@ -27,6 +27,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		m.evaIntroDone = true
+		// Skipping into themed mode reveals the header band; resize the panes to
+		// the reduced body so they don't render stale until a manual resize.
+		m.resizeAgents()
 		return m, nil
 	}
 

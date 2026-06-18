@@ -428,6 +428,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.evaIntroFrame++
 			if m.evaIntroFrame >= evaIntroFrames {
 				m.evaIntroDone = true
+				// The themed header band now appears, shrinking the body; resize
+				// the panes' PTYs to match so they don't render stale until the
+				// next terminal resize.
+				m.resizeAgents()
 			}
 		}
 		if m.animationLive() {
@@ -496,6 +500,8 @@ func (m *Model) toggleEva() tea.Cmd {
 	}
 	m.evaIntroDone = false
 	m.Status = "EVA mode disengaged"
+	// The header band is gone; restore the panes to the full body height.
+	m.resizeAgents()
 	return nil
 }
 
