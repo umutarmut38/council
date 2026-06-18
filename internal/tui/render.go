@@ -87,34 +87,50 @@ func (m Model) renderHeaderBand(c chromeStyles) string {
 
 	head := anim.Head(headW, headH, m.animFrame)
 
-	// COUNCIL block banner anchors the left of the band (falling back to NERV
-	// when the band is too narrow for COUNCIL).
-	banner := anim.Banner("COUNCIL")
-	if anim.BannerWidth(banner) > beforeW {
-		banner = anim.Banner("NERV")
-	}
-	bannerW := anim.BannerWidth(banner)
-	if bannerW > beforeW {
-		bannerW = beforeW
-	}
-
-	// The NERV logo sits centered in the gap between the banner and the head, and
-	// vertically centered within the band.
-	gapW := beforeW - bannerW
-	logo := nervLogoBlock(gapW)
-	logoTop := (headH - len(logo)) / 2
+	// Left region: COUNCIL and NERV side by side in the same bold block letters
+	// (COUNCIL in title orange, NERV in NERV red), with the motto beneath. When
+	// the band is too narrow for both, fall back to a single banner plus the
+	// centered NERV logo in the gap.
+	council := anim.Banner("COUNCIL")
+	nerv := anim.Banner("NERV")
+	nervStyle := lipgloss.NewStyle().Bold(true).Foreground(idxColor(anim.EvaRed))
+	cW, nW := anim.BannerWidth(council), anim.BannerWidth(nerv)
 
 	before := make([]string, headH)
-	for i := 0; i < headH; i++ {
-		leftCell := fitText("", bannerW)
-		if i < len(banner) && bannerW > 0 {
-			leftCell = c.title.Render(fitText(banner[i], bannerW))
+	for i := range before {
+		before[i] = fitText("", beforeW)
+	}
+	if cW+2+nW <= beforeW {
+		for i := 0; i < len(council) && i < headH; i++ {
+			row := c.title.Render(council[i]) + "  " + nervStyle.Render(nerv[i])
+			before[i] = row + fitText("", beforeW-cW-2-nW)
 		}
-		midCell := fitText("", gapW)
-		if li := i - logoTop; li >= 0 && li < len(logo) {
-			midCell = logo[li]
+		if mottoRow := len(council); mottoRow < headH-2 {
+			before[mottoRow] = lipgloss.NewStyle().Foreground(idxColor(anim.NervOrangeDim)).Render(fitText(nervMotto, beforeW))
 		}
-		before[i] = leftCell + midCell
+	} else {
+		banner := council
+		if cW > beforeW {
+			banner = nerv
+		}
+		bannerW := anim.BannerWidth(banner)
+		if bannerW > beforeW {
+			bannerW = beforeW
+		}
+		gapW := beforeW - bannerW
+		logo := nervLogoBlock(gapW)
+		logoTop := (headH - len(logo)) / 2
+		for i := 0; i < headH; i++ {
+			leftCell := fitText("", bannerW)
+			if i < len(banner) && bannerW > 0 {
+				leftCell = c.title.Render(fitText(banner[i], bannerW))
+			}
+			midCell := fitText("", gapW)
+			if li := i - logoTop; li >= 0 && li < len(logo) {
+				midCell = logo[li]
+			}
+			before[i] = leftCell + midCell
+		}
 	}
 	// A single operational-status line along the bottom (clear of the banner rows
 	// and the centered logo): the current phase, pulsing while a phase is live.
