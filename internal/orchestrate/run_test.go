@@ -7,6 +7,32 @@ import (
 	"testing"
 )
 
+func TestResultLetter(t *testing.T) {
+	root := t.TempDir()
+	run, err := NewRun(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// No result.json yet.
+	if got := run.ResultLetter(); got != "" {
+		t.Fatalf("ResultLetter before vote = %q, want \"\"", got)
+	}
+
+	if err := run.WriteResult(Result{WinnerAgent: "codex", WinnerLetter: "B", Points: map[string]int{}, Firsts: map[string]int{}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := run.ResultLetter(); got != "B" {
+		t.Fatalf("ResultLetter = %q, want \"B\"", got)
+	}
+
+	// Nil receiver must not panic.
+	var nilRun *Run
+	if got := nilRun.ResultLetter(); got != "" {
+		t.Fatalf("nil ResultLetter = %q, want \"\"", got)
+	}
+}
+
 func TestListRunsSummarizesArtifacts(t *testing.T) {
 	root := t.TempDir()
 	run, err := NewRun(root)

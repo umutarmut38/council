@@ -599,6 +599,52 @@ func TestBeginPhaseResetsDirectInputState(t *testing.T) {
 	}
 }
 
+func TestCmdStatusRefreshesProgressFromDisk(t *testing.T) {
+	root := initTUITestRepo(t)
+	chdirTUI(t, root)
+
+	cfg := config.Config{
+		Agents: map[string]config.AgentConfig{
+			"planner": {Enabled: true, Command: []string{"true"}},
+		},
+		Sessions: config.SessionConfig{RootDir: filepath.Join(root, ".council", "runs")},
+	}
+	cfg.Normalize()
+	ctrl, err := orchestrate.NewController(cfg, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.StartRun("do it"); err != nil {
+		t.Fatal(err)
+	}
+	run := ctrl.Run()
+	if err := os.WriteFile(run.PlanPath("planner"), []byte("plan"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.WriteResult(orchestrate.Result{WinnerAgent: "planner", WinnerLetter: "A", Points: map[string]int{}, Firsts: map[string]int{}}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	model := NewModel([]*agent.Session{agent.NewSession("planner", config.AgentConfig{}, "")}, nil, 1000, "", 0, nil, ctrl)
+	model.Width = 80
+	model.Height = 24
+	model.phase = "vote"
+	// Stale snapshot from before the artifacts landed.
+	model.progress = &runProgress{Stamp: run.Stamp}
+
+	model.cmdStatus()
+
+	if model.progress == nil || model.progress.Plans != 1 {
+		t.Fatalf("cmdStatus did not refresh progress: %+v", model.progress)
+	}
+	if model.progress.PlanWinner != "planner" {
+		t.Fatalf("refreshed winner = %q, want planner", model.progress.PlanWinner)
+	}
+	if !strings.Contains(model.artifactView, "Plans 1") {
+		t.Fatalf("status body missing fresh counts: %q", model.artifactView)
+	}
+}
+
 func TestStaleExitFromReplacedSessionIsIgnored(t *testing.T) {
 	oldSession := agent.NewSession("codex", config.AgentConfig{}, "")
 	newSession := agent.NewSession("codex", config.AgentConfig{}, "")

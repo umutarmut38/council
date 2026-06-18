@@ -80,6 +80,22 @@ func TestPhaseRailRendering(t *testing.T) {
 	}
 }
 
+func TestShortAgent(t *testing.T) {
+	cases := map[string]string{
+		"codex":           "codex",
+		"codex-2":         "codex-2", // numeric suffix must be preserved
+		"claude-worker":   "claude",
+		"cursor-reviewer": "cursor",
+		"my-agent-2":      "my-agent-2",
+		"":                "",
+	}
+	for in, want := range cases {
+		if got := shortAgent(in); got != want {
+			t.Errorf("shortAgent(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestPaneBadgeStates(t *testing.T) {
 	m := hudModel(t, "codex")
 	view := m.Agents[0]
