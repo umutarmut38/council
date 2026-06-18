@@ -271,11 +271,15 @@ func capitalize(s string) string {
 	return strings.ToUpper(s[:1]) + s[1:]
 }
 
-// shortAgent trims a role suffix (e.g. "codex-worker" -> "codex") for the compact
-// rail winner tag. Display only; /status shows the full name.
+// shortAgent trims a known role suffix (e.g. "codex-worker" -> "codex") for the
+// compact rail winner tag. It deliberately does not split on the first hyphen, so
+// legitimate names like "codex-2" are left intact. Display only; /status shows the
+// full name.
 func shortAgent(name string) string {
-	if i := strings.IndexByte(name, '-'); i > 0 {
-		return name[:i]
+	for _, suffix := range []string{"-worker", "-reviewer"} {
+		if strings.HasSuffix(name, suffix) {
+			return strings.TrimSuffix(name, suffix)
+		}
 	}
 	return name
 }

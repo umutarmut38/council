@@ -358,6 +358,10 @@ func (m *Model) cmdStatus() {
 		phase = "idle"
 	}
 
+	// Recompute from disk so the snapshot shows current counts/winner rather than
+	// whatever the last poll cached.
+	m.refreshProgress()
+
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Status — run %s · phase %s\n\n", run.Stamp, phase)
 	if m.progress != nil {

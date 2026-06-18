@@ -198,6 +198,9 @@ func resultWinner(path string) string {
 // or "" when no vote result exists yet. Kept here so the TUI never parses result.json
 // itself.
 func (r *Run) ResultLetter() string {
+	if r == nil {
+		return ""
+	}
 	data, err := os.ReadFile(r.ResultPath())
 	if err != nil {
 		return ""
@@ -205,7 +208,7 @@ func (r *Run) ResultLetter() string {
 	var payload struct {
 		Letter string `json:"winner_letter"`
 	}
-	if json.Unmarshal(data, &payload) != nil {
+	if err := json.Unmarshal(data, &payload); err != nil {
 		return ""
 	}
 	return payload.Letter
