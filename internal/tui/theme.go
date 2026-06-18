@@ -239,18 +239,17 @@ func sgrLeavesDefaultBackground(seq string) bool {
 
 // evaPaneColors cycles unfocused pane borders across the NERV accents so the
 // roster stays readable while themed.
-var evaPaneColors = []int{anim.NervOrange, anim.DataGreen, anim.WireCyan}
+var evaPaneColors = []int{anim.NervOrange, anim.DataGreen, anim.WireCyan, anim.EvaViolet}
 
-// evaPaneStyle is the EVA-mode pane-border style: the focused pane is full
-// orange, the rest cycle across the NERV accents and are muted (a computed
-// darker index, never SGR faint) while unfocused.
+// evaPaneStyle is the EVA-mode pane-border style: every pane takes its full,
+// bright palette accent, cycling per index so the roster clearly alternates
+// colors. This overrides any configured agent color while themed; the focused
+// pane is the same accent in bold (the ">" marker and bold title also mark it).
 func evaPaneStyle(index int, focused bool) lipgloss.Style {
-	if focused {
-		return lipgloss.NewStyle().Bold(true).Foreground(idxColor(anim.NervOrange))
-	}
 	accent := evaPaneColors[index%len(evaPaneColors)]
-	if _, muted, ok := paneBorderColors(strconv.Itoa(accent)); ok {
-		return lipgloss.NewStyle().Foreground(muted)
+	style := lipgloss.NewStyle().Foreground(idxColor(accent))
+	if focused {
+		style = style.Bold(true)
 	}
-	return lipgloss.NewStyle().Foreground(idxColor(accent))
+	return style
 }

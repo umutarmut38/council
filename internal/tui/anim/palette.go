@@ -25,6 +25,7 @@ const (
 	Steel         = 253 // secondary text
 	SteelDim      = 240 // de-emphasized secondary text
 	HotWhite      = 231 // peak pulse (vote)
+	EvaViolet     = 141 // EVA-01 purple accent
 )
 
 // eyeColor is the fixed near-white used for the EVA-01's eyes (the white sclera

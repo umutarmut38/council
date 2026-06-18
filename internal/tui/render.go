@@ -146,16 +146,26 @@ const (
 	nervMotto2 = "ALL'S RIGHT WITH THE WORLD"
 )
 
-// nervLogoBlock renders the centered NERV logo to fit a gapW-wide column: the red
-// wordmark row, then the dim motto (one line, or two when the gap is narrow).
-// Each returned row is exactly gapW visible columns; nil if the gap is too small.
+// nervLogoBlock renders the centered NERV logo to fit a gapW-wide column: a big
+// red block wordmark when the gap is wide enough, the compact emblem otherwise,
+// then the dim motto below (one line, or two when narrower). Each returned row is
+// exactly gapW visible columns; nil if the gap is too small for even the emblem.
 func nervLogoBlock(gapW int) []string {
-	if gapW < lipgloss.Width(nervEmblem)+2 {
-		return nil
-	}
 	logo := lipgloss.NewStyle().Bold(true).Foreground(idxColor(anim.AlarmRed))
 	sub := lipgloss.NewStyle().Foreground(idxColor(anim.NervOrangeDim))
-	rows := []string{logo.Render(centerLine(nervEmblem, gapW))}
+
+	var rows []string
+	if banner := anim.Banner("NERV"); gapW >= anim.BannerWidth(banner)+2 {
+		// Big block wordmark.
+		for _, line := range banner {
+			rows = append(rows, logo.Render(centerLine(line, gapW)))
+		}
+	} else if gapW >= lipgloss.Width(nervEmblem)+2 {
+		rows = append(rows, logo.Render(centerLine(nervEmblem, gapW)))
+	} else {
+		return nil
+	}
+
 	switch {
 	case gapW >= lipgloss.Width(nervMotto)+2:
 		rows = append(rows, sub.Render(centerLine(nervMotto, gapW)))
