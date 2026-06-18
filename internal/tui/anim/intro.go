@@ -76,28 +76,35 @@ func Intro(w, h, frame int) string {
 	// monitoring feed.
 	placeInstrumentFrame(grid, w, h, frame)
 
-	// Title: the NERV wordmark — double-height block when there's room, single
-	// block on a medium field, spaced caps when tiny.
-	big := Banner2x("NERV")
+	// Title: the NERV emblem (fig-leaf + wordmark) in NERV red when there's room,
+	// the block wordmark on a medium field, spaced caps when tiny.
+	emblem := NervEmblem()
 	small := Banner("NERV")
-	titleBottom := 2
-	placeTitle := func(rows []string) {
+	wordBottom := 2 // the row just below the wordmark
+	placeRows := func(rows []string) {
 		for i, line := range rows {
-			placeText(grid, w, h, 1+i, centerCol(w, line), line, NervOrange)
+			placeText(grid, w, h, 1+i, centerCol(w, line), line, EvaRed)
 		}
-		titleBottom = 1 + len(rows) // the row just below the wordmark
+		wordBottom = 1 + len(rows)
 	}
 	switch {
-	case w >= runewidth.StringWidth(big[0])+2 && h >= 24:
-		placeTitle(big)
+	case w >= runewidth.StringWidth(emblem[0])+2 && h >= 30:
+		placeRows(emblem)
 	case w >= runewidth.StringWidth(small[0])+2 && h >= 16:
-		placeTitle(small)
+		placeRows(small)
 	default:
-		placeCentered(grid, w, h, 1, "N E R V", NervOrange)
+		placeCentered(grid, w, h, 1, "N E R V", EvaRed)
 	}
+	// The motto (red, part of the logo) then the system label (cyan). Their rows
+	// are reserved regardless of frame so the head below never shifts when they
+	// reveal.
+	mottoRow := wordBottom
+	subtitleRow := wordBottom + 1
 	if frame >= introSubtitleAt {
-		placeCentered(grid, w, h, titleBottom, "NERV CENTRAL DOGMA · MAGI SYSTEM", WireCyan)
+		placeCentered(grid, w, h, mottoRow, NervMotto, EvaRed)
+		placeCentered(grid, w, h, subtitleRow, "NERV CENTRAL DOGMA · MAGI SYSTEM", WireCyan)
 	}
+	titleBottom := subtitleRow // the head starts below this
 
 	// Layout: a bottom band (sync bar, EVANGELION, ACTIVATION) anchored to the
 	// bottom edge, with the readout log stacked above it.

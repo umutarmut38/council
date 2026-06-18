@@ -106,20 +106,51 @@ func BannerWidth(rows []string) int {
 	return len([]rune(rows[0]))
 }
 
-// Banner2x renders text at double size: each block cell is doubled horizontally
-// and each row is emitted twice, so a 5-row banner becomes 10 rows at twice the
-// width. Used for the prominent NERV wordmark in the activation intro.
-func Banner2x(text string) []string {
-	base := Banner(text)
-	out := make([]string, 0, len(base)*2)
-	for _, row := range base {
-		var b strings.Builder
-		for _, r := range row {
-			b.WriteRune(r)
-			b.WriteRune(r)
+// NervMotto is the institutional motto that arcs under the NERV emblem.
+const NervMotto = "GOD'S IN HIS HEAVEN, ALL'S RIGHT WITH THE WORLD"
+
+// nervLeaf is a stylized fig-leaf silhouette for the NERV emblem — a lobed crown
+// tapering to a point, evoking the half-leaf of the logo. All glyphs are
+// display-width 1; callers render it red. Rows vary in width; NervEmblem centers
+// them.
+var nervLeaf = []string{
+	"      ▟▙   ▟▙   ▟▙",
+	"   ▗▟███▆███▆███▙▖",
+	" ▟███████████████████▙",
+	" ▜███████████████████▛",
+	"    ▜███████████████▛",
+	"       ▜█████████▛",
+	"         ▜█████▛",
+	"           ▜█▛",
+}
+
+// NervEmblem returns the NERV logo as plain lines: the fig-leaf silhouette above
+// the block NERV wordmark, every line padded to a common width so a caller can
+// color the whole block one red and center it. The motto (NervMotto) is placed
+// separately by the caller.
+func NervEmblem() []string {
+	word := Banner("NERV")
+	width := BannerWidth(word)
+	for _, r := range nervLeaf {
+		if n := len([]rune(r)); n > width {
+			width = n
 		}
-		doubled := b.String()
-		out = append(out, doubled, doubled)
+	}
+	center := func(s string) string {
+		n := len([]rune(s))
+		if n >= width {
+			return s
+		}
+		left := (width - n) / 2
+		return strings.Repeat(" ", left) + s + strings.Repeat(" ", width-n-left)
+	}
+	out := make([]string, 0, len(nervLeaf)+1+len(word))
+	for _, r := range nervLeaf {
+		out = append(out, center(r))
+	}
+	out = append(out, strings.Repeat(" ", width))
+	for _, r := range word {
+		out = append(out, center(r))
 	}
 	return out
 }

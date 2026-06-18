@@ -151,7 +151,7 @@ const (
 // then the dim motto below (one line, or two when narrower). Each returned row is
 // exactly gapW visible columns; nil if the gap is too small for even the emblem.
 func nervLogoBlock(gapW int) []string {
-	logo := lipgloss.NewStyle().Bold(true).Foreground(idxColor(anim.AlarmRed))
+	logo := lipgloss.NewStyle().Bold(true).Foreground(idxColor(anim.EvaRed))
 	sub := lipgloss.NewStyle().Foreground(idxColor(anim.NervOrangeDim))
 
 	var rows []string
