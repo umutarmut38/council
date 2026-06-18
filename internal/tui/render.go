@@ -87,59 +87,70 @@ func (m Model) renderHeaderBand(c chromeStyles) string {
 
 	head := anim.Head(headW, headH, m.animFrame)
 
-	// Left region: COUNCIL and NERV side by side in the same bold block letters
-	// (COUNCIL in title orange, NERV in NERV red), with the motto beneath. When
-	// the band is too narrow for both, fall back to a single banner plus the
-	// centered NERV logo in the gap.
+	// Left: COUNCIL in block letters. When a phase is live and the band is wide
+	// enough, the current phase sits right next to it in the same bold block
+	// letters (pulsing) — otherwise it drops to the thin status line. The NERV
+	// logo always stays centered in the gap between the wordmark(s) and the head.
 	council := anim.Banner("COUNCIL")
-	nerv := anim.Banner("NERV")
-	nervStyle := lipgloss.NewStyle().Bold(true).Foreground(idxColor(anim.EvaRed))
-	cW, nW := anim.BannerWidth(council), anim.BannerWidth(nerv)
+	cW := anim.BannerWidth(council)
+
+	name := ""
+	if m.progress != nil && m.phase != "" {
+		name = strings.ToUpper(m.phase)
+	}
+	var phaseBanner []string
+	phaseW := 0
+	if name != "" {
+		phaseBanner = anim.Banner(name)
+		phaseW = anim.BannerWidth(phaseBanner)
+	}
+	// Only place the phase beside COUNCIL if room remains (>=18) for the centered
+	// NERV logo.
+	phaseBeside := phaseW > 0 && cW+2+phaseW+18 <= beforeW
+
+	leftW := cW
+	if phaseBeside {
+		leftW = cW + 2 + phaseW
+	}
+	gapW := beforeW - leftW
+	logo := nervLogoBlock(gapW)
+	logoTop := (headH - len(logo)) / 2
+	pulse := lipgloss.NewStyle().Bold(true).Foreground(idxColor(phasePulseColor(m.animFrame)))
 
 	before := make([]string, headH)
 	for i := range before {
 		before[i] = fitText("", beforeW)
 	}
-	if cW+2+nW <= beforeW {
-		for i := 0; i < len(council) && i < headH; i++ {
-			row := c.title.Render(council[i]) + "  " + nervStyle.Render(nerv[i])
-			before[i] = row + fitText("", beforeW-cW-2-nW)
-		}
-		if mottoRow := len(council); mottoRow < headH-2 {
-			before[mottoRow] = lipgloss.NewStyle().Foreground(idxColor(anim.NervOrangeDim)).Render(fitText(nervMotto, beforeW))
-		}
-	} else {
-		banner := council
-		if cW > beforeW {
-			banner = nerv
-		}
-		bannerW := anim.BannerWidth(banner)
-		if bannerW > beforeW {
-			bannerW = beforeW
-		}
-		gapW := beforeW - bannerW
-		logo := nervLogoBlock(gapW)
-		logoTop := (headH - len(logo)) / 2
-		for i := 0; i < headH; i++ {
-			leftCell := fitText("", bannerW)
-			if i < len(banner) && bannerW > 0 {
-				leftCell = c.title.Render(fitText(banner[i], bannerW))
+	for i := 0; i < headH; i++ {
+		left := fitText("", leftW)
+		if i < len(council) {
+			seg := c.title.Render(council[i])
+			if phaseBeside && i < len(phaseBanner) {
+				seg += "  " + pulse.Render(phaseBanner[i])
 			}
-			midCell := fitText("", gapW)
-			if li := i - logoTop; li >= 0 && li < len(logo) {
-				midCell = logo[li]
-			}
-			before[i] = leftCell + midCell
+			left = seg
 		}
+		mid := fitText("", gapW)
+		if li := i - logoTop; li >= 0 && li < len(logo) {
+			mid = logo[li]
+		}
+		before[i] = left + mid
 	}
-	// A single operational-status line along the bottom (clear of the banner rows
-	// and the centered logo): the current phase, pulsing while a phase is live.
+	// Bottom status line: the full phase readout, or just the count when the phase
+	// name is already shown big beside COUNCIL.
 	if headH >= 2 {
+		detail := m.evaPhaseReadout()
+		if phaseBeside {
+			detail = ""
+			if ph := m.railPhase(m.progress); ph != nil && ph.Counted && ph.Expected > 0 {
+				detail = fmt.Sprintf("%d/%d", ph.Done, ph.Expected)
+			}
+		}
 		style := c.rail
 		if m.phase != "" {
 			style = lipgloss.NewStyle().Foreground(idxColor(phasePulseColor(m.animFrame)))
 		}
-		before[headH-2] = style.Render(fitText(m.evaPhaseReadout(), beforeW))
+		before[headH-2] = style.Render(fitText(detail, beforeW))
 	}
 
 	rows := make([]string, headH)
