@@ -27,59 +27,26 @@ const (
 	HotWhite      = 231 // peak pulse (vote)
 )
 
-// eyeGreen is the fixed bright green used for the EVA-01's eyes, kept distinct
-// from the body ramp so the eyes always read as the unit's "live" gaze.
-const eyeGreen = 47
+// eyeColor is the fixed near-white used for the EVA-01's eyes (the white sclera
+// in the reference), kept distinct from the body so the gaze always reads.
+const eyeColor = 231
 
 // charRamp shades the head dark -> bright. Index 0 (space) is reserved for
 // empty cells, so a plotted surface point never collapses to blank.
 const charRamp = " .:-=+*#%@"
 
-// phosphorRamp is the idle green-phosphor luminance ramp (dark -> bright) so the
-// head reads like a CRT vector monitor.
-var phosphorRamp = []int{22, 28, 34, 40, 46, 83, 118, 47}
-
-// Per-phase accent ramps. Each runs dark -> bright in its hue so the same
-// luminance shading reads correctly whatever the phase tint is.
+// EVA-01 material ramps (dark -> bright), mapped to the nearest indexed-256
+// colors from the unit's canonical palette: a lavender-purple shell, neon
+// yellow-green accents, grey joints, and red trim. Each shades by luminance so
+// the 3D form reads under directional light, but the hue stays fixed (the head
+// is the EVA-01, not a phase indicator).
 var (
-	amberRamp = []int{52, 130, 166, 202, 208, 214, 220, 226}
-	cyanRamp  = []int{17, 23, 30, 37, 44, 51, 87, 123}
-	whiteRamp = []int{240, 243, 246, 249, 252, 254, 255, 231}
-	redRamp   = []int{52, 88, 124, 160, 196, 202, 203, 210}
-	steelRamp = []int{236, 238, 240, 242, 244, 246, 249, 252}
+	purpleRamp = []int{53, 54, 97, 98, 99, 140, 141, 183}      // body shell
+	greenRamp  = []int{22, 28, 70, 76, 113, 149, 155, 191}     // neon accents
+	greyRamp   = []int{236, 238, 240, 243, 245, 248, 250, 252} // joints / neck
+	redRamp    = []int{52, 88, 124, 160, 196, 202, 203, 210}   // red trim
+	darkRamp   = []int{16, 233, 234, 235, 236, 238, 240, 242}  // eye sockets / black
 )
-
-// AccentForPhase maps an orchestration phase to the head's accent color index.
-// Idle is green phosphor; plan/refine and build are amber/orange; vote pulses
-// white; review is cyan. The empty phase ("") is idle.
-func AccentForPhase(phase string) int {
-	switch phase {
-	case "plan", "refine":
-		return NervOrange
-	case "vote":
-		return HotWhite
-	case "build":
-		return NervOrange
-	case "review":
-		return WireCyan
-	default:
-		return DataGreen
-	}
-}
-
-// rampForAccent selects the luminance ramp matching an accent color index.
-func rampForAccent(accent int) []int {
-	switch accent {
-	case NervOrange:
-		return amberRamp
-	case WireCyan:
-		return cyanRamp
-	case HotWhite, 15:
-		return whiteRamp
-	default:
-		return phosphorRamp
-	}
-}
 
 // sgr returns the indexed-256 foreground escape for a palette index.
 func sgr(idx int) string {

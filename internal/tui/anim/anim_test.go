@@ -29,7 +29,7 @@ func assertIndexedSGROnly(t *testing.T, out, what string) {
 
 func TestHeadDimensionsAndWidth(t *testing.T) {
 	for _, dim := range []struct{ w, h int }{{18, 8}, {24, 10}, {32, 14}} {
-		lines := Head(dim.w, dim.h, 0, DataGreen)
+		lines := Head(dim.w, dim.h, 0)
 		if len(lines) != dim.h {
 			t.Fatalf("Head(%d,%d) returned %d lines, want %d", dim.w, dim.h, len(lines), dim.h)
 		}
@@ -42,57 +42,45 @@ func TestHeadDimensionsAndWidth(t *testing.T) {
 }
 
 func TestHeadIndexedSGROnly(t *testing.T) {
-	for _, accent := range []int{DataGreen, NervOrange, WireCyan, HotWhite} {
-		out := strings.Join(Head(24, 10, 5, accent), "\n")
-		assertIndexedSGROnly(t, out, "head")
-	}
+	out := strings.Join(Head(24, 10, 5), "\n")
+	assertIndexedSGROnly(t, out, "head")
 }
 
 func TestHeadEyesBrightWhenFrontFacing(t *testing.T) {
-	// Frame 0 faces the viewer, so the eyes must paint with the fixed bright
-	// green index regardless of the body accent.
-	out := strings.Join(Head(18, 8, 0, NervOrange), "\n")
-	if !strings.Contains(out, sgr(eyeGreen)) {
-		t.Fatalf("front-facing head missing bright-green eyes (index %d)", eyeGreen)
+	// Frame 0 faces the viewer, so the eyes must paint with the fixed eye color.
+	out := strings.Join(Head(18, 8, 0), "\n")
+	if !strings.Contains(out, sgr(eyeColor)) {
+		t.Fatalf("front-facing head missing its eye color (index %d)", eyeColor)
 	}
 }
 
 func TestHeadFramesDifferAcrossRotation(t *testing.T) {
-	a := strings.Join(Head(18, 8, 0, DataGreen), "\n")
-	b := strings.Join(Head(18, 8, 9, DataGreen), "\n")
+	a := strings.Join(Head(18, 8, 0), "\n")
+	b := strings.Join(Head(18, 8, 9), "\n")
 	if a == b {
 		t.Fatalf("head frames 0 and 9 are identical; head is not rotating")
 	}
 }
 
-func TestHeadRegionColorsAndAccent(t *testing.T) {
-	white := strings.Join(Head(40, 18, 0, HotWhite), "\n")
-	green := strings.Join(Head(40, 18, 0, DataGreen), "\n")
+// The head holds the EVA-01's fixed palette: purple armor shell, white eyes,
+// independent of any phase.
+func TestHeadUsesEvaPalette(t *testing.T) {
+	out := strings.Join(Head(44, 20, 0), "\n")
+	if !strings.Contains(out, sgr(eyeColor)) {
+		t.Fatalf("head missing white eyes (index %d)", eyeColor)
+	}
+	if !containsAnyShade(out, purpleRamp) {
+		t.Fatalf("head missing purple armor shades %v", purpleRamp)
+	}
+}
 
-	// Eyes glow bright green under any accent.
-	if !strings.Contains(white, sgr(eyeGreen)) || !strings.Contains(green, sgr(eyeGreen)) {
-		t.Fatalf("eyes should glow under both accents")
-	}
-	// The accent retints the armor. The shades 243/254/255/231 are exclusive to
-	// the white armor ramp (no other region or ramp uses them), so they appear
-	// under the HotWhite accent and never leak into the green-accent head — proof
-	// the accent recolors the armor without touching the iconic regions.
-	whiteOnly := []int{243, 254, 255, 231}
-	hasWhite := false
-	for _, idx := range whiteOnly {
-		if strings.Contains(white, sgr(idx)) {
-			hasWhite = true
-		}
-		if strings.Contains(green, sgr(idx)) {
-			t.Fatalf("green-accent head leaked white-armor shade %d", idx)
+func containsAnyShade(s string, ramp []int) bool {
+	for _, idx := range ramp {
+		if strings.Contains(s, sgr(idx)) {
+			return true
 		}
 	}
-	if !hasWhite {
-		t.Fatalf("white-accent armor missing its exclusive white shades")
-	}
-	if white == green {
-		t.Fatalf("accent should retint the armor")
-	}
+	return false
 }
 
 func TestBannerShape(t *testing.T) {
@@ -115,7 +103,7 @@ func TestBannerShape(t *testing.T) {
 }
 
 func TestHeadTooSmallIsBlank(t *testing.T) {
-	lines := Head(4, 2, 0, DataGreen)
+	lines := Head(4, 2, 0)
 	if len(lines) != 2 {
 		t.Fatalf("blank head returned %d lines, want 2", len(lines))
 	}

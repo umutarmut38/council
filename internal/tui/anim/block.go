@@ -105,3 +105,21 @@ func BannerWidth(rows []string) int {
 	}
 	return len([]rune(rows[0]))
 }
+
+// Banner2x renders text at double size: each block cell is doubled horizontally
+// and each row is emitted twice, so a 5-row banner becomes 10 rows at twice the
+// width. Used for the prominent NERV wordmark in the activation intro.
+func Banner2x(text string) []string {
+	base := Banner(text)
+	out := make([]string, 0, len(base)*2)
+	for _, row := range base {
+		var b strings.Builder
+		for _, r := range row {
+			b.WriteRune(r)
+			b.WriteRune(r)
+		}
+		doubled := b.String()
+		out = append(out, doubled, doubled)
+	}
+	return out
+}

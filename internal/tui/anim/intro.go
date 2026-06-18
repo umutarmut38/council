@@ -76,28 +76,54 @@ func Intro(w, h, frame int) string {
 	// monitoring feed.
 	placeInstrumentFrame(grid, w, h, frame)
 
-	// Title: big block NERV at the top when there's room, else spaced caps.
-	title := Banner("NERV")
-	titleW := runewidth.StringWidth(title[0])
-	titleBottom := 1
-	if w >= titleW+2 && h >= 16 {
-		for i, line := range title {
+	// Title: the NERV wordmark — double-height block when there's room, single
+	// block on a medium field, spaced caps when tiny.
+	big := Banner2x("NERV")
+	small := Banner("NERV")
+	titleBottom := 2
+	placeTitle := func(rows []string) {
+		for i, line := range rows {
 			placeText(grid, w, h, 1+i, centerCol(w, line), line, NervOrange)
 		}
-		titleBottom = len(title)
-		if frame >= introSubtitleAt {
-			placeCentered(grid, w, h, titleBottom, "NERV CENTRAL DOGMA · MAGI SYSTEM", WireCyan)
-		}
-	} else {
+		titleBottom = 1 + len(rows) // the row just below the wordmark
+	}
+	switch {
+	case w >= runewidth.StringWidth(big[0])+2 && h >= 24:
+		placeTitle(big)
+	case w >= runewidth.StringWidth(small[0])+2 && h >= 16:
+		placeTitle(small)
+	default:
 		placeCentered(grid, w, h, 1, "N E R V", NervOrange)
 	}
+	if frame >= introSubtitleAt {
+		placeCentered(grid, w, h, titleBottom, "NERV CENTRAL DOGMA · MAGI SYSTEM", WireCyan)
+	}
 
-	// Bottom band, anchored to the bottom edge: ACTIVATION flash, EVANGELION
-	// wordmark, and the synchronization-ratio bar.
+	// Layout: a bottom band (sync bar, EVANGELION, ACTIVATION) anchored to the
+	// bottom edge, with the readout log stacked above it.
 	activationRow := h - 2
 	evangelionRow := h - 4
 	barRow := h - 6
+	readoutBottom := barRow - 2
+	n := len(introReadouts)
+	syncRow := readoutBottom        // the synchronization line caps the log
+	readoutTop := readoutBottom - n // first readout row (MELCHIOR)
+	magiRow := readoutTop - 2       // MAGI consensus banner above the stack
 
+	// The rotating EVA-01 head is the centerpiece: blit it FIRST and large,
+	// filling the band from just under the title down to the sync bar, so the
+	// institutional readouts overlay on top of it like a NERV monitor feed.
+	headTop := titleBottom + 1
+	headBottom := barRow - 1
+	if headH := headBottom - headTop + 1; headH >= 4 {
+		headW := w - 4
+		if headW > 64 {
+			headW = 64
+		}
+		blitHead(grid, w, h, (w-headW)/2, headTop, headW, headH, frame)
+	}
+
+	// Bottom band, over the head.
 	if frame >= introActivationAt {
 		// Blink between hot white and orange for the final beat.
 		col := NervOrange
@@ -114,15 +140,7 @@ func Intro(w, h, frame int) string {
 		placeSyncBar(grid, w, h, barRow, frac)
 	}
 
-	// Readout log: stepped institutional lines stacked just above the bar.
-	readoutBottom := barRow - 2
-	n := len(introReadouts)
-	// The synchronization line caps the log; the MAGI consensus banner sits above
-	// the readout stack.
-	syncRow := readoutBottom
-	readoutTop := readoutBottom - n // first readout row (MELCHIOR)
-	magiRow := readoutTop - 2
-
+	// Readout log, over the head.
 	if frame >= introMagiAt {
 		placeCentered(grid, w, h, magiRow, "──  MAGI SYSTEM ONLINE  ──", DataGreen)
 	}
@@ -137,21 +155,6 @@ func Intro(w, h, frame int) string {
 		start := centerCol(w, jp+latin)
 		placeText(grid, w, h, syncRow, start, jp, WireCyan)
 		placeText(grid, w, h, syncRow, start+runewidth.StringWidth(jp), latin, DataGreen)
-	}
-
-	// The rotating EVA-01 head is the centerpiece, filling the space between the
-	// title and the readout log. Armor glows activation-amber during the boot.
-	headTop := titleBottom + 2
-	headBottom := magiRow - 2
-	if frame < introMagiAt {
-		headBottom = readoutTop - 1 // before the banner appears, use its room
-	}
-	if headH := headBottom - headTop + 1; headH >= 4 {
-		headW := w - 6
-		if headW > 40 {
-			headW = 40
-		}
-		blitHead(grid, w, h, (w-headW)/2, headTop, headW, headH, frame, NervOrange)
 	}
 
 	return introCompose(grid, w, h)
@@ -235,8 +238,8 @@ func placeInstrumentFrame(grid []introCell, w, h, frame int) {
 // blitHead renders the head into an hw x hh sub-grid and copies its lit cells
 // into the intro grid at (hx, hy), leaving the scan line/labels showing through
 // the gaps.
-func blitHead(grid []introCell, w, h, hx, hy, hw, hh, frame, accent int) {
-	chars, colors, ok := headGrid(hw, hh, frame, accent)
+func blitHead(grid []introCell, w, h, hx, hy, hw, hh, frame int) {
+	chars, colors, ok := headGrid(hw, hh, frame)
 	if !ok {
 		return
 	}

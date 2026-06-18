@@ -58,11 +58,11 @@ const spinPerFrame = 0.16
 var light = normalize3(-0.30, 0.55, 0.80)
 
 // Head renders the rotating EVA-01 head into a w x h grid and returns h lines,
-// each exactly w visible columns (indexed-256 SGR, reset at line end). accent
-// tints only the armor; the green crest, eyes, and red accents keep their
-// iconic colors. frame drives the rotation.
-func Head(w, h, frame, accent int) []string {
-	chars, colors, ok := headGrid(w, h, frame, accent)
+// each exactly w visible columns (indexed-256 SGR, reset at line end). The head
+// holds the unit's canonical colors — purple shell, neon-green accents, grey
+// joints, red trim, white eyes — independent of phase. frame drives the rotation.
+func Head(w, h, frame int) []string {
+	chars, colors, ok := headGrid(w, h, frame)
 	if !ok {
 		return blankLines(w, h)
 	}
@@ -80,12 +80,10 @@ const headSS = 2
 // region-shaded). It is the shared core of Head (which styles it into lines) and
 // the intro (which blits it into its own grid). ok is false when the grid is too
 // small or the cloud is empty.
-func headGrid(w, h, frame, accent int) (chars []rune, colors []int, ok bool) {
+func headGrid(w, h, frame int) (chars []rune, colors []int, ok bool) {
 	if w < 6 || h < 4 || len(evaHeadPoints) == 0 {
 		return nil, nil, false
 	}
-
-	armorRamp := rampForAccent(accent)
 
 	// Supersampled buffers: render the cloud at headSS x resolution, downsample
 	// at the end.
@@ -165,7 +163,7 @@ func headGrid(w, h, frame, accent int) (chars []rune, colors []int, ok bool) {
 		if lum < 0 {
 			lum = 0
 		}
-		ch, color := shade(p.R, lum, armorRamp)
+		ch, color := shade(p.R, lum)
 		depth[idx] = z
 		scharBuf[idx] = ch
 		scolorBuf[idx] = color
@@ -206,22 +204,22 @@ func headGrid(w, h, frame, accent int) (chars []rune, colors []int, ok bool) {
 // the dense armor shell never occludes the EVA-01's glowing eyes.
 const eyeDepthBias = 0.6
 
-// shade maps a point's region + luminance to a glyph and an indexed color.
-// Eyes always glow bright green; the armor follows the phase accent ramp.
-func shade(r region, lum float64, armorRamp []int) (rune, int) {
+// shade maps a point's region + luminance to a glyph and an indexed color,
+// using the EVA-01's fixed material palette.
+func shade(r region, lum float64) (rune, int) {
 	switch r {
 	case regionEyes:
-		return '@', eyeGreen
+		return '@', eyeColor
 	case regionBlackEyes:
-		return rampChar(lum * 0.6), steelRamp[rampIndex(lum*0.5, len(steelRamp))]
+		return rampChar(lum * 0.6), darkRamp[rampIndex(lum*0.5, len(darkRamp))]
 	case regionGreen:
-		return rampChar(lum), phosphorRamp[rampIndex(lum, len(phosphorRamp))]
+		return rampChar(lum), greenRamp[rampIndex(lum, len(greenRamp))]
 	case regionRed:
 		return rampChar(lum), redRamp[rampIndex(lum, len(redRamp))]
 	case regionBrown:
-		return rampChar(lum), amberRamp[rampIndex(lum, len(amberRamp))]
-	default: // armor
-		return rampChar(lum), armorRamp[rampIndex(lum, len(armorRamp))]
+		return rampChar(lum), greyRamp[rampIndex(lum, len(greyRamp))]
+	default: // purple armor shell
+		return rampChar(lum), purpleRamp[rampIndex(lum, len(purpleRamp))]
 	}
 }
 

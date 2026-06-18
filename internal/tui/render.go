@@ -85,7 +85,7 @@ func (m Model) renderHeaderBand(c chromeStyles, statusText, railText string) str
 	}
 	beforeW := m.Width - headW // the left + middle region, before the docked head
 
-	head := anim.Head(headW, headH, m.animFrame, anim.AccentForPhase(m.phase))
+	head := anim.Head(headW, headH, m.animFrame)
 
 	// COUNCIL block banner anchors the left of the band (falling back to NERV
 	// when the band is too narrow for COUNCIL).
