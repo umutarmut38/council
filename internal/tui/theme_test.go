@@ -3,43 +3,23 @@ package tui
 import (
 	"strings"
 	"testing"
-
-	"github.com/umutarmut38/council/internal/tui/anim"
 )
 
-// applyCRT paints the chrome rows but skips the body (panes), which carry their
-// own accent-toned scanline tint from renderPane.
-func TestApplyCRTPaintsChromeSkipsBody(t *testing.T) {
+// applyCRT paints every row — panes included — so the scanline texture crosses
+// the whole console. crtRowBG (tested below) is what keeps an agent's own
+// background intact within those rows.
+func TestApplyCRTPaintsEveryRow(t *testing.T) {
 	lines := []string{"head", "BODY-A", "BODY-B", "foot"}
 	screen := strings.Join(lines, "\n")
-	out := applyCRT(screen, 0, 1, 3) // body rows are indexes 1 and 2
+	out := applyCRT(screen, 0)
 	got := strings.Split(out, "\n")
 	if len(got) != len(lines) {
 		t.Fatalf("line count changed: got %d, want %d", len(got), len(lines))
 	}
-	if got[1] != "BODY-A" || got[2] != "BODY-B" {
-		t.Errorf("body rows were painted: %q, %q", got[1], got[2])
-	}
-	for _, i := range []int{0, 3} {
-		if !strings.Contains(got[i], "\x1b[48;5;") {
-			t.Errorf("chrome row %d was not painted: %q", i, got[i])
+	for i, line := range got {
+		if !strings.Contains(line, "\x1b[48;5;") {
+			t.Errorf("row %d (%q) was not painted", i, line)
 		}
-	}
-}
-
-// evaInteriorBG gives each accent its own dark hue (a distinct tinted wash).
-func TestEvaInteriorBGDistinctHues(t *testing.T) {
-	hues := map[int]int{
-		anim.DataGreen:  evaInteriorBG(anim.DataGreen),
-		anim.WireCyan:   evaInteriorBG(anim.WireCyan),
-		anim.NervOrange: evaInteriorBG(anim.NervOrange),
-	}
-	seen := map[int]bool{}
-	for accent, bg := range hues {
-		if seen[bg] {
-			t.Errorf("accent %d reuses bg %d; hues should be distinct", accent, bg)
-		}
-		seen[bg] = true
 	}
 }
 

@@ -614,26 +614,8 @@ func (m Model) renderPane(index int, width int, height int) []string {
 	lines = append(lines, topLine)
 	bodyHeight := height - 2
 	body := view.bodyLines(bodyHeight, width-2)
-	eva := m.evaThemed()
-	accent := 0
-	if eva {
-		accent = evaPaneAccent(index, focused)
-		if view.Session.StartError != nil || (view.Attention && !view.Session.Done) {
-			accent = anim.AlarmRed
-		}
-	}
-	bg := 0
-	if eva {
-		bg = evaInteriorBG(accent)
-	}
 	for _, line := range body {
-		content := fitText(line, width-2)
-		if eva {
-			// Faint per-accent wash behind the content; the agent's own background
-			// is preserved (crtRowBG only tints default-bg spans).
-			content = crtRowBG(content, bg)
-		}
-		lines = append(lines, side+content+side)
+		lines = append(lines, side+fitText(line, width-2)+side)
 	}
 	lines = append(lines, botLine)
 	return lines
