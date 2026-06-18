@@ -19,3 +19,8 @@ coverage.out
 # JavaScript examples
 node_modules/
 *.tsbuildinfo
+
+# EVA-01 head mesh (CC-BY by ngkirto) — bake input only; the decimated cloud is
+# committed as internal/tui/anim/evahead_data.go. See internal/tui/anim/meshgen.go.
+evangelion_unit_01_head_printable.zip
+internal/tui/anim/testdata/

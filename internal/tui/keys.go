@@ -17,6 +17,14 @@ func interruptArmStatus(name string) string {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// While the EVA activation intro is playing, any key skips straight into
+	// themed mode. It does NOT exit EVA mode (exit is /eva again); the key is
+	// consumed so it doesn't also act on the panes underneath.
+	if m.evaActive && !m.evaIntroDone {
+		m.evaIntroDone = true
+		return m, nil
+	}
+
 	// Any key other than Ctrl+C cancels a pending interrupt arm (see the ctrl+c
 	// branch below). handleKey is a value receiver, so this persists across keys.
 	if msg.String() != "ctrl+c" && m.interruptArmed != "" {

@@ -224,6 +224,11 @@ func (m *Model) handleCommand(text string) (bool, tea.Cmd) {
 	}
 
 	word := strings.TrimPrefix(strings.ToLower(fields[0]), "/")
+	// /eva is a hidden easter egg: intercepted before the registry so it never
+	// appears in the palette or help, and toggles the persistent NERV theme.
+	if word == "eva" {
+		return true, m.toggleEva()
+	}
 	cmd, ok := command.LookupComposer(word)
 	if !ok {
 		m.Status = "unknown command: " + fields[0]

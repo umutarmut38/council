@@ -14,6 +14,7 @@ import (
 	"github.com/umutarmut38/council/internal/orchestrate"
 	runstore "github.com/umutarmut38/council/internal/session"
 	"github.com/umutarmut38/council/internal/setup"
+	"github.com/umutarmut38/council/internal/tui/anim"
 )
 
 type TargetMode int
@@ -66,6 +67,10 @@ type initialPromptMsg string
 type initialAgentPromptsMsg map[string]string
 type phasePromptsMsg map[string]string
 type pollArtifactsMsg struct{}
+
+// animTickMsg drives the activity-animation frame loop (the rotating 3D head
+// and the /eva intro). The loop reschedules itself while it is live.
+type animTickMsg time.Time
 
 // reviewReadyMsg carries the result of the (async) build-check gate.
 type reviewReadyMsg struct {
@@ -176,6 +181,18 @@ type Model struct {
 	interruptArmed   string
 	interruptArmedAt time.Time
 
+	// activity animation + EVA mode. animFrame is the monotonically increasing
+	// frame counter that drives the rotating 3D head and the /eva intro;
+	// animLoopRunning guards against stacking multiple self-rescheduling tick
+	// chains. evaActive toggles the persistent NERV theme; while it is on but
+	// evaIntroDone is false the activation intro plays full-screen, advanced by
+	// evaIntroFrame.
+	animFrame       int
+	animLoopRunning bool
+	evaActive       bool
+	evaIntroFrame   int
+	evaIntroDone    bool
+
 	// artifact browser (/artifacts)
 	Artifacts          []artifactEntry
 	ArtifactIndex      int
@@ -224,10 +241,16 @@ var (
 )
 
 const (
+	// headerHeight is the compact header: title + status (a phase rail adds a
+	// third row during a run).
 	headerHeight = 2
+	// headerBandHeight is the taller header used when the activity animation is
+	// on; it must be tall enough to dock the 3D head grid. Capped so the body
+	// still clears its minimum at the headShown floor (Height>=20): band(10) +
+	// footer(4) + body(6) == 20.
+	headerBandHeight = 10
 	// footer = suggestion line + input box (top border, content, bottom border)
 	footerHeight = 4
-	chromeHeight = headerHeight + footerHeight
 )
 
 // interruptArmWindow is how long the first Ctrl+C stays armed before a second
@@ -395,11 +418,84 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.pollArtifacts()
 	case reviewReadyMsg:
 		return m.handleReviewReady(msg)
+	case animTickMsg:
+		m.animFrame++
+		if m.evaActive && !m.evaIntroDone {
+			m.evaIntroFrame++
+			if m.evaIntroFrame >= evaIntroFrames {
+				m.evaIntroDone = true
+			}
+		}
+		if m.animationLive() {
+			return m, m.animTick()
+		}
+		// Nothing wants frames anymore: stop the loop so a later /eva can
+		// cleanly restart it.
+		m.animLoopRunning = false
+		return m, nil
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
 
 	return m, nil
+}
+
+// evaIntroFrames is how many frames the activation intro plays before it
+// auto-advances into themed mode (any key skips it sooner). It spans the full
+// stepped NERV sequence in anim.Intro (the last beat, ACTIVATION, lands a few
+// frames before this).
+const evaIntroFrames = 64
+
+// animationLive reports whether the frame loop is needed: it runs only while
+// EVA mode is active (the intro, then the themed UI with its rotating head and
+// CRT sweep). Outside EVA mode there is no repaint.
+func (m Model) animationLive() bool {
+	return m.evaActive
+}
+
+// animInterval is the per-frame cadence: ~10 fps normally, a touch faster while
+// building or in EVA mode so the head spins with more urgency.
+func (m Model) animInterval() time.Duration {
+	if m.evaActive || m.phase == "build" {
+		return 70 * time.Millisecond
+	}
+	return 100 * time.Millisecond
+}
+
+// animTick schedules the next frame.
+func (m Model) animTick() tea.Cmd {
+	return tea.Tick(m.animInterval(), func(t time.Time) tea.Msg {
+		return animTickMsg(t)
+	})
+}
+
+// kickAnimLoop starts the self-rescheduling frame loop if it should run and
+// isn't already, returning the tick command (or nil). The animLoopRunning guard
+// prevents stacking multiple tick chains (which would multiply the frame rate).
+func (m *Model) kickAnimLoop() tea.Cmd {
+	if m.animLoopRunning || !m.animationLive() {
+		return nil
+	}
+	m.animLoopRunning = true
+	return m.animTick()
+}
+
+// toggleEva flips the persistent EVA/NERV theme. Turning it on (re)plays the
+// full-screen activation intro and then leaves the UI recolored until toggled
+// off; turning it off reverts cleanly to the configured colors and header
+// height. It kicks the frame loop when needed; when turning off, the loop
+// stops itself on the next tick unless ui.animation keeps it live.
+func (m *Model) toggleEva() tea.Cmd {
+	m.evaActive = !m.evaActive
+	if m.evaActive {
+		m.evaIntroFrame = 0
+		m.evaIntroDone = false
+		m.Status = "EVA mode engaged"
+		return m.kickAnimLoop()
+	}
+	m.evaIntroDone = false
+	m.Status = "EVA mode disengaged"
+	return nil
 }
 
 func (m Model) View() string {
@@ -408,6 +504,12 @@ func (m Model) View() string {
 	}
 	if m.Width < 48 || m.Height < 14 {
 		return "Window too small for council. Resize to at least 48x14."
+	}
+
+	// While EVA mode is engaging, the activation intro takes over the whole
+	// screen until it finishes (or a key skips it).
+	if m.evaActive && !m.evaIntroDone {
+		return anim.Intro(m.Width, m.Height, m.evaIntroFrame)
 	}
 
 	header := m.renderHeader()
@@ -427,7 +529,13 @@ func (m Model) View() string {
 			body = strings.Join(lines[:len(lines)-extra], "\n")
 		}
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+	screen := lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+	if m.evaThemed() {
+		// CRT scanline overlay, last — purely zero-width SGR, so the screen stays
+		// exactly Height lines x Width columns.
+		screen = applyCRT(screen, m.animFrame)
+	}
+	return screen
 }
 
 func (m *Model) appendOutput(view *agentView, chunk string) {

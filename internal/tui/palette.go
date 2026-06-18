@@ -185,7 +185,7 @@ func (m Model) renderPalette() []string {
 	// palette shrinks so the panes always keep at least a few lines.
 	start := 0
 	visible := paletteMaxRows
-	if room := m.Height - chromeHeight - 10; room < visible {
+	if room := m.Height - m.chromeLines() - 10; room < visible {
 		visible = room
 	}
 	if visible < 3 {

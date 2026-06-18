@@ -13,6 +13,7 @@ import (
 
 	"github.com/umutarmut38/council/internal/command"
 	"github.com/umutarmut38/council/internal/config"
+	"github.com/umutarmut38/council/internal/tui/anim"
 )
 
 func (m Model) renderHeader() string {
@@ -44,14 +45,143 @@ func (m Model) renderHeader() string {
 	if m.ScreenMode != ScreenPanes {
 		page = strings.ToUpper(m.screenModeName()) + " · " + page
 	}
-	header := titleStyle.Render(fitText(line, m.Width)) + "\n" + statusStyle.Render(fitText(page+" · "+m.Status, m.Width))
+	statusText := page + " · " + m.Status
+	railText := ""
 	if m.progress != nil {
-		header += "\n" + railStyle.Render(fitText(m.progress.phaseRail(), m.Width))
+		railText = m.progress.phaseRail()
+	}
+
+	c := m.chrome()
+	if m.headShown() {
+		return m.renderHeaderBand(c, statusText, railText)
+	}
+
+	header := c.title.Render(fitText(line, m.Width)) + "\n" + c.status.Render(fitText(statusText, m.Width))
+	if railText != "" {
+		header += "\n" + c.rail.Render(fitText(railText, m.Width))
 	}
 	return header
 }
 
+// headBandHeadWidth is the width of the docked 3D head within the header band;
+// the title/status/rail occupy the remaining width to its left.
+const headBandHeadWidth = 22
+
+// renderHeaderBand lays out the themed NERV header as three columns: the COUNCIL
+// block banner on the left, the compact NERV logo centered in the gap between
+// them (and vertically centered in the band), and the rotating 3D EVA-01 head
+// docked on the right. The status + NERV marking run along the bottom of the
+// left+middle region. Every row is exactly m.Width columns so the View invariant
+// holds.
+func (m Model) renderHeaderBand(c chromeStyles, statusText, railText string) string {
+	headH := headerBandHeight
+
+	headW := headBandHeadWidth
+	if headW > m.Width-24 {
+		headW = m.Width - 24
+	}
+	if headW < 12 {
+		headW = 12
+	}
+	beforeW := m.Width - headW // the left + middle region, before the docked head
+
+	head := anim.Head(headW, headH, m.animFrame, anim.AccentForPhase(m.phase))
+
+	// COUNCIL block banner anchors the left of the band (falling back to NERV
+	// when the band is too narrow for COUNCIL).
+	banner := anim.Banner("COUNCIL")
+	if anim.BannerWidth(banner) > beforeW {
+		banner = anim.Banner("NERV")
+	}
+	bannerW := anim.BannerWidth(banner)
+	if bannerW > beforeW {
+		bannerW = beforeW
+	}
+
+	// The NERV logo sits centered in the gap between the banner and the head, and
+	// vertically centered within the band.
+	gapW := beforeW - bannerW
+	logo := nervLogoBlock(gapW)
+	logoTop := (headH - len(logo)) / 2
+
+	before := make([]string, headH)
+	for i := 0; i < headH; i++ {
+		leftCell := fitText("", bannerW)
+		if i < len(banner) && bannerW > 0 {
+			leftCell = c.title.Render(fitText(banner[i], bannerW))
+		}
+		midCell := fitText("", gapW)
+		if li := i - logoTop; li >= 0 && li < len(logo) {
+			midCell = logo[li]
+		}
+		before[i] = leftCell + midCell
+	}
+	// Status + NERV marking along the bottom, spanning the full left+middle
+	// region (clear of the banner rows and the centered logo).
+	if headH >= 3 {
+		before[headH-3] = c.status.Render(fitText(statusText, beforeW))
+	}
+	if headH >= 2 {
+		mark := "NERV // 中央ドグマ"
+		if railText != "" {
+			mark = railText
+		}
+		before[headH-2] = c.rail.Render(fitText(mark, beforeW))
+	}
+
+	rows := make([]string, headH)
+	for i := 0; i < headH; i++ {
+		rows[i] = before[i] + head[i]
+	}
+	return strings.Join(rows, "\n")
+}
+
+// NERV logo text: the wordmark with a small half-leaf motif (block elements, all
+// display-width 1) evoking the institutional emblem, plus the motto (kept as one
+// line when wide enough, split across two when the gap is narrower).
+const (
+	nervEmblem = "N E R V  ▞▟█▙"
+	nervMotto  = "GOD'S IN HIS HEAVEN, ALL'S RIGHT WITH THE WORLD"
+	nervMotto1 = "GOD'S IN HIS HEAVEN,"
+	nervMotto2 = "ALL'S RIGHT WITH THE WORLD"
+)
+
+// nervLogoBlock renders the centered NERV logo to fit a gapW-wide column: the red
+// wordmark row, then the dim motto (one line, or two when the gap is narrow).
+// Each returned row is exactly gapW visible columns; nil if the gap is too small.
+func nervLogoBlock(gapW int) []string {
+	if gapW < lipgloss.Width(nervEmblem)+2 {
+		return nil
+	}
+	logo := lipgloss.NewStyle().Bold(true).Foreground(idxColor(anim.AlarmRed))
+	sub := lipgloss.NewStyle().Foreground(idxColor(anim.NervOrangeDim))
+	rows := []string{logo.Render(centerLine(nervEmblem, gapW))}
+	switch {
+	case gapW >= lipgloss.Width(nervMotto)+2:
+		rows = append(rows, sub.Render(centerLine(nervMotto, gapW)))
+	case gapW >= lipgloss.Width(nervMotto2)+2:
+		rows = append(rows,
+			sub.Render(centerLine(nervMotto1, gapW)),
+			sub.Render(centerLine(nervMotto2, gapW)))
+	}
+	return rows
+}
+
+// centerLine pads s with spaces on both sides to sit centered in exactly width
+// visible columns (truncating if it overflows).
+func centerLine(s string, width int) string {
+	s = truncateText(s, width)
+	w := lipgloss.Width(s)
+	if w >= width {
+		return s
+	}
+	left := (width - w) / 2
+	return strings.Repeat(" ", left) + s + strings.Repeat(" ", width-w-left)
+}
+
 func (m Model) renderFooter() string {
+	c := m.chrome()
+	eva := m.evaThemed()
 	if m.ScreenMode != ScreenPanes {
 		hint := "Esc back"
 		switch m.ScreenMode {
@@ -67,18 +197,18 @@ func (m Model) renderFooter() string {
 			hint = "Compare: ↑/↓ select · Enter files/diff · d full diff · x mark pair · e $EDITOR · Esc back"
 		}
 		return strings.Join([]string{
-			suggestStyle.Render(fitText(hint, m.Width)),
-			inputBoxTop(m.screenModeName(), m.Width),
-			inputBoxContent(m.Status, m.Width),
-			inputBoxBottom(m.Width),
+			c.suggest.Render(fitText(hint, m.Width)),
+			inputBoxTop(m.screenModeName(), m.Width, c.border, eva),
+			inputBoxContent(m.Status, m.Width, c.border, c.input, eva),
+			inputBoxBottom(m.Width, c.border, eva),
 		}, "\n")
 	}
 
 	if m.InputMode == InputDirect {
-		hint := suggestStyle.Render(fitText("DIRECT MODE — keystrokes go straight to the pane. Esc/F2 returns to the composer.", m.Width))
+		hint := c.suggest.Render(fitText("DIRECT MODE — keystrokes go straight to the pane. Esc/F2 returns to the composer.", m.Width))
 		label := "direct: " + m.focusedName()
 		content := "keys → " + m.focusedName()
-		return strings.Join([]string{hint, inputBoxTop(label, m.Width), inputBoxContent(content, m.Width), inputBoxBottom(m.Width)}, "\n")
+		return strings.Join([]string{hint, inputBoxTop(label, m.Width, c.border, eva), inputBoxContent(content, m.Width, c.border, c.input, eva), inputBoxBottom(m.Width, c.border, eva)}, "\n")
 	}
 
 	label := m.targetLabel()
@@ -89,61 +219,61 @@ func (m Model) renderFooter() string {
 	prompt := m.targetPrompt()
 	content := prompt + " > " + m.PromptInput + "_"
 
-	lines := m.suggestionBlock()
+	lines := m.suggestionBlock(c)
 	lines = append(lines,
-		inputBoxTop(label, m.Width),
-		inputBoxContent(content, m.Width),
-		inputBoxBottom(m.Width),
+		inputBoxTop(label, m.Width, c.border, eva),
+		inputBoxContent(content, m.Width, c.border, c.input, eva),
+		inputBoxBottom(m.Width, c.border, eva),
 	)
 	return strings.Join(lines, "\n")
 }
 
 // suggestionBlock is the area above the composer: the vertical @file picker
 // or command palette while one is being typed, a single hint line otherwise.
-func (m Model) suggestionBlock() []string {
+func (m Model) suggestionBlock(c chromeStyles) []string {
 	if m.filePaletteActive() {
 		return m.renderFilePalette()
 	}
 	if m.paletteActive() {
 		return m.renderPalette()
 	}
-	return []string{m.suggestionLine()}
+	return []string{m.suggestionLine(c)}
 }
 
 // suggestionLine shows matching /commands while one is being typed, and the key
 // hints otherwise.
-func (m Model) suggestionLine() string {
+func (m Model) suggestionLine(c chromeStyles) string {
 	if strings.HasPrefix(m.PromptInput, "/") {
 		prefix := strings.ToLower(strings.TrimPrefix(strings.Fields(m.PromptInput + " ")[0], "/"))
 		all := command.Composers()
 		parts := make([]string, 0, len(all))
-		for _, c := range all {
-			if strings.HasPrefix(c.Name, prefix) {
-				entry := "/" + c.Name
-				if c.Args != "" {
-					entry += " " + c.Args
+		for _, cmd := range all {
+			if strings.HasPrefix(cmd.Name, prefix) {
+				entry := "/" + cmd.Name
+				if cmd.Args != "" {
+					entry += " " + cmd.Args
 				}
-				parts = append(parts, entry+" — "+c.Desc)
+				parts = append(parts, entry+" — "+cmd.Desc)
 			}
 		}
 		text := strings.Join(parts, "   ")
 		if text == "" {
 			text = "no matching command"
 		}
-		return suggestStyle.Render(fitText(text, m.Width))
+		return c.suggest.Render(fitText(text, m.Width))
 	}
 
 	// During a run, next actions beat the generic shortcut list; blocked
 	// panes beat everything.
 	if hint, ok := m.contextHint(); ok {
 		if len(m.attentionAgents()) > 0 {
-			return warnStyle.Render(fitText(hint, m.Width))
+			return c.warn.Render(fitText(hint, m.Width))
 		}
-		return suggestStyle.Render(fitText(hint, m.Width))
+		return c.suggest.Render(fitText(hint, m.Width))
 	}
 
 	help := "Enter send | Ctrl+G overview | F2 direct | Ctrl+B target | Ctrl+F zoom | Ctrl+N/P page | Tab focus | @file"
-	return faintStyle.Render(fitText(help, m.Width))
+	return c.faint.Render(fitText(help, m.Width))
 }
 
 func (m Model) targetLabel() string {
@@ -172,36 +302,48 @@ func (m Model) targetPrompt() string {
 	}
 }
 
-func inputBoxTop(label string, width int) string {
+func inputBoxTop(label string, width int, border lipgloss.Style, eva bool) string {
+	tl, tr, hbar := "╭", "╮", "─"
+	if eva {
+		tl, tr, hbar = "┏", "┓", "━"
+	}
 	if width < 2 {
-		return borderStyle.Render(strings.Repeat("─", max0(width)))
+		return border.Render(strings.Repeat(hbar, max0(width)))
 	}
 	inner := width - 2
 	lbl := ""
 	if label != "" {
-		lbl = "─ " + label + " "
+		lbl = hbar + " " + label + " "
 	}
 	lbl = truncateText(lbl, inner)
 	pad := inner - lipgloss.Width(lbl)
 	if pad < 0 {
 		pad = 0
 	}
-	return borderStyle.Render("╭" + lbl + strings.Repeat("─", pad) + "╮")
+	return border.Render(tl + lbl + strings.Repeat(hbar, pad) + tr)
 }
 
-func inputBoxBottom(width int) string {
-	if width < 2 {
-		return borderStyle.Render(strings.Repeat("─", max0(width)))
+func inputBoxBottom(width int, border lipgloss.Style, eva bool) string {
+	bl, br, hbar := "╰", "╯", "─"
+	if eva {
+		bl, br, hbar = "┗", "┛", "━"
 	}
-	return borderStyle.Render("╰" + strings.Repeat("─", width-2) + "╯")
+	if width < 2 {
+		return border.Render(strings.Repeat(hbar, max0(width)))
+	}
+	return border.Render(bl + strings.Repeat(hbar, width-2) + br)
 }
 
-func inputBoxContent(text string, width int) string {
+func inputBoxContent(text string, width int, border, input lipgloss.Style, eva bool) string {
+	vbar := "│"
+	if eva {
+		vbar = "┃"
+	}
 	if width < 2 {
-		return inputStyle.Render(fitText(text, width))
+		return input.Render(fitText(text, width))
 	}
 	inner := width - 2
-	return borderStyle.Render("│") + inputStyle.Render(fitText(" "+text, inner)) + borderStyle.Render("│")
+	return border.Render(vbar) + input.Render(fitText(" "+text, inner)) + border.Render(vbar)
 }
 
 func max0(v int) int {
@@ -405,20 +547,26 @@ func (m Model) renderPane(index int, width int, height int) []string {
 		height = 3
 	}
 
+	c := m.chrome()
 	view := m.Agents[index]
 	state := m.paneBadge(view)
 	focused := index == m.FocusedIndex
 
 	marker := " "
-	style := borderStyle
+	style := c.border
 	if focused {
 		marker = ">"
-		style = focusStyle
+		style = c.focus
 	}
-	// A configured agent color tints the border only — the pane looks normal
-	// otherwise. Focused: full-strength color; unfocused: a computed muted
-	// shade (never SGR faint, which some terminals render invisibly).
-	if colorValue := m.paneColor(view.Session.Name); colorValue != "" {
+	if m.evaThemed() {
+		// EVA mode overrides the configured agent colors entirely: the focused
+		// pane is full orange, the rest cycle across the NERV accents (muted
+		// while unfocused). Toggling /eva off restores the configured path.
+		style = evaPaneStyle(index, focused)
+	} else if colorValue := m.paneColor(view.Session.Name); colorValue != "" {
+		// A configured agent color tints the border only — the pane looks normal
+		// otherwise. Focused: full-strength color; unfocused: a computed muted
+		// shade (never SGR faint, which some terminals render invisibly).
 		if focusedColor, mutedColor, ok := paneBorderColors(colorValue); ok {
 			if focused {
 				style = lipgloss.NewStyle().Foreground(focusedColor)
@@ -434,24 +582,79 @@ func (m Model) renderPane(index int, width int, height int) []string {
 	// Blocked or failed panes get a visually distinct border so they can't
 	// hide among the running ones.
 	if view.Session.StartError != nil || (view.Attention && !view.Session.Done) {
-		style = warnStyle
+		style = c.warn
 	}
 
-	title := fmt.Sprintf(" %s %s [%s] ", marker, view.Session.Name, state)
 	titleStyleForPane := style
 	if focused {
 		titleStyleForPane = style.Bold(true)
 	}
-	lines := make([]string, 0, height)
-	lines = append(lines, titleStyleForPane.Render(topBorder(title, width)))
 
+	side := style.Render("│")
+	topLine := titleStyleForPane.Render(topBorder(fmt.Sprintf(" %s %s [%s] ", marker, view.Session.Name, state), width))
+	botLine := style.Render("╰" + strings.Repeat("─", width-2) + "╯")
+	if m.evaThemed() {
+		// Angular NERV frame: heavy box, a classification code on the top rail,
+		// and a bilingual status tag on the bottom rail.
+		side = style.Render("┃")
+		code := fmt.Sprintf("NERV//%02d", index+1)
+		jp := "同期" // SYNC
+		if view.Session.StartError != nil || (view.Attention && !view.Session.Done) {
+			jp = "警告" // WARNING
+		}
+		title := fmt.Sprintf("%s %s [%s]", strings.TrimSpace(marker), view.Session.Name, state)
+		topLine = titleStyleForPane.Render(evaTopBorder(title, code, width))
+		botLine = style.Render(evaBottomBorder(jp, width))
+	}
+
+	lines := make([]string, 0, height)
+	lines = append(lines, topLine)
 	bodyHeight := height - 2
 	body := view.bodyLines(bodyHeight, width-2)
 	for _, line := range body {
-		lines = append(lines, style.Render("│")+fitText(line, width-2)+style.Render("│"))
+		lines = append(lines, side+fitText(line, width-2)+side)
 	}
-	lines = append(lines, style.Render("╰"+strings.Repeat("─", width-2)+"╯"))
+	lines = append(lines, botLine)
 	return lines
+}
+
+// evaTopBorder draws the heavy NERV top rail: ┏━ TITLE ━…━ CODE ━┓, exactly
+// width visible columns.
+func evaTopBorder(title, code string, width int) string {
+	if width < 8 {
+		return strings.Repeat("━", max0(width))
+	}
+	inner := width - 4 // for "┏━" ... "━┓"
+	label := " " + title + " "
+	tag := " " + code + " "
+	if lipgloss.Width(label)+lipgloss.Width(tag) > inner {
+		// Drop the code, then truncate the title, to stay within width.
+		tag = ""
+		label = truncateText(" "+title+" ", inner)
+	}
+	fill := inner - lipgloss.Width(label) - lipgloss.Width(tag)
+	if fill < 0 {
+		fill = 0
+	}
+	return "┏━" + label + strings.Repeat("━", fill) + tag + "━┓"
+}
+
+// evaBottomBorder draws the heavy NERV bottom rail: ┗━ LABEL ━…━┛, exactly
+// width visible columns. label may contain CJK (width-aware).
+func evaBottomBorder(label string, width int) string {
+	if width < 8 {
+		return strings.Repeat("━", max0(width))
+	}
+	inner := width - 4
+	seg := " " + label + " "
+	if lipgloss.Width(seg) > inner {
+		seg = truncateText(seg, inner)
+	}
+	fill := inner - lipgloss.Width(seg)
+	if fill < 0 {
+		fill = 0
+	}
+	return "┗━" + seg + strings.Repeat("━", fill) + "━┛"
 }
 
 func (v *agentView) bodyLines(height int, width int) []string {
