@@ -88,9 +88,11 @@ func (m Model) renderHeaderBand(c chromeStyles) string {
 	head := anim.Head(headW, headH, m.animFrame)
 
 	// Left: COUNCIL in block letters. When a phase is live and the band is wide
-	// enough, the current phase sits right next to it in the same bold block
-	// letters (pulsing) — otherwise it drops to the thin status line. The NERV
-	// logo always stays centered in the gap between the wordmark(s) and the head.
+	// enough, the current phase — with its count — sits right next to it in the
+	// same bold block letters, in green; the count joins the block when it fits,
+	// else it is dropped. The NERV logo always stays centered in the gap between
+	// the wordmark(s) and the head; narrow bands drop the phase to the thin
+	// status line below.
 	council := anim.Banner("COUNCIL")
 	cW := anim.BannerWidth(council)
 
@@ -98,11 +100,25 @@ func (m Model) renderHeaderBand(c chromeStyles) string {
 	if m.progress != nil && m.phase != "" {
 		name = strings.ToUpper(m.phase)
 	}
+	count := ""
+	if name != "" {
+		if ph := m.railPhase(m.progress); ph != nil && ph.Counted && ph.Expected > 0 {
+			count = fmt.Sprintf("%d/%d", ph.Done, ph.Expected)
+		}
+	}
 	var phaseBanner []string
 	phaseW := 0
 	if name != "" {
-		phaseBanner = anim.Banner(name)
-		phaseW = anim.BannerWidth(phaseBanner)
+		label := name
+		if count != "" {
+			label = name + " " + count
+		}
+		b := anim.Banner(label)
+		if count != "" && cW+2+anim.BannerWidth(b)+18 > beforeW {
+			b = anim.Banner(name) // name + count won't fit beside the logo — drop the count
+		}
+		phaseBanner = b
+		phaseW = anim.BannerWidth(b)
 	}
 	// Only place the phase beside COUNCIL if room remains (>=18) for the centered
 	// NERV logo.
@@ -115,7 +131,7 @@ func (m Model) renderHeaderBand(c chromeStyles) string {
 	gapW := beforeW - leftW
 	logo := nervLogoBlock(gapW)
 	logoTop := (headH - len(logo)) / 2
-	pulse := lipgloss.NewStyle().Bold(true).Foreground(idxColor(phasePulseColor(m.animFrame)))
+	phaseStyle := lipgloss.NewStyle().Bold(true).Foreground(idxColor(anim.DataGreen))
 
 	before := make([]string, headH)
 	for i := range before {
@@ -126,7 +142,7 @@ func (m Model) renderHeaderBand(c chromeStyles) string {
 		if i < len(council) {
 			seg := c.title.Render(council[i])
 			if phaseBeside && i < len(phaseBanner) {
-				seg += "  " + pulse.Render(phaseBanner[i])
+				seg += "  " + phaseStyle.Render(phaseBanner[i])
 			}
 			left = seg
 		}
@@ -136,21 +152,17 @@ func (m Model) renderHeaderBand(c chromeStyles) string {
 		}
 		before[i] = left + mid
 	}
-	// Bottom status line: the full phase readout, or just the count when the phase
-	// name is already shown big beside COUNCIL.
-	if headH >= 2 {
-		detail := m.evaPhaseReadout()
-		if phaseBeside {
-			detail = ""
-			if ph := m.railPhase(m.progress); ph != nil && ph.Counted && ph.Expected > 0 {
-				detail = fmt.Sprintf("%d/%d", ph.Done, ph.Expected)
+	// Bottom status line only when the phase isn't already shown beside COUNCIL:
+	// the thin phase readout (green) on narrow bands, the next action (cyan) when
+	// idle, nothing when there is no run.
+	if headH >= 2 && !phaseBeside {
+		if detail := m.evaPhaseReadout(); detail != "" {
+			style := c.rail
+			if m.phase != "" {
+				style = c.status // green
 			}
+			before[headH-2] = style.Render(fitText(detail, beforeW))
 		}
-		style := c.rail
-		if m.phase != "" {
-			style = lipgloss.NewStyle().Foreground(idxColor(phasePulseColor(m.animFrame)))
-		}
-		before[headH-2] = style.Render(fitText(detail, beforeW))
 	}
 
 	rows := make([]string, headH)

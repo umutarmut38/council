@@ -90,16 +90,6 @@ func idxColor(i int) lipgloss.Color {
 	return lipgloss.Color(strconv.Itoa(i))
 }
 
-// phasePulseColor cycles the active EVA phase line between cyan and hot white on
-// a slow beat (~1s at the EVA frame rate), so the live phase reads as a pulsing
-// NERV status — rhythm as state, per the console aesthetic.
-func phasePulseColor(frame int) int {
-	if (frame/7)%2 == 0 {
-		return anim.WireCyan
-	}
-	return anim.HotWhite
-}
-
 // CRT overlay. Applied to the whole themed screen as the last render step. It is
 // built entirely from zero-width indexed-256 background SGR, so it tints rows
 // without changing any line's visible width (the View invariants still hold).

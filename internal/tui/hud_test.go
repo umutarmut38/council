@@ -29,11 +29,11 @@ func hudModel(t *testing.T, names ...string) Model {
 func TestEvaPhaseReadout(t *testing.T) {
 	m := hudModel(t, "a")
 
-	// No run -> NERV standby marking.
+	// No run -> nothing.
 	m.progress = nil
 	m.phase = ""
-	if got := m.evaPhaseReadout(); got != "NERV // 中央ドグマ" {
-		t.Fatalf("no run: got %q", got)
+	if got := m.evaPhaseReadout(); got != "" {
+		t.Fatalf("no run: got %q, want empty", got)
 	}
 
 	// Active phase -> phase name + artifact count.

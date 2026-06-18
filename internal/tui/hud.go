@@ -321,7 +321,7 @@ func (m Model) evaPhaseReadout() string {
 	if p != nil && p.Next != "" { // idle/between/complete → next step
 		return "▶ AWAITING · " + p.Next
 	}
-	return "NERV // 中央ドグマ" // no run → standby marking
+	return "" // no run → nothing
 }
 
 // paneBadge builds the pane title state: process state plus, during an
