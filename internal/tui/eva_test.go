@@ -225,3 +225,34 @@ func TestAnimTickGatingAndNoStacking(t *testing.T) {
 		t.Fatalf("intro should auto-finish once evaIntroFrame reaches %d", evaIntroFrames)
 	}
 }
+
+func TestEvaLoopRunsIntroIndefinitely(t *testing.T) {
+	m := evaTestModel(t, 80, 30)
+	m.handleCommand("/eva loop")
+	if !m.evaActive || !m.evaIntroLoop {
+		t.Fatalf("/eva loop should engage EVA with a looping intro (active=%v loop=%v)", m.evaActive, m.evaIntroLoop)
+	}
+	cur := m
+	for i := 0; i < evaIntroFrames*3; i++ {
+		updated, _ := cur.Update(animTickMsg(time.Now()))
+		cur = updated.(Model)
+	}
+	if cur.evaIntroDone {
+		t.Fatal("a looping intro must never auto-complete into themed mode")
+	}
+}
+
+func TestCrtCommandToggles(t *testing.T) {
+	m := evaTestModel(t, 80, 30)
+	if m.crtOff {
+		t.Fatal("the CRT effect should be on by default")
+	}
+	m.handleCommand("/crt")
+	if !m.crtOff {
+		t.Fatal("/crt should turn the CRT effect off")
+	}
+	m.handleCommand("/crt")
+	if m.crtOff {
+		t.Fatal("/crt again should turn the CRT effect back on")
+	}
+}

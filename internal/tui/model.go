@@ -192,6 +192,11 @@ type Model struct {
 	evaActive       bool
 	evaIntroFrame   int
 	evaIntroDone    bool
+	// evaIntroLoop keeps the activation intro playing indefinitely (it never
+	// auto-advances into themed mode; a key still skips it). crtOff disables the
+	// CRT scanline overlay while themed.
+	evaIntroLoop bool
+	crtOff       bool
 	// activeChrome caches the chrome style set for the current frame so the
 	// render tree doesn't rebuild it for every pane. View sets it; chrome()
 	// returns it when present (nil falls back to computing on demand).
@@ -426,7 +431,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.animFrame++
 		if m.evaActive && !m.evaIntroDone {
 			m.evaIntroFrame++
-			if m.evaIntroFrame >= evaIntroFrames {
+			// In loop mode the intro never auto-advances (a key still skips it).
+			if !m.evaIntroLoop && m.evaIntroFrame >= evaIntroFrames {
 				m.evaIntroDone = true
 				// The themed header band now appears, shrinking the body; resize
 				// the panes' PTYs to match so they don't render stale until the
@@ -490,15 +496,21 @@ func (m *Model) kickAnimLoop() tea.Cmd {
 // off; turning it off reverts cleanly to the configured colors and header
 // height. It kicks the frame loop when needed; when turning off, the loop
 // stops itself on the next tick unless ui.animation keeps it live.
-func (m *Model) toggleEva() tea.Cmd {
+func (m *Model) toggleEva(loop bool) tea.Cmd {
 	m.evaActive = !m.evaActive
 	if m.evaActive {
 		m.evaIntroFrame = 0
 		m.evaIntroDone = false
-		m.Status = "EVA mode engaged"
+		m.evaIntroLoop = loop
+		if loop {
+			m.Status = "EVA mode — activation intro looping (any key to enter)"
+		} else {
+			m.Status = "EVA mode engaged"
+		}
 		return m.kickAnimLoop()
 	}
 	m.evaIntroDone = false
+	m.evaIntroLoop = false
 	m.Status = "EVA mode disengaged"
 	// The header band is gone; restore the panes to the full body height.
 	m.resizeAgents()
@@ -543,10 +555,10 @@ func (m Model) View() string {
 		}
 	}
 	screen := lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
-	if m.evaThemed() {
+	if m.evaThemed() && !m.crtOff {
 		// CRT scanline overlay across the whole screen — panes included — for the
 		// full in-console look. Zero-width SGR keeps the exact dimensions, and
-		// crtRowBG leaves any agent-set background intact.
+		// crtRowBG leaves any agent-set background intact. Toggle off with /crt.
 		screen = applyCRT(screen, m.animFrame)
 	}
 	return screen
