@@ -76,9 +76,20 @@ func Intro(w, h, frame int) string {
 	// monitoring feed.
 	placeInstrumentFrame(grid, w, h, frame)
 
+	// Layout: a bottom band (sync bar, EVANGELION, ACTIVATION) anchored to the
+	// bottom edge, with the readout log stacked above it.
+	activationRow := h - 2
+	evangelionRow := h - 4
+	barRow := h - 6
+	readoutBottom := barRow - 2
+	n := len(introReadouts)
+	syncRow := readoutBottom        // the synchronization line caps the log
+	readoutTop := readoutBottom - n // first readout row (MELCHIOR)
+	magiRow := readoutTop - 2       // MAGI consensus banner above the stack
+
 	// Title: the NERV emblem (the embedded leaf-and-wordmark art) in NERV red,
-	// scaled to the upper portion of the field; the block wordmark on a short
-	// field; spaced caps when tiny.
+	// sized so the head sits centered between it and the readout block; the block
+	// wordmark on a short field; spaced caps when tiny.
 	small := Banner("NERV")
 	wordBottom := 2 // the row just below the wordmark
 	placeRows := func(rows []string, top int) {
@@ -87,9 +98,14 @@ func Intro(w, h, frame int) string {
 		}
 		wordBottom = top + len(rows)
 	}
-	logoMaxH := (h - 8) / 2 // leave room for the head + readouts below
+	// Mirror the readout block's height at the top so the head ends up centered,
+	// but keep the head at least ~8 rows tall on shorter fields.
+	logoMaxH := h - magiRow - 2
+	if maxLogo := magiRow - 12; logoMaxH > maxLogo {
+		logoMaxH = maxLogo
+	}
 	switch {
-	case h >= 22 && len(NervLogo(w-4, logoMaxH)) >= 8:
+	case logoMaxH >= 6 && len(NervLogo(w-4, logoMaxH)) >= 6:
 		placeRows(NervLogo(w-4, logoMaxH), 1)
 	case w >= runewidth.StringWidth(small[0])+2 && h >= 16:
 		placeRows(small, 1)
@@ -107,22 +123,10 @@ func Intro(w, h, frame int) string {
 	}
 	titleBottom := subtitleRow // the head starts below this
 
-	// Layout: a bottom band (sync bar, EVANGELION, ACTIVATION) anchored to the
-	// bottom edge, with the readout log stacked above it.
-	activationRow := h - 2
-	evangelionRow := h - 4
-	barRow := h - 6
-	readoutBottom := barRow - 2
-	n := len(introReadouts)
-	syncRow := readoutBottom        // the synchronization line caps the log
-	readoutTop := readoutBottom - n // first readout row (MELCHIOR)
-	magiRow := readoutTop - 2       // MAGI consensus banner above the stack
-
-	// The rotating EVA-01 head is the centerpiece: blit it FIRST and large,
-	// filling the band from just under the title down to the sync bar, so the
-	// institutional readouts overlay on top of it like a NERV monitor feed.
+	// The rotating EVA-01 head is the centerpiece: centered in the clean band
+	// between the title and the readout log.
 	headTop := titleBottom + 1
-	headBottom := barRow - 1
+	headBottom := magiRow - 1
 	if headH := headBottom - headTop + 1; headH >= 4 {
 		headW := w - 4
 		if headW > 64 {
