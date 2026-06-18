@@ -76,22 +76,23 @@ func Intro(w, h, frame int) string {
 	// monitoring feed.
 	placeInstrumentFrame(grid, w, h, frame)
 
-	// Title: the NERV emblem (fig-leaf + wordmark) in NERV red when there's room,
-	// the block wordmark on a medium field, spaced caps when tiny.
-	emblem := NervEmblem()
+	// Title: the NERV emblem (the embedded leaf-and-wordmark art) in NERV red,
+	// scaled to the upper portion of the field; the block wordmark on a short
+	// field; spaced caps when tiny.
 	small := Banner("NERV")
 	wordBottom := 2 // the row just below the wordmark
-	placeRows := func(rows []string) {
+	placeRows := func(rows []string, top int) {
 		for i, line := range rows {
-			placeText(grid, w, h, 1+i, centerCol(w, line), line, EvaRed)
+			placeText(grid, w, h, top+i, centerCol(w, line), line, EvaRed)
 		}
-		wordBottom = 1 + len(rows)
+		wordBottom = top + len(rows)
 	}
+	logoMaxH := (h - 8) / 2 // leave room for the head + readouts below
 	switch {
-	case w >= runewidth.StringWidth(emblem[0])+2 && h >= 30:
-		placeRows(emblem)
+	case h >= 22 && len(NervLogo(w-4, logoMaxH)) >= 8:
+		placeRows(NervLogo(w-4, logoMaxH), 1)
 	case w >= runewidth.StringWidth(small[0])+2 && h >= 16:
-		placeRows(small)
+		placeRows(small, 1)
 	default:
 		placeCentered(grid, w, h, 1, "N E R V", EvaRed)
 	}
