@@ -192,6 +192,10 @@ type Model struct {
 	evaActive       bool
 	evaIntroFrame   int
 	evaIntroDone    bool
+	// activeChrome caches the chrome style set for the current frame so the
+	// render tree doesn't rebuild it for every pane. View sets it; chrome()
+	// returns it when present (nil falls back to computing on demand).
+	activeChrome *chromeStyles
 
 	// artifact browser (/artifacts)
 	Artifacts          []artifactEntry
@@ -453,18 +457,15 @@ func (m Model) animationLive() bool {
 	return m.evaActive
 }
 
-// animInterval is the per-frame cadence: ~10 fps normally, a touch faster while
-// building or in EVA mode so the head spins with more urgency.
-func (m Model) animInterval() time.Duration {
-	if m.evaActive || m.phase == "build" {
-		return 70 * time.Millisecond
-	}
-	return 100 * time.Millisecond
-}
+// animInterval is the per-frame cadence (~14 fps) for the EVA-mode animation
+// loop — the rotating head and the CRT sweep. The loop only runs while EVA mode
+// is active (see animationLive), so there is no animation, and no repaint,
+// outside it.
+const animInterval = 70 * time.Millisecond
 
 // animTick schedules the next frame.
 func (m Model) animTick() tea.Cmd {
-	return tea.Tick(m.animInterval(), func(t time.Time) tea.Msg {
+	return tea.Tick(animInterval, func(t time.Time) tea.Msg {
 		return animTickMsg(t)
 	})
 }
@@ -511,6 +512,12 @@ func (m Model) View() string {
 	if m.evaActive && !m.evaIntroDone {
 		return anim.Intro(m.Width, m.Height, m.evaIntroFrame)
 	}
+
+	// Build the frame's chrome set once; chrome() hands this cached copy to every
+	// sub-renderer (header, footer, body, and each pane) so it isn't rebuilt per
+	// pane.
+	cs := m.chrome()
+	m.activeChrome = &cs
 
 	header := m.renderHeader()
 	footer := m.renderFooter()

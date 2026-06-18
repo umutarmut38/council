@@ -6,6 +6,7 @@ package tui
 // toggled off — without ever mutating the shared package styles.
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -36,9 +37,14 @@ func (m Model) evaThemed() bool {
 	return m.evaActive && m.evaIntroDone
 }
 
-// chrome selects the active chrome styles: the NERV palette while EVA mode is
-// themed, otherwise the normal package styles.
+// chrome selects the active chrome styles: the per-frame cache when View has set
+// it, else the NERV palette while EVA mode is themed, else the normal package
+// styles. The cache means the EVA palette's styles are built once per frame
+// rather than once per pane.
 func (m Model) chrome() chromeStyles {
+	if m.activeChrome != nil {
+		return *m.activeChrome
+	}
 	if m.evaThemed() {
 		return evaChrome()
 	}
@@ -174,14 +180,58 @@ func crtVignetteCap(edge int) (int, bool) {
 	return 0, false
 }
 
-// crtRowBG paints an indexed background across a row, re-asserting it after every
-// SGR reset inside the row so foreground changes in the content never punch a
-// hole in the band. All added codes are zero-width.
+// sgrPattern matches a single SGR escape (CSI … m), used to re-assert the CRT
+// background after any sequence that clears the background to the terminal
+// default.
+var sgrPattern = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+// crtRowBG paints an indexed background across a row, re-asserting it after any
+// SGR that resets the background to the terminal default — a full reset
+// (\x1b[0m / \x1b[m) or an explicit default-background reset (\x1b[49m, and
+// combinations like \x1b[39;49m). Agent output that sets its OWN background is
+// left untouched (solid content legitimately covers the scanline), so the band
+// stays consistent without erasing real colors. All added codes are zero-width.
 func crtRowBG(line string, bg int) string {
 	set := "\x1b[48;5;" + strconv.Itoa(bg) + "m"
-	line = strings.ReplaceAll(line, crtReset, crtReset+set)
-	line = strings.ReplaceAll(line, "\x1b[m", "\x1b[m"+set)
-	return set + line + crtReset
+	out := sgrPattern.ReplaceAllStringFunc(line, func(seq string) string {
+		if sgrLeavesDefaultBackground(seq) {
+			return seq + set
+		}
+		return seq
+	})
+	return set + out + crtReset
+}
+
+// sgrLeavesDefaultBackground reports whether an SGR sequence's net effect leaves
+// the background at the terminal default (so the CRT band must be re-asserted
+// after it). It scans the parameters left to right: a full reset or "49" clears
+// the background, while "48;5;n" / "48;2;r;g;b" / 40-47 / 100-107 set one.
+func sgrLeavesDefaultBackground(seq string) bool {
+	params := seq[2 : len(seq)-1] // strip leading "\x1b[" and trailing "m"
+	if params == "" {             // "\x1b[m" is a full reset
+		return true
+	}
+	toks := strings.Split(params, ";")
+	bgDefault := false
+	for i := 0; i < len(toks); i++ {
+		switch {
+		case toks[i] == "0" || toks[i] == "00" || toks[i] == "49":
+			bgDefault = true
+		case toks[i] == "48":
+			bgDefault = false
+			if i+1 < len(toks) && toks[i+1] == "5" {
+				i += 2
+			} else if i+1 < len(toks) && toks[i+1] == "2" {
+				i += 4
+			}
+		default:
+			if n, err := strconv.Atoi(toks[i]); err == nil &&
+				((n >= 40 && n <= 47) || (n >= 100 && n <= 107)) {
+				bgDefault = false
+			}
+		}
+	}
+	return bgDefault
 }
 
 // evaPaneColors cycles unfocused pane borders across the NERV accents so the

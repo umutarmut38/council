@@ -19,8 +19,13 @@ func interruptArmStatus(name string) string {
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// While the EVA activation intro is playing, any key skips straight into
 	// themed mode. It does NOT exit EVA mode (exit is /eva again); the key is
-	// consumed so it doesn't also act on the panes underneath.
+	// consumed so it doesn't also act on the panes underneath. Ctrl+X still
+	// quits, so the user is never trapped waiting out the intro.
 	if m.evaActive && !m.evaIntroDone {
+		if msg.String() == "ctrl+x" {
+			m.terminateAgents()
+			return m, tea.Quit
+		}
 		m.evaIntroDone = true
 		return m, nil
 	}

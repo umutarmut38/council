@@ -410,6 +410,7 @@ func (m Model) renderGrid(bodyHeight int) string {
 // renderOverview is the run dashboard: run/phase/next-action and per-phase
 // progress on top, then the agent roster with roles and artifact state.
 func (m Model) renderOverview(bodyHeight int) []string {
+	c := m.chrome()
 	lines := make([]string, 0, bodyHeight)
 
 	if p := m.progress; p != nil {
@@ -417,7 +418,7 @@ func (m Model) renderOverview(bodyHeight int) []string {
 		if m.phase != "" {
 			title += " · Phase: " + capitalize(m.phase)
 		}
-		lines = append(lines, headingStyle.Render(fitText(title, m.Width)))
+		lines = append(lines, c.heading.Render(fitText(title, m.Width)))
 		if p.Next != "" {
 			lines = append(lines, fitText("Next: "+p.Next, m.Width))
 		}
@@ -437,7 +438,7 @@ func (m Model) renderOverview(bodyHeight int) []string {
 			lines = append(lines, fitText(fmt.Sprintf("  %-8s %s%s", ph.Label, counter, status), m.Width))
 		}
 		lines = append(lines, "")
-		lines = append(lines, headingStyle.Render(fitText("Agents", m.Width)))
+		lines = append(lines, c.heading.Render(fitText("Agents", m.Width)))
 	}
 
 	indexes := m.overviewIndexes()
@@ -449,7 +450,7 @@ func (m Model) renderOverview(bodyHeight int) []string {
 		view := m.Agents[idx]
 		group := m.agentGroupLabel(view.Session.Name)
 		if group != lastGroup {
-			lines = append(lines, headingStyle.Render(fitText(group, m.Width)))
+			lines = append(lines, c.heading.Render(fitText(group, m.Width)))
 			lastGroup = group
 		}
 		marker := " "
@@ -466,7 +467,7 @@ func (m Model) renderOverview(bodyHeight int) []string {
 			m.agentPersonalityLabel(view.Session.Name), visibility, page, m.paneBadge(view))
 		line := fitText(label, m.Width)
 		if view.Attention && !view.Session.Done {
-			line = warnStyle.Render(line)
+			line = c.warn.Render(line)
 		}
 		lines = append(lines, line)
 	}
@@ -497,9 +498,10 @@ func (m Model) agentRoleLabel(name string) string {
 }
 
 func (m Model) renderSettings(bodyHeight int) []string {
+	c := m.chrome()
 	items := m.settingsItems()
 	lines := make([]string, 0, bodyHeight)
-	lines = append(lines, headingStyle.Render(fitText("Settings", m.Width)))
+	lines = append(lines, c.heading.Render(fitText("Settings", m.Width)))
 	for i, item := range items {
 		marker := " "
 		if i == m.SettingsIndex {
@@ -510,14 +512,15 @@ func (m Model) renderSettings(bodyHeight int) []string {
 	lines = append(lines, "")
 	lines = append(lines, fitText("Current layout: "+m.layoutPreview(), m.Width))
 	lines = append(lines, "")
-	lines = append(lines, faintStyle.Render(fitText("Changes apply to this session. Edit YAML (ui.adaptive_grid, ui.page_rows, …) to make them permanent.", m.Width)))
+	lines = append(lines, c.faint.Render(fitText("Changes apply to this session. Edit YAML (ui.adaptive_grid, ui.page_rows, …) to make them permanent.", m.Width)))
 	return fitBlock(lines, m.Width, bodyHeight)
 }
 
 func (m Model) renderRuns(bodyHeight int) []string {
-	lines := []string{headingStyle.Render(fitText("Runs", m.Width))}
+	c := m.chrome()
+	lines := []string{c.heading.Render(fitText("Runs", m.Width))}
 	if len(m.Runs) == 0 {
-		lines = append(lines, faintStyle.Render(fitText("No runs found.", m.Width)))
+		lines = append(lines, c.faint.Render(fitText("No runs found.", m.Width)))
 		return fitBlock(lines, m.Width, bodyHeight)
 	}
 	for i, run := range m.Runs {
