@@ -39,6 +39,8 @@ func keyMsg(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyCtrlP}
 	case "ctrl+g":
 		return tea.KeyMsg{Type: tea.KeyCtrlG}
+	case "ctrl+c":
+		return tea.KeyMsg{Type: tea.KeyCtrlC}
 	case "space":
 		return tea.KeyMsg{Type: tea.KeySpace}
 	}
@@ -315,6 +317,93 @@ func TestCtrlGOpensOverview(t *testing.T) {
 	model = updated.(Model)
 	if model.ScreenMode != ScreenOverview {
 		t.Fatalf("ctrl+g mode = %v, want overview", model.ScreenMode)
+	}
+}
+
+func TestCtrlCConfirmsBeforeInterrupt(t *testing.T) {
+	model := NewModel([]*agent.Session{agent.NewSession("a", config.AgentConfig{}, "")}, nil, 1000, "", 0, nil, nil)
+
+	// A non-empty prompt: Ctrl+C clears input and does not arm an interrupt.
+	model.PromptInput = "hello"
+	updated, _ := model.handleKey(keyMsg("ctrl+c"))
+	model = updated.(Model)
+	if model.PromptInput != "" {
+		t.Fatalf("ctrl+c with input should clear it, got %q", model.PromptInput)
+	}
+	if model.interruptArmed != "" {
+		t.Fatalf("ctrl+c with input should not arm, got %q", model.interruptArmed)
+	}
+
+	// First Ctrl+C on an empty prompt arms rather than interrupting.
+	updated, _ = model.handleKey(keyMsg("ctrl+c"))
+	model = updated.(Model)
+	if model.interruptArmed != "a" {
+		t.Fatalf("first ctrl+c should arm agent a, got %q", model.interruptArmed)
+	}
+	if !strings.Contains(model.Status, "press Ctrl+C again") {
+		t.Fatalf("status should prompt for confirmation, got %q", model.Status)
+	}
+
+	// Second Ctrl+C within the window attempts the interrupt and disarms. The
+	// test session has no live PTY, so the write reports failure — either way the
+	// status reflects an interrupt attempt rather than the arm prompt.
+	updated, _ = model.handleKey(keyMsg("ctrl+c"))
+	model = updated.(Model)
+	if model.interruptArmed != "" {
+		t.Fatalf("second ctrl+c should disarm, got %q", model.interruptArmed)
+	}
+	if !strings.Contains(model.Status, "interrupt") || strings.Contains(model.Status, "again") {
+		t.Fatalf("status should report an interrupt attempt, got %q", model.Status)
+	}
+}
+
+func TestCtrlCDisarmsOnOtherKey(t *testing.T) {
+	model := NewModel([]*agent.Session{agent.NewSession("a", config.AgentConfig{}, "")}, nil, 1000, "", 0, nil, nil)
+
+	updated, _ := model.handleKey(keyMsg("ctrl+c"))
+	model = updated.(Model)
+	if model.interruptArmed != "a" {
+		t.Fatalf("first ctrl+c should arm, got %q", model.interruptArmed)
+	}
+
+	// An unrelated key cancels the arm (use a navigation key so the empty prompt
+	// stays empty — a text key would clear input on the next Ctrl+C instead).
+	updated, _ = model.handleKey(keyMsg("down"))
+	model = updated.(Model)
+	if model.interruptArmed != "" {
+		t.Fatalf("other key should disarm, got %q", model.interruptArmed)
+	}
+	// The stale confirmation prompt must not linger after disarming.
+	if strings.Contains(model.Status, "press Ctrl+C again") {
+		t.Fatalf("disarm should clear the stale prompt, got %q", model.Status)
+	}
+
+	// A subsequent Ctrl+C re-arms instead of interrupting.
+	updated, _ = model.handleKey(keyMsg("ctrl+c"))
+	model = updated.(Model)
+	if model.interruptArmed != "a" {
+		t.Fatalf("ctrl+c after disarm should re-arm, got %q", model.interruptArmed)
+	}
+	if !strings.Contains(model.Status, "press Ctrl+C again") {
+		t.Fatalf("status should re-prompt, got %q", model.Status)
+	}
+}
+
+func TestCtrlCReArmsAfterWindowExpires(t *testing.T) {
+	model := NewModel([]*agent.Session{agent.NewSession("a", config.AgentConfig{}, "")}, nil, 1000, "", 0, nil, nil)
+
+	updated, _ := model.handleKey(keyMsg("ctrl+c"))
+	model = updated.(Model)
+	// Backdate the arm beyond the window: the next Ctrl+C must re-arm, not interrupt.
+	model.interruptArmedAt = model.interruptArmedAt.Add(-2 * interruptArmWindow)
+
+	updated, _ = model.handleKey(keyMsg("ctrl+c"))
+	model = updated.(Model)
+	if !strings.Contains(model.Status, "press Ctrl+C again") {
+		t.Fatalf("expired arm should re-prompt, got %q", model.Status)
+	}
+	if model.interruptArmed != "a" {
+		t.Fatalf("expired arm should re-arm, got %q", model.interruptArmed)
 	}
 }
 
