@@ -358,9 +358,15 @@ func (m *Model) cmdStatus() {
 		phase = "idle"
 	}
 
-	// Recompute from disk so the snapshot shows current counts/winner rather than
-	// whatever the last poll cached.
-	m.refreshProgress()
+	// Read the run once from disk and drive both the rail/counts and the report
+	// off the same snapshot, so the two halves can't disagree and we don't pay
+	// for SummarizeRun twice.
+	summary, err := orchestrate.SummarizeRun(run.RootDir, run.Stamp)
+	if err != nil {
+		m.Status = "status: " + err.Error()
+		return
+	}
+	m.progress = m.progressFromSummary(summary)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Status — run %s · phase %s\n\n", run.Stamp, phase)
@@ -373,9 +379,7 @@ func (m *Model) cmdStatus() {
 		fmt.Fprintf(&b, "\nBuilding: %s\n", strings.Join(working, ", "))
 	}
 
-	if summary, err := orchestrate.SummarizeRun(run.RootDir, run.Stamp); err == nil {
-		b.WriteString(orchestrate.StatusReport(run, summary))
-	}
+	b.WriteString(orchestrate.StatusReport(run, summary))
 
 	m.openArtifactText("status: "+run.Stamp, b.String())
 	m.Status = "status — run " + run.Stamp + " · phase " + phase

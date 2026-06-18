@@ -61,15 +61,22 @@ func (m *Model) computeProgress() *runProgress {
 	if m.orch == nil || m.orch.Run() == nil {
 		return nil
 	}
-	run := m.orch.Run()
-	p := &runProgress{Stamp: run.Stamp, Current: m.phase}
-
-	summary, err := orchestrate.SummarizeRun(run.RootDir, run.Stamp)
+	summary, err := orchestrate.SummarizeRun(m.orch.Run().RootDir, m.orch.Run().Stamp)
 	if err != nil {
 		return nil
 	}
+	return m.progressFromSummary(summary)
+}
+
+// progressFromSummary builds the run progress from an already-loaded summary so
+// callers that have one (e.g. /status) don't re-read result.json and the run
+// artifacts a second time.
+func (m *Model) progressFromSummary(summary orchestrate.RunSummary) *runProgress {
+	run := m.orch.Run()
+	p := &runProgress{Stamp: run.Stamp, Current: m.phase}
+
 	p.PlanWinner = summary.Winner
-	p.PlanWinnerLetter = run.ResultLetter()
+	p.PlanWinnerLetter = summary.WinnerLetter
 	p.BuildWinner = m.buildWinnerQuiet()
 	p.Plans, p.Votes, p.Diffs, p.Reviews = len(summary.Plans), len(summary.Votes), len(summary.Diffs), len(summary.Reviews)
 	if adopted, ok := run.Adoption(); ok {
