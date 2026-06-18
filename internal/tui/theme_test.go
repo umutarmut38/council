@@ -5,23 +5,20 @@ import (
 	"testing"
 )
 
-// applyCRT must paint the chrome rows but leave the body rows (the live agent
-// panes) byte-for-byte untouched, so terminal output and tool cursors there are
-// never corrupted.
-func TestApplyCRTLeavesBodyRowsUntouched(t *testing.T) {
-	lines := []string{"head0", "head1", "BODY-A", "BODY-B", "foot0"}
+// applyCRT paints every row — panes included — so the scanline texture crosses
+// the whole console. crtRowBG (tested below) is what keeps an agent's own
+// background intact within those rows.
+func TestApplyCRTPaintsEveryRow(t *testing.T) {
+	lines := []string{"head", "BODY-A", "BODY-B", "foot"}
 	screen := strings.Join(lines, "\n")
-	out := applyCRT(screen, 0, 2, 4) // body rows are indexes 2 and 3
+	out := applyCRT(screen, 0)
 	got := strings.Split(out, "\n")
 	if len(got) != len(lines) {
 		t.Fatalf("line count changed: got %d, want %d", len(got), len(lines))
 	}
-	if got[2] != "BODY-A" || got[3] != "BODY-B" {
-		t.Errorf("body rows were modified: %q, %q", got[2], got[3])
-	}
-	for _, i := range []int{0, 1, 4} {
-		if !strings.Contains(got[i], "\x1b[48;5;") {
-			t.Errorf("chrome row %d was not painted: %q", i, got[i])
+	for i, line := range got {
+		if !strings.Contains(line, "\x1b[48;5;") {
+			t.Errorf("row %d (%q) was not painted", i, line)
 		}
 	}
 }

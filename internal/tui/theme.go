@@ -108,17 +108,17 @@ const (
 	crtFlickerN = 31  // rare flicker cadence (frames) — an occasional blip, not a pulse
 )
 
-// applyCRT lays a faint retro-CRT texture over the screen's chrome rows, built
+// applyCRT lays a faint retro-CRT texture over the whole composed screen, built
 // entirely from zero-width indexed-256 backgrounds so every line keeps its exact
-// visible width. The body rows [bodyTop, bodyBottom) — the live agent panes and
-// other screen bodies — are left untouched: they are real terminal output with
-// their own colors and cursor, and painting a background across them corrupts
-// their rendering. Four low-contrast layers combine per chrome row: gentle
+// visible width. The scanlines and sweep cross the agent panes too, for the full
+// in-console feel — crtRowBG preserves any background the agent set itself (only
+// default-background spans pick up the phosphor tint), so live terminal content
+// and cursors stay intact. Four low-contrast layers combine per row: gentle
 // scanlines (a lit row barely lifted over a near-black gap), a soft refresh bar
 // that sweeps downward with a short trailing glow above it, a vignette that
 // darkens the top and bottom edges, and a rare, faint whole-field flicker every
 // crtFlickerN frames — a shimmer rather than a flash.
-func applyCRT(screen string, frame, bodyTop, bodyBottom int) string {
+func applyCRT(screen string, frame int) string {
 	lines := strings.Split(screen, "\n")
 	n := len(lines)
 	if n == 0 {
@@ -130,10 +130,6 @@ func applyCRT(screen string, frame, bodyTop, bodyBottom int) string {
 		dim = 1
 	}
 	for i, line := range lines {
-		// Never overlay the live pane bodies — only the header/footer chrome.
-		if i >= bodyTop && i < bodyBottom {
-			continue
-		}
 		// Scanlines: lit phosphor row over a darker gap row.
 		bg := crtLineBG
 		if i%2 == 1 {
