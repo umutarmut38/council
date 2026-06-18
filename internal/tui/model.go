@@ -168,6 +168,12 @@ type Model struct {
 	// attentionCheckPending debounces the delayed approval-prompt re-check.
 	attentionCheckPending bool
 
+	// interruptArmed holds the agent name for which a Ctrl+C interrupt is armed;
+	// a second Ctrl+C within interruptArmWindow actually sends \x03. Cleared by
+	// any other key (see handleKey) or when the window lapses. Empty = disarmed.
+	interruptArmed   string
+	interruptArmedAt time.Time
+
 	// artifact browser (/artifacts)
 	Artifacts          []artifactEntry
 	ArtifactIndex      int
@@ -221,6 +227,10 @@ const (
 	footerHeight = 4
 	chromeHeight = headerHeight + footerHeight
 )
+
+// interruptArmWindow is how long the first Ctrl+C stays armed before a second
+// Ctrl+C is required again to interrupt the focused agent.
+const interruptArmWindow = 2 * time.Second
 
 func NewModel(sessions []*agent.Session, store *runstore.Store, maxScrollback int, initialPrompt string, initialPromptDelay time.Duration, launch func(*agent.Session), orch *orchestrate.Controller) Model {
 	return NewModelWithPrompts(sessions, store, maxScrollback, initialPrompt, nil, initialPromptDelay, launch, orch)

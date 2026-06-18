@@ -5,11 +5,18 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Any key other than Ctrl+C cancels a pending interrupt arm (see the ctrl+c
+	// branch below). handleKey is a value receiver, so this persists across keys.
+	if msg.String() != "ctrl+c" {
+		m.interruptArmed = ""
+	}
+
 	switch m.ScreenMode {
 	case ScreenOverview:
 		return m.handleOverviewKey(msg)
@@ -85,10 +92,22 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.Status = "input cleared"
 			return m, nil
 		}
-		if session := m.focusedSession(); session != nil {
-			_ = session.WriteString("\x03")
-			m.Status = "sent ctrl+c to " + session.Name
+		session := m.focusedSession()
+		if session == nil {
+			return m, nil
 		}
+		// Confirm-before-interrupt: the first Ctrl+C arms; a second within the
+		// window actually sends \x03. Guards against accidentally interrupting
+		// the focused pane from the composer.
+		if m.interruptArmed == session.Name && time.Since(m.interruptArmedAt) <= interruptArmWindow {
+			_ = session.WriteString("\x03")
+			m.interruptArmed = ""
+			m.Status = "interrupted " + session.Name
+			return m, nil
+		}
+		m.interruptArmed = session.Name
+		m.interruptArmedAt = time.Now()
+		m.Status = "press Ctrl+C again to interrupt " + session.Name
 		return m, nil
 	case "ctrl+d":
 		if m.PromptInput == "" {
