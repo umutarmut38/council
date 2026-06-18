@@ -26,6 +26,33 @@ func hudModel(t *testing.T, names ...string) Model {
 	return m
 }
 
+func TestEvaPhaseReadout(t *testing.T) {
+	m := hudModel(t, "a")
+
+	// No run -> NERV standby marking.
+	m.progress = nil
+	m.phase = ""
+	if got := m.evaPhaseReadout(); got != "NERV // 中央ドグマ" {
+		t.Fatalf("no run: got %q", got)
+	}
+
+	// Active phase -> phase name + artifact count.
+	m.phase = "review"
+	m.progress = &runProgress{
+		Phases: []phaseInfo{{Label: "Review", State: phaseActive, Done: 1, Expected: 2, Counted: true}},
+	}
+	if got := m.evaPhaseReadout(); got != "▶ REVIEW · 1/2" {
+		t.Fatalf("active phase: got %q, want %q", got, "▶ REVIEW · 1/2")
+	}
+
+	// Idle with a run -> the next action.
+	m.phase = ""
+	m.progress = &runProgress{Next: "/compare or /adopt"}
+	if got := m.evaPhaseReadout(); got != "▶ AWAITING · /compare or /adopt" {
+		t.Fatalf("idle: got %q", got)
+	}
+}
+
 func TestAdaptiveGridFollowsPaneCount(t *testing.T) {
 	cases := []struct {
 		agents     []string

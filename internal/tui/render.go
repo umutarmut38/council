@@ -53,7 +53,7 @@ func (m Model) renderHeader() string {
 
 	c := m.chrome()
 	if m.headShown() {
-		return m.renderHeaderBand(c, statusText, railText)
+		return m.renderHeaderBand(c)
 	}
 
 	header := c.title.Render(fitText(line, m.Width)) + "\n" + c.status.Render(fitText(statusText, m.Width))
@@ -70,10 +70,10 @@ const headBandHeadWidth = 22
 // renderHeaderBand lays out the themed NERV header as three columns: the COUNCIL
 // block banner on the left, the compact NERV logo centered in the gap between
 // them (and vertically centered in the band), and the rotating 3D EVA-01 head
-// docked on the right. The status + NERV marking run along the bottom of the
-// left+middle region. Every row is exactly m.Width columns so the View invariant
-// holds.
-func (m Model) renderHeaderBand(c chromeStyles, statusText, railText string) string {
+// docked on the right. A single NERV operational-status line (the current phase,
+// pulsing while live) runs along the bottom of the left+middle region. Every row
+// is exactly m.Width columns so the View invariant holds.
+func (m Model) renderHeaderBand(c chromeStyles) string {
 	headH := headerBandHeight
 
 	headW := headBandHeadWidth
@@ -116,17 +116,14 @@ func (m Model) renderHeaderBand(c chromeStyles, statusText, railText string) str
 		}
 		before[i] = leftCell + midCell
 	}
-	// Status + NERV marking along the bottom, spanning the full left+middle
-	// region (clear of the banner rows and the centered logo).
-	if headH >= 3 {
-		before[headH-3] = c.status.Render(fitText(statusText, beforeW))
-	}
+	// A single operational-status line along the bottom (clear of the banner rows
+	// and the centered logo): the current phase, pulsing while a phase is live.
 	if headH >= 2 {
-		mark := "NERV // 中央ドグマ"
-		if railText != "" {
-			mark = railText
+		style := c.rail
+		if m.phase != "" {
+			style = lipgloss.NewStyle().Foreground(idxColor(phasePulseColor(m.animFrame)))
 		}
-		before[headH-2] = c.rail.Render(fitText(mark, beforeW))
+		before[headH-2] = style.Render(fitText(m.evaPhaseReadout(), beforeW))
 	}
 
 	rows := make([]string, headH)

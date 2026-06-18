@@ -305,6 +305,25 @@ func (m Model) railPhase(p *runProgress) *phaseInfo {
 	return nil
 }
 
+// evaPhaseReadout is the single-line operational-status line shown in the EVA
+// header band: the live phase + its artifact count while a phase runs, the next
+// action when idle/between/complete, or the NERV standby marking with no run. It
+// is the simplified replacement for the full phase rail in themed mode.
+func (m Model) evaPhaseReadout() string {
+	p := m.progress
+	if p != nil && m.phase != "" { // a phase is live
+		name := strings.ToUpper(m.phase) // PLAN/REFINE/VOTE/BUILD/REVIEW
+		if ph := m.railPhase(p); ph != nil && ph.Counted && ph.Expected > 0 {
+			return fmt.Sprintf("▶ %s · %d/%d", name, ph.Done, ph.Expected)
+		}
+		return "▶ " + name
+	}
+	if p != nil && p.Next != "" { // idle/between/complete → next step
+		return "▶ AWAITING · " + p.Next
+	}
+	return "NERV // 中央ドグマ" // no run → standby marking
+}
+
 // paneBadge builds the pane title state: process state plus, during an
 // orchestration phase, what the agent owes (waiting for PLAN.md / wrote
 // VOTE.md / needs input).
