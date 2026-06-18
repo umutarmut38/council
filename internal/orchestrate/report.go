@@ -56,6 +56,25 @@ func WriteReport(run *Run) (string, error) {
 	return path, nil
 }
 
+// StatusReport renders the live outcome sections (plan vote, builds, build review,
+// adopted) for a run, reusing the same section builders as WriteReport. Unlike
+// WriteReport it writes no file and omits the issue/timings/artifacts chrome, so the
+// TUI /status view can call it at any point. Sections without data are omitted, so it
+// renders cleanly mid-phase (it returns "" before anything has been decided).
+func StatusReport(run *Run, summary RunSummary) string {
+	if run == nil {
+		return ""
+	}
+	var b strings.Builder
+	writeVoteSection(&b, run)
+	writeBuildSection(&b, run, summary)
+	writeReviewSection(&b, run)
+	if adopted, ok := run.Adoption(); ok {
+		fmt.Fprintf(&b, "\n## Adopted\n\n%s's implementation was applied to the working tree (`%s`).\n", adopted, run.BuildDiffPath(adopted))
+	}
+	return b.String()
+}
+
 func writeVoteSection(b *strings.Builder, run *Run) {
 	data, err := os.ReadFile(run.ResultPath())
 	if err != nil {

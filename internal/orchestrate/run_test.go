@@ -7,6 +7,35 @@ import (
 	"testing"
 )
 
+func TestResultOutcome(t *testing.T) {
+	root := t.TempDir()
+	run, err := NewRun(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// No result.json yet.
+	if w, l := resultOutcome(run.ResultPath()); w != "" || l != "" {
+		t.Fatalf("resultOutcome before vote = (%q, %q), want empty", w, l)
+	}
+
+	if err := run.WriteResult(Result{WinnerAgent: "codex", WinnerLetter: "B", Points: map[string]int{}, Firsts: map[string]int{}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if w, l := resultOutcome(run.ResultPath()); w != "codex" || l != "B" {
+		t.Fatalf("resultOutcome = (%q, %q), want (codex, B)", w, l)
+	}
+
+	// SummarizeRun carries both winner and letter so callers don't re-read.
+	summary, err := SummarizeRun(root, run.Stamp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Winner != "codex" || summary.WinnerLetter != "B" {
+		t.Fatalf("summary outcome = (%q, %q), want (codex, B)", summary.Winner, summary.WinnerLetter)
+	}
+}
+
 func TestListRunsSummarizesArtifacts(t *testing.T) {
 	root := t.TempDir()
 	run, err := NewRun(root)

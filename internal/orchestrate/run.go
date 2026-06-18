@@ -33,6 +33,7 @@ type RunSummary struct {
 	Dir           string
 	PromptPreview string
 	Winner        string
+	WinnerLetter  string
 	Plans         []string
 	Votes         []string
 	Reviews       []string
@@ -149,7 +150,7 @@ func SummarizeRun(rootDir string, stamp string) (RunSummary, error) {
 		Reviews:       suffixNames(run.BuildsDir(), ".review.md"),
 		Diffs:         diffNames(run.BuildsDir()),
 	}
-	summary.Winner = resultWinner(run.ResultPath())
+	summary.Winner, summary.WinnerLetter = resultOutcome(run.ResultPath())
 	agentSet := map[string]bool{}
 	for _, group := range [][]string{summary.Plans, summary.Votes, summary.Reviews, summary.Diffs} {
 		for _, name := range group {
@@ -180,18 +181,21 @@ func promptPreview(run *Run) string {
 	return ""
 }
 
-func resultWinner(path string) string {
+// resultOutcome parses the winning agent and its anonymized ballot letter from
+// result.json in one read, so callers don't have to open the file twice.
+func resultOutcome(path string) (winner, letter string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	var payload struct {
 		Winner string `json:"winner_agent"`
+		Letter string `json:"winner_letter"`
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
-		return ""
+		return "", ""
 	}
-	return payload.Winner
+	return payload.Winner, payload.Letter
 }
 
 func markdownNames(dir string) []string {

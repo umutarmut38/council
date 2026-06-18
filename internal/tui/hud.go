@@ -44,9 +44,10 @@ type runProgress struct {
 	Diffs   int
 	Reviews int
 
-	PlanWinner  string
-	BuildWinner string
-	Adopted     string
+	PlanWinner       string
+	PlanWinnerLetter string
+	BuildWinner      string
+	Adopted          string
 }
 
 // refreshProgress recomputes the cached run progress from disk. Call it on
@@ -60,14 +61,22 @@ func (m *Model) computeProgress() *runProgress {
 	if m.orch == nil || m.orch.Run() == nil {
 		return nil
 	}
-	run := m.orch.Run()
-	p := &runProgress{Stamp: run.Stamp, Current: m.phase}
-
-	summary, err := orchestrate.SummarizeRun(run.RootDir, run.Stamp)
+	summary, err := orchestrate.SummarizeRun(m.orch.Run().RootDir, m.orch.Run().Stamp)
 	if err != nil {
 		return nil
 	}
+	return m.progressFromSummary(summary)
+}
+
+// progressFromSummary builds the run progress from an already-loaded summary so
+// callers that have one (e.g. /status) don't re-read result.json and the run
+// artifacts a second time.
+func (m *Model) progressFromSummary(summary orchestrate.RunSummary) *runProgress {
+	run := m.orch.Run()
+	p := &runProgress{Stamp: run.Stamp, Current: m.phase}
+
 	p.PlanWinner = summary.Winner
+	p.PlanWinnerLetter = summary.WinnerLetter
 	p.BuildWinner = m.buildWinnerQuiet()
 	p.Plans, p.Votes, p.Diffs, p.Reviews = len(summary.Plans), len(summary.Votes), len(summary.Diffs), len(summary.Reviews)
 	if adopted, ok := run.Adoption(); ok {
@@ -188,6 +197,24 @@ func (p *runProgress) phaseRail() string {
 		default:
 			seg += " ○"
 		}
+		// Pin the outcome to the rail so the winner survives across phases. On a
+		// narrow terminal fitText drops this tail first, which is acceptable.
+		if ph.State == phaseDone {
+			switch ph.Label {
+			case "Vote":
+				if p.PlanWinner != "" {
+					if p.PlanWinnerLetter != "" {
+						seg += fmt.Sprintf(" %s(%s)", shortAgent(p.PlanWinner), p.PlanWinnerLetter)
+					} else {
+						seg += " " + shortAgent(p.PlanWinner)
+					}
+				}
+			case "Review":
+				if p.BuildWinner != "" {
+					seg += " " + shortAgent(p.BuildWinner)
+				}
+			}
+		}
 		parts = append(parts, seg)
 	}
 	rail := strings.Join(parts, "  ")
@@ -249,6 +276,19 @@ func capitalize(s string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// shortAgent trims a known role suffix (e.g. "codex-worker" -> "codex") for the
+// compact rail winner tag. It deliberately does not split on the first hyphen, so
+// legitimate names like "codex-2" are left intact. Display only; /status shows the
+// full name.
+func shortAgent(name string) string {
+	for _, suffix := range []string{"-worker", "-reviewer"} {
+		if strings.HasSuffix(name, suffix) {
+			return strings.TrimSuffix(name, suffix)
+		}
+	}
+	return name
 }
 
 // railPhase returns the rail segment for the currently active phase.
