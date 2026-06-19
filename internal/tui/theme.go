@@ -2,7 +2,7 @@ package tui
 
 // Chrome theming. The header/footer/pane styles are selected per-render from a
 // chromeStyles set rather than read from the package-level vars directly, so
-// /eva mode can recolor the whole UI in the NERV palette and revert cleanly when
+// retro mode can recolor the whole UI in the retro palette and revert cleanly when
 // toggled off — without ever mutating the shared package styles.
 
 import (
@@ -30,23 +30,23 @@ type chromeStyles struct {
 	faint   lipgloss.Style
 }
 
-// evaThemed reports whether the persistent NERV theme is active — EVA mode is on
+// retroThemed reports whether the persistent retro theme is active — retro mode is on
 // and its activation intro has finished (during the intro the UI is replaced by
 // the full-screen sequence, so the chrome theme does not apply yet).
-func (m Model) evaThemed() bool {
-	return m.evaActive && m.evaIntroDone
+func (m Model) retroThemed() bool {
+	return m.retroActive && m.retroIntroDone
 }
 
 // chrome selects the active chrome styles: the per-frame cache when View has set
-// it, else the NERV palette while EVA mode is themed, else the normal package
-// styles. The cache means the EVA palette's styles are built once per frame
+// it, else the retro palette while retro mode is themed, else the normal package
+// styles. The cache means the retro palette's styles are built once per frame
 // rather than once per pane.
 func (m Model) chrome() chromeStyles {
 	if m.activeChrome != nil {
 		return *m.activeChrome
 	}
-	if m.evaThemed() {
-		return evaChrome()
+	if m.retroThemed() {
+		return retroChrome()
 	}
 	return defaultChrome()
 }
@@ -67,20 +67,20 @@ func defaultChrome() chromeStyles {
 	}
 }
 
-// evaChrome is the persistent NERV theme: orange labels, green data, cyan rail,
+// retroChrome is the persistent retro theme: orange labels, green data, cyan rail,
 // red alerts — all indexed-256 so it honors the color constraint.
-func evaChrome() chromeStyles {
+func retroChrome() chromeStyles {
 	fg := func(i int) lipgloss.Style { return lipgloss.NewStyle().Foreground(idxColor(i)) }
 	return chromeStyles{
-		title:   fg(anim.NervOrange).Bold(true),
-		status:  fg(anim.DataGreen),
-		rail:    fg(anim.WireCyan),
-		border:  fg(anim.NervOrangeDim),
-		focus:   fg(anim.NervOrange).Bold(true),
-		suggest: fg(anim.DataGreen),
+		title:   fg(anim.Amber).Bold(true),
+		status:  fg(anim.Green),
+		rail:    fg(anim.Cyan),
+		border:  fg(anim.AmberDim),
+		focus:   fg(anim.Amber).Bold(true),
+		suggest: fg(anim.Green),
 		input:   fg(anim.Steel),
-		warn:    fg(anim.AlarmRed),
-		heading: fg(anim.NervOrange).Bold(true),
+		warn:    fg(anim.Red),
+		heading: fg(anim.Amber).Bold(true),
 		faint:   fg(anim.SteelDim),
 	}
 }
@@ -237,18 +237,18 @@ func sgrLeavesDefaultBackground(seq string) bool {
 	return bgDefault
 }
 
-// evaPaneColors cycles unfocused pane borders across the NERV accents so the
+// retroPaneColors cycles unfocused pane borders across the retro accents so the
 // roster stays readable while themed.
-var evaPaneColors = []int{anim.NervOrange, anim.DataGreen, anim.WireCyan, anim.EvaViolet}
+var retroPaneColors = []int{anim.Amber, anim.Green, anim.Cyan, anim.Violet}
 
-// evaPaneStyle is the EVA-mode pane-border style. Unfocused panes take their
+// retroPaneStyle is the retro-mode pane-border style. Unfocused panes take their
 // full, bright palette accent, cycling per index so the roster clearly
 // alternates colors (overriding any configured agent color while themed). The
-// focused pane is the EVA red — a color absent from the unfocused cycle
+// focused pane is the retro red — a color absent from the unfocused cycle
 // (orange/green/cyan/violet) — bold, so focus reads at a glance.
-func evaPaneStyle(index int, focused bool) lipgloss.Style {
+func retroPaneStyle(index int, focused bool) lipgloss.Style {
 	if focused {
-		return lipgloss.NewStyle().Bold(true).Foreground(idxColor(anim.EvaRed))
+		return lipgloss.NewStyle().Bold(true).Foreground(idxColor(anim.Crimson))
 	}
-	return lipgloss.NewStyle().Foreground(idxColor(evaPaneColors[index%len(evaPaneColors)]))
+	return lipgloss.NewStyle().Foreground(idxColor(retroPaneColors[index%len(retroPaneColors)]))
 }

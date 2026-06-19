@@ -2,8 +2,8 @@ package anim
 
 import "strings"
 
-// Block-letter "EVA font": a 5-row figlet-style alphabet used for the intro
-// title cards (NERV / EVANGELION) and the themed COUNCIL header banner. A
+// Block-letter "retro font": a 5-row figlet-style alphabet used for the intro
+// title cards (retro / the head) and the themed COUNCIL header banner. A
 // terminal can't swap fonts, so big institutional lettering is drawn as solid
 // block glyphs.
 
@@ -106,5 +106,5 @@ func BannerWidth(rows []string) int {
 	return len([]rune(rows[0]))
 }
 
-// NervMotto is the institutional motto that arcs under the NERV emblem.
-const NervMotto = "GOD'S IN HIS HEAVEN, ALL'S RIGHT WITH THE WORLD"
+// Motto is the institutional motto that arcs under the retro emblem.
+const Motto = "GOD'S IN HIS HEAVEN, ALL'S RIGHT WITH THE WORLD"

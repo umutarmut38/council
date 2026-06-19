@@ -7,18 +7,18 @@ import (
 	"github.com/mattn/go-runewidth"
 )
 
-// introCell is one character of the intro grid: a rune, its color index (-1 for
+// splashCell is one character of the intro grid: a rune, its color index (-1 for
 // the default foreground), and whether it is the trailing continuation half of
 // a wide (CJK) glyph and so emits nothing of its own.
-type introCell struct {
+type splashCell struct {
 	r     rune
 	color int
 	cont  bool
 }
 
-// introBeat is one stepped readout in the activation log: it appears once frame
+// splashBeat is one stepped readout in the activation log: it appears once frame
 // reaches reveal and is drawn as "LABEL ……… VALUE".
-type introBeat struct {
+type splashBeat struct {
 	reveal     int
 	label      string
 	value      string
@@ -26,155 +26,155 @@ type introBeat struct {
 	valueColor int
 }
 
-// introReadouts is the NERV/MAGI boot log, revealed line by line. The MAGI three
-// come online first, then the synchronization and field readouts — the
-// institutional theater of an EVA activation. Reveal frames are spread across
-// evaIntroFrames (see internal/tui/model.go); the last lands well before it.
-var introReadouts = []introBeat{
-	{reveal: 7, label: "MELCHIOR-1", value: "ONLINE", labelColor: Steel, valueColor: DataGreen},
-	{reveal: 11, label: "BALTHASAR-2", value: "ONLINE", labelColor: Steel, valueColor: DataGreen},
-	{reveal: 15, label: "CASPER-3", value: "ONLINE", labelColor: Steel, valueColor: DataGreen},
-	{reveal: 30, label: "HARMONICS", value: "NOMINAL", labelColor: Steel, valueColor: DataGreen},
-	{reveal: 35, label: "EGO BORDER", value: "CLEAR", labelColor: Steel, valueColor: DataGreen},
-	{reveal: 40, label: "LCL PRESSURE", value: "STABLE", labelColor: Steel, valueColor: WireCyan},
-	{reveal: 45, label: "A.T. FIELD", value: "DISENGAGED", labelColor: NervOrange, valueColor: DataGreen},
+// splashReadouts is the retro boot log, revealed line by line. The three core
+// units come online first, then the synchronization and field readouts — the
+// institutional theater of a retro activation. Reveal frames are spread across
+// retroIntroFrames (see internal/tui/model.go); the last lands well before it.
+var splashReadouts = []splashBeat{
+	{reveal: 7, label: "MELCHIOR-1", value: "ONLINE", labelColor: Steel, valueColor: Green},
+	{reveal: 11, label: "BALTHASAR-2", value: "ONLINE", labelColor: Steel, valueColor: Green},
+	{reveal: 15, label: "CASPER-3", value: "ONLINE", labelColor: Steel, valueColor: Green},
+	{reveal: 30, label: "HARMONICS", value: "NOMINAL", labelColor: Steel, valueColor: Green},
+	{reveal: 35, label: "EGO BORDER", value: "CLEAR", labelColor: Steel, valueColor: Green},
+	{reveal: 40, label: "LCL PRESSURE", value: "STABLE", labelColor: Steel, valueColor: Cyan},
+	{reveal: 45, label: "A.T. FIELD", value: "DISENGAGED", labelColor: Amber, valueColor: Green},
 }
 
-// Intro beat thresholds. They are spread across evaIntroFrames so the sequence
+// Splash beat thresholds. They are spread across retroIntroFrames so the sequence
 // keeps unfolding for the whole activation, ending on the ACTIVATION flash.
 const (
-	introSubtitleAt   = 3
-	introMagiAt       = 20 // "MAGI SYSTEM ONLINE" consensus banner
-	introSyncAt       = 24 // synchronization line + sync-ratio bar begin
-	introSyncFull     = 58 // frame the sync ratio reaches 100%
-	introEvangelAt    = 50
-	introActivationAt = 56
+	splashSubtitleAt   = 3
+	splashBannerAt     = 20 // consensus banner row
+	splashSyncAt       = 24 // synchronization line + sync-ratio bar begin
+	splashSyncFull     = 58 // frame the sync ratio reaches 100%
+	splashWordmarkAt   = 50
+	splashActivationAt = 56
 )
 
-// Intro renders one frame of the NERV activation sequence into a full-screen
+// Splash renders one frame of the retro activation sequence into a full-screen
 // w x h field and returns it as a single string of h lines, each exactly w
 // visible columns. The sequence reveals in stepped beats keyed off frame — the
-// MAGI coming online, a climbing synchronization ratio, instrument readouts, a
+// core system coming online, a climbing synchronization ratio, instrument readouts, a
 // REC timecode and registration marks, and a final ACTIVATION flash — over the
-// rotating EVA-01 head, with a vertical scan line sweeping across.
-func Intro(w, h, frame int) string {
+// rotating head, with a vertical scan line sweeping across.
+func Splash(w, h, frame int) string {
 	if w < 1 || h < 1 {
 		return ""
 	}
-	grid := make([]introCell, w*h)
+	grid := make([]splashCell, w*h)
 	for i := range grid {
-		grid[i] = introCell{r: ' ', color: -1}
+		grid[i] = splashCell{r: ' ', color: -1}
 	}
 
 	// Scan line first, so revealed text and the head paint over it.
 	scanCol := (frame * 2) % w
 	for r := 0; r < h; r++ {
-		grid[r*w+scanCol] = introCell{r: '│', color: scanDim}
+		grid[r*w+scanCol] = splashCell{r: '│', color: scanDim}
 	}
 
 	// Corner registration marks + a blinking REC timecode frame the field like a
 	// monitoring feed.
 	placeInstrumentFrame(grid, w, h, frame)
 
-	// Layout: a bottom band (sync bar, EVANGELION, ACTIVATION) anchored to the
+	// Layout: a bottom band (sync bar, the head, ACTIVATION) anchored to the
 	// bottom edge, with the readout log stacked above it.
 	activationRow := h - 2
-	evangelionRow := h - 4
+	wordmarkRow := h - 4
 	barRow := h - 6
 	readoutBottom := barRow - 2
-	n := len(introReadouts)
+	n := len(splashReadouts)
 	syncRow := readoutBottom        // the synchronization line caps the log
-	readoutTop := readoutBottom - n // first readout row (MELCHIOR)
-	magiRow := readoutTop - 2       // MAGI consensus banner above the stack
+	readoutTop := readoutBottom - n // first readout row
+	bannerRow := readoutTop - 2     // consensus banner above the stack
 
-	// Title: the NERV emblem (the embedded leaf-and-wordmark art) in NERV red,
+	// Title: the retro emblem (the embedded leaf-and-wordmark art) in retro red,
 	// sized so the head sits centered between it and the readout block; the block
 	// wordmark on a short field; spaced caps when tiny.
 	small := Banner("NERV")
 	wordBottom := 2 // the row just below the wordmark
 	placeRows := func(rows []string, top int) {
 		for i, line := range rows {
-			placeText(grid, w, h, top+i, centerCol(w, line), line, EvaRed)
+			placeText(grid, w, h, top+i, centerCol(w, line), line, Crimson)
 		}
 		wordBottom = top + len(rows)
 	}
 	// Mirror the readout block's height at the top so the head ends up centered,
 	// but keep the head at least ~8 rows tall on shorter fields.
-	logoMaxH := h - magiRow - 2
-	if maxLogo := magiRow - 12; logoMaxH > maxLogo {
+	logoMaxH := h - bannerRow - 2
+	if maxLogo := bannerRow - 12; logoMaxH > maxLogo {
 		logoMaxH = maxLogo
 	}
 	switch {
-	case logoMaxH >= 6 && len(NervLogo(w-4, logoMaxH)) >= 6:
-		placeRows(NervLogo(w-4, logoMaxH), 1)
+	case logoMaxH >= 6 && len(Logo(w-4, logoMaxH)) >= 6:
+		placeRows(Logo(w-4, logoMaxH), 1)
 	case w >= runewidth.StringWidth(small[0])+2 && h >= 16:
 		placeRows(small, 1)
 	default:
-		placeCentered(grid, w, h, 1, "N E R V", EvaRed)
+		placeCentered(grid, w, h, 1, "N E R V", Crimson)
 	}
 	// The motto (red, part of the logo) then the system label (cyan). Their rows
 	// are reserved regardless of frame so the head below never shifts when they
 	// reveal.
 	mottoRow := wordBottom
 	subtitleRow := wordBottom + 1
-	if frame >= introSubtitleAt {
-		placeCentered(grid, w, h, mottoRow, NervMotto, EvaRed)
-		placeCentered(grid, w, h, subtitleRow, "NERV CENTRAL DOGMA · MAGI SYSTEM", WireCyan)
+	if frame >= splashSubtitleAt {
+		placeCentered(grid, w, h, mottoRow, Motto, Crimson)
+		placeCentered(grid, w, h, subtitleRow, "NERV CENTRAL DOGMA · MAGI SYSTEM", Cyan)
 	}
 	titleBottom := subtitleRow // the head starts below this
 
-	// The rotating EVA-01 head is the centerpiece: centered in the clean band
+	// The rotating head is the centerpiece: centered in the clean band
 	// between the title and the readout log.
 	headTop := titleBottom + 1
-	headBottom := magiRow - 1
+	headBottom := bannerRow - 1
 	if headH := headBottom - headTop + 1; headH >= 4 {
 		headW := w - 4
 		if headW > 64 {
 			headW = 64
 		}
-		blitHead(grid, w, h, (w-headW)/2, headTop, headW, headH, frame)
+		blitMesh(grid, w, h, (w-headW)/2, headTop, headW, headH, frame)
 	}
 
 	// Bottom band, over the head.
-	if frame >= introActivationAt {
+	if frame >= splashActivationAt {
 		// Blink between hot white and orange for the final beat.
-		col := NervOrange
+		col := Amber
 		if (frame/3)%2 == 0 {
-			col = HotWhite
+			col = White
 		}
 		placeCentered(grid, w, h, activationRow, "▶▶  ACTIVATION  ◀◀", col)
 	}
-	if frame >= introEvangelAt {
-		placeCentered(grid, w, h, evangelionRow, "E V A N G E L I O N", Steel)
+	if frame >= splashWordmarkAt {
+		placeCentered(grid, w, h, wordmarkRow, "E V A N G E L I O N", Steel)
 	}
-	if frame >= introSyncAt {
-		frac := float64(frame-introSyncAt) / float64(introSyncFull-introSyncAt)
+	if frame >= splashSyncAt {
+		frac := float64(frame-splashSyncAt) / float64(splashSyncFull-splashSyncAt)
 		placeSyncBar(grid, w, h, barRow, frac)
 	}
 
 	// Readout log, over the head.
-	if frame >= introMagiAt {
-		placeCentered(grid, w, h, magiRow, "──  MAGI SYSTEM ONLINE  ──", DataGreen)
+	if frame >= splashBannerAt {
+		placeCentered(grid, w, h, bannerRow, "──  MAGI SYSTEM ONLINE  ──", Green)
 	}
-	for i, b := range introReadouts {
+	for i, b := range splashReadouts {
 		if frame >= b.reveal {
 			placeReadout(grid, w, h, readoutTop+i, b.label, b.value, b.labelColor, b.valueColor)
 		}
 	}
-	if frame >= introSyncAt {
+	if frame >= splashSyncAt {
 		jp := "同期"
 		latin := " SYNCHRONIZATION START"
 		start := centerCol(w, jp+latin)
-		placeText(grid, w, h, syncRow, start, jp, WireCyan)
-		placeText(grid, w, h, syncRow, start+runewidth.StringWidth(jp), latin, DataGreen)
+		placeText(grid, w, h, syncRow, start, jp, Cyan)
+		placeText(grid, w, h, syncRow, start+runewidth.StringWidth(jp), latin, Green)
 	}
 
-	return introCompose(grid, w, h)
+	return splashCompose(grid, w, h)
 }
 
 // placeReadout writes "LABEL ……… VALUE" centered on a row: the label, an ASCII
 // dotted leader (dim steel), then the value. Width-aware via placeText.
-func placeReadout(grid []introCell, w, h, row int, label, value string, labelColor, valueColor int) {
+func placeReadout(grid []splashCell, w, h, row int, label, value string, labelColor, valueColor int) {
 	target := w * 2 / 5
 	if target > 40 {
 		target = 40
@@ -198,7 +198,7 @@ func placeReadout(grid []introCell, w, h, row int, label, value string, labelCol
 
 // placeSyncBar draws a centered "SYNC RATIO [████░░░░] NN.N%" gauge whose fill
 // and percentage climb with frac (clamped to [0,1]).
-func placeSyncBar(grid []introCell, w, h, row int, frac float64) {
+func placeSyncBar(grid []splashCell, w, h, row int, frac float64) {
 	if frac < 0 {
 		frac = 0
 	}
@@ -218,22 +218,22 @@ func placeSyncBar(grid []introCell, w, h, row int, frac float64) {
 	full := label + "[" + strings.Repeat("█", barW) + "]" + pct
 	start := centerCol(w, full)
 	col := start
-	placeText(grid, w, h, row, col, label, WireCyan)
+	placeText(grid, w, h, row, col, label, Cyan)
 	col += runewidth.StringWidth(label)
 	placeText(grid, w, h, row, col, "[", SteelDim)
 	col++
-	placeText(grid, w, h, row, col, strings.Repeat("█", fill), DataGreen)
+	placeText(grid, w, h, row, col, strings.Repeat("█", fill), Green)
 	placeText(grid, w, h, row, col+fill, strings.Repeat("░", barW-fill), SteelDim)
 	col += barW
 	placeText(grid, w, h, row, col, "]", SteelDim)
 	col++
-	placeText(grid, w, h, row, col, pct, DataGreen)
+	placeText(grid, w, h, row, col, pct, Green)
 }
 
 // placeInstrumentFrame stamps the corner registration ticks and a blinking REC
-// timecode, framing the field like a NERV monitoring feed. All placements clip
+// timecode, framing the field like a retro monitoring feed. All placements clip
 // to the grid, so it is safe at any size.
-func placeInstrumentFrame(grid []introCell, w, h, frame int) {
+func placeInstrumentFrame(grid []splashCell, w, h, frame int) {
 	placeText(grid, w, h, 0, 0, "┌─", SteelDim)
 	placeText(grid, w, h, 0, w-2, "─┐", SteelDim)
 	placeText(grid, w, h, h-1, 0, "└─", SteelDim)
@@ -242,16 +242,16 @@ func placeInstrumentFrame(grid []introCell, w, h, frame int) {
 	// Blinking REC dot + a fake running timecode in the top-left.
 	tc := fmt.Sprintf("%02d:%02d:%02d", (frame/3600)%24, (frame/60)%60, frame%60)
 	if (frame/4)%2 == 0 {
-		placeText(grid, w, h, 0, 3, "●", AlarmRed)
+		placeText(grid, w, h, 0, 3, "●", Red)
 	}
 	placeText(grid, w, h, 0, 5, "REC "+tc, SteelDim)
 }
 
-// blitHead renders the head into an hw x hh sub-grid and copies its lit cells
+// blitMesh renders the head into an hw x hh sub-grid and copies its lit cells
 // into the intro grid at (hx, hy), leaving the scan line/labels showing through
 // the gaps.
-func blitHead(grid []introCell, w, h, hx, hy, hw, hh, frame int) {
-	chars, colors, ok := headGrid(hw, hh, frame)
+func blitMesh(grid []splashCell, w, h, hx, hy, hw, hh, frame int) {
+	chars, colors, ok := meshGrid(hw, hh, frame)
 	if !ok {
 		return
 	}
@@ -269,7 +269,7 @@ func blitHead(grid []introCell, w, h, hx, hy, hw, hh, frame int) {
 			if gx < 0 || gx >= w {
 				continue
 			}
-			grid[gy*w+gx] = introCell{r: ch, color: colors[r*hw+c]}
+			grid[gy*w+gx] = splashCell{r: ch, color: colors[r*hw+c]}
 		}
 	}
 }
@@ -277,7 +277,7 @@ func blitHead(grid []introCell, w, h, hx, hy, hw, hh, frame int) {
 const scanDim = 23 // dim cyan, a CRT phosphor scan line under the readability floor
 
 // placeCentered writes s horizontally centered on a row.
-func placeCentered(grid []introCell, w, h, row int, s string, color int) {
+func placeCentered(grid []splashCell, w, h, row int, s string, color int) {
 	placeText(grid, w, h, row, centerCol(w, s), s, color)
 }
 
@@ -293,7 +293,7 @@ func centerCol(w int, s string) int {
 // placeText writes s into the grid starting at (row, col), honoring rune widths
 // so wide CJK glyphs occupy two cells (the second marked as a continuation).
 // Out-of-range rows and glyphs that would overflow the right edge are skipped.
-func placeText(grid []introCell, w, h, row, col int, s string, color int) {
+func placeText(grid []splashCell, w, h, row, col int, s string, color int) {
 	if row < 0 || row >= h {
 		return
 	}
@@ -309,18 +309,18 @@ func placeText(grid []introCell, w, h, row, col int, s string, color int) {
 		if col+rw > w {
 			break
 		}
-		grid[row*w+col] = introCell{r: r, color: color}
+		grid[row*w+col] = splashCell{r: r, color: color}
 		if rw == 2 {
-			grid[row*w+col+1] = introCell{r: ' ', color: color, cont: true}
+			grid[row*w+col+1] = splashCell{r: ' ', color: color, cont: true}
 		}
 		col += rw
 	}
 }
 
-// introCompose turns the cell grid into styled lines, coalescing color runs and
+// splashCompose turns the cell grid into styled lines, coalescing color runs and
 // resetting at blanks and line ends. Continuation cells emit nothing (their wide
 // glyph already covered the column). Every line is exactly w visible columns.
-func introCompose(grid []introCell, w, h int) string {
+func splashCompose(grid []splashCell, w, h int) string {
 	lines := make([]string, h)
 	for r := 0; r < h; r++ {
 		var b strings.Builder

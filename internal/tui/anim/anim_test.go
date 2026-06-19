@@ -27,45 +27,45 @@ func assertIndexedSGROnly(t *testing.T, out, what string) {
 	}
 }
 
-func TestHeadDimensionsAndWidth(t *testing.T) {
+func TestMeshDimensionsAndWidth(t *testing.T) {
 	for _, dim := range []struct{ w, h int }{{18, 8}, {24, 10}, {32, 14}} {
-		lines := Head(dim.w, dim.h, 0)
+		lines := Mesh(dim.w, dim.h, 0)
 		if len(lines) != dim.h {
-			t.Fatalf("Head(%d,%d) returned %d lines, want %d", dim.w, dim.h, len(lines), dim.h)
+			t.Fatalf("Mesh(%d,%d) returned %d lines, want %d", dim.w, dim.h, len(lines), dim.h)
 		}
 		for i, line := range lines {
 			if got := runewidth.StringWidth(plain(line)); got != dim.w {
-				t.Fatalf("Head(%d,%d) line %d width = %d, want %d: %q", dim.w, dim.h, i, got, dim.w, plain(line))
+				t.Fatalf("Mesh(%d,%d) line %d width = %d, want %d: %q", dim.w, dim.h, i, got, dim.w, plain(line))
 			}
 		}
 	}
 }
 
-func TestHeadIndexedSGROnly(t *testing.T) {
-	out := strings.Join(Head(24, 10, 5), "\n")
+func TestMeshIndexedSGROnly(t *testing.T) {
+	out := strings.Join(Mesh(24, 10, 5), "\n")
 	assertIndexedSGROnly(t, out, "head")
 }
 
-func TestHeadEyesBrightWhenFrontFacing(t *testing.T) {
+func TestMeshEyesBrightWhenFrontFacing(t *testing.T) {
 	// Frame 0 faces the viewer, so the eyes must paint with the fixed eye color.
-	out := strings.Join(Head(18, 8, 0), "\n")
+	out := strings.Join(Mesh(18, 8, 0), "\n")
 	if !strings.Contains(out, sgr(eyeColor)) {
 		t.Fatalf("front-facing head missing its eye color (index %d)", eyeColor)
 	}
 }
 
-func TestHeadFramesDifferAcrossRotation(t *testing.T) {
-	a := strings.Join(Head(18, 8, 0), "\n")
-	b := strings.Join(Head(18, 8, 9), "\n")
+func TestMeshFramesDifferAcrossRotation(t *testing.T) {
+	a := strings.Join(Mesh(18, 8, 0), "\n")
+	b := strings.Join(Mesh(18, 8, 9), "\n")
 	if a == b {
 		t.Fatalf("head frames 0 and 9 are identical; head is not rotating")
 	}
 }
 
-// The head holds the EVA-01's fixed palette: purple armor shell, white eyes,
+// The head holds the head's fixed palette: purple armor shell, white eyes,
 // independent of any phase.
-func TestHeadUsesEvaPalette(t *testing.T) {
-	out := strings.Join(Head(44, 20, 0), "\n")
+func TestMeshUsesThemePalette(t *testing.T) {
+	out := strings.Join(Mesh(44, 20, 0), "\n")
 	if !strings.Contains(out, sgr(eyeColor)) {
 		t.Fatalf("head missing white eyes (index %d)", eyeColor)
 	}
@@ -98,12 +98,12 @@ func TestBannerShape(t *testing.T) {
 		t.Fatalf("banner should be drawn with block glyphs")
 	}
 	if BannerWidth(Banner("COUNCIL")) <= BannerWidth(Banner("NERV")) {
-		t.Fatalf("COUNCIL banner should be wider than NERV")
+		t.Fatalf("COUNCIL banner should be wider than a short word")
 	}
 }
 
-func TestHeadTooSmallIsBlank(t *testing.T) {
-	lines := Head(4, 2, 0)
+func TestMeshTooSmallIsBlank(t *testing.T) {
+	lines := Mesh(4, 2, 0)
 	if len(lines) != 2 {
 		t.Fatalf("blank head returned %d lines, want 2", len(lines))
 	}
@@ -114,11 +114,11 @@ func TestHeadTooSmallIsBlank(t *testing.T) {
 	}
 }
 
-func TestIntroDimensionsWidthAndContent(t *testing.T) {
+func TestSplashDimensionsWidthAndContent(t *testing.T) {
 	// Width/height invariants must hold at any size and frame.
 	for _, dim := range []struct{ w, h int }{{60, 20}, {90, 34}, {120, 40}} {
 		for _, frame := range []int{0, 12, 42, 56} {
-			out := Intro(dim.w, dim.h, frame)
+			out := Splash(dim.w, dim.h, frame)
 			lines := strings.Split(out, "\n")
 			if len(lines) != dim.h {
 				t.Fatalf("intro(%d,%d,%d) has %d lines, want %d", dim.w, dim.h, frame, len(lines), dim.h)
@@ -133,7 +133,7 @@ func TestIntroDimensionsWidthAndContent(t *testing.T) {
 	}
 
 	// The full stepped sequence has shown by a late frame.
-	flat := plain(Intro(90, 34, 52))
+	flat := plain(Splash(90, 34, 52))
 	for _, want := range []string{
 		"MELCHIOR-1", "BALTHASAR-2", "CASPER-3",
 		"MAGI SYSTEM ONLINE", "SYNCHRONIZATION START", "SYNC RATIO",
@@ -144,25 +144,25 @@ func TestIntroDimensionsWidthAndContent(t *testing.T) {
 		}
 	}
 	// The final ACTIVATION beat lands by the end.
-	if !strings.Contains(plain(Intro(90, 34, 60)), "ACTIVATION") {
+	if !strings.Contains(plain(Splash(90, 34, 60)), "ACTIVATION") {
 		t.Fatalf("intro (frame 60) missing ACTIVATION beat")
 	}
 }
 
-func TestIntroNervFallbackOnNarrowField(t *testing.T) {
+func TestSplashWordmarkFallbackOnNarrowField(t *testing.T) {
 	// Too short for the block title -> spaced-caps "N E R V".
-	flat := plain(Intro(40, 9, 0))
+	flat := plain(Splash(40, 9, 0))
 	if !strings.Contains(flat, "N E R V") {
 		t.Fatalf("narrow intro missing N E R V title; got:\n%s", flat)
 	}
 }
 
-func TestIntroRevealsAreStepped(t *testing.T) {
-	early := plain(Intro(60, 20, 0))
+func TestSplashRevealsAreStepped(t *testing.T) {
+	early := plain(Splash(60, 20, 0))
 	if strings.Contains(early, "E V A N G E L I O N") {
-		t.Fatalf("EVANGELION should not appear at frame 0 (stepped reveal)")
+		t.Fatalf("the title should not appear at frame 0 (stepped reveal)")
 	}
 	if strings.Contains(early, "MAGI SYSTEM ONLINE") {
-		t.Fatalf("MAGI label should not appear at frame 0 (stepped reveal)")
+		t.Fatalf("the readout label should not appear at frame 0 (stepped reveal)")
 	}
 }

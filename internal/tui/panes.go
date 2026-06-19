@@ -12,7 +12,7 @@ func (m Model) chromeLines() int {
 
 // headerLines is the header height: the compact title/status header (plus a
 // phase-rail row while a run is active), or the taller band that docks the
-// rotating 3D head while EVA mode is themed.
+// rotating 3D head while retro mode is themed.
 func (m Model) headerLines() int {
 	if m.headShown() {
 		return headerBandHeight
@@ -24,11 +24,11 @@ func (m Model) headerLines() int {
 	return h
 }
 
-// headShown reports whether the docked rotating 3D EVA-01 head is rendered in
-// the header band: EVA mode is themed (intro finished) and the terminal has
+// headShown reports whether the docked rotating 3D head is rendered in
+// the header band: retro mode is themed (intro finished) and the terminal has
 // room for the band without starving the agent panes below it.
 func (m Model) headShown() bool {
-	return m.evaThemed() && m.Width >= 48 && m.Height >= 20
+	return m.retroThemed() && m.Width >= 48 && m.Height >= 20
 }
 
 func (m *Model) focusNext() {

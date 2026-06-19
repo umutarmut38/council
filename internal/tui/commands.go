@@ -226,11 +226,11 @@ func (m *Model) handleCommand(text string) (bool, tea.Cmd) {
 	word := strings.TrimPrefix(strings.ToLower(fields[0]), "/")
 	// /eva and /crt are hidden easter-egg controls: intercepted before the
 	// registry so they never appear in the palette or help. /eva toggles the
-	// persistent NERV theme (/eva loop keeps the activation intro running
+	// persistent retro theme (/eva loop keeps the activation intro running
 	// indefinitely); /crt toggles the CRT scanline overlay.
 	if word == "eva" {
 		loop := len(fields) > 1 && (strings.EqualFold(fields[1], "loop") || strings.EqualFold(fields[1], "intro"))
-		return true, m.toggleEva(loop)
+		return true, m.toggleRetro(loop)
 	}
 	if word == "crt" {
 		m.crtOff = !m.crtOff

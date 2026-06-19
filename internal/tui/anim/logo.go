@@ -5,15 +5,15 @@ import (
 	"strings"
 )
 
-// nervLogoRaw is the NERV emblem ASCII art (fig-leaf + wordmark + the diagonal),
-// embedded from nervlogo.txt.
+// logoRaw is the retro emblem ASCII art (emblem + wordmark + the diagonal),
+// embedded from splash.dat.
 //
-//go:embed nervlogo.txt
-var nervLogoRaw string
+//go:embed splash.dat
+var logoRaw string
 
-// nervLogoLines is the emblem with trailing spaces and surrounding blank lines
-// trimmed. Callers render it red and center it; NervLogo scales it to fit.
-var nervLogoLines = parseLogo(nervLogoRaw)
+// logoLines is the emblem with trailing spaces and surrounding blank lines
+// trimmed. Callers render it red and center it; Logo scales it to fit.
+var logoLines = parseLogo(logoRaw)
 
 func parseLogo(raw string) []string {
 	lines := strings.Split(strings.ReplaceAll(raw, "\r\n", "\n"), "\n")
@@ -30,20 +30,20 @@ func parseLogo(raw string) []string {
 	return lines[start:end]
 }
 
-// NervLogoNativeSize is the emblem's native width and height in cells.
-func NervLogoNativeSize() (w, h int) {
-	for _, l := range nervLogoLines {
+// LogoSize is the emblem's native width and height in cells.
+func LogoSize() (w, h int) {
+	for _, l := range logoLines {
 		if n := len([]rune(l)); n > w {
 			w = n
 		}
 	}
-	return w, len(nervLogoLines)
+	return w, len(logoLines)
 }
 
-// NervLogo returns the emblem scaled to fit within maxW x maxH (never upscaled),
+// Logo returns the emblem scaled to fit within maxW x maxH (never upscaled),
 // as plain lines for the caller to color red and center.
-func NervLogo(maxW, maxH int) []string {
-	return scaleArt(nervLogoLines, maxW, maxH)
+func Logo(maxW, maxH int) []string {
+	return scaleArt(logoLines, maxW, maxH)
 }
 
 // scaleArt downsamples ASCII art to fit maxW x maxH, mapping each output cell's

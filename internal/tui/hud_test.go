@@ -26,13 +26,13 @@ func hudModel(t *testing.T, names ...string) Model {
 	return m
 }
 
-func TestEvaPhaseReadout(t *testing.T) {
+func TestRetroPhaseReadout(t *testing.T) {
 	m := hudModel(t, "a")
 
 	// No run -> nothing.
 	m.progress = nil
 	m.phase = ""
-	if got := m.evaPhaseReadout(); got != "" {
+	if got := m.phaseReadout(); got != "" {
 		t.Fatalf("no run: got %q, want empty", got)
 	}
 
@@ -41,14 +41,14 @@ func TestEvaPhaseReadout(t *testing.T) {
 	m.progress = &runProgress{
 		Phases: []phaseInfo{{Label: "Review", State: phaseActive, Done: 1, Expected: 2, Counted: true}},
 	}
-	if got := m.evaPhaseReadout(); got != "▶ REVIEW · 1/2" {
+	if got := m.phaseReadout(); got != "▶ REVIEW · 1/2" {
 		t.Fatalf("active phase: got %q, want %q", got, "▶ REVIEW · 1/2")
 	}
 
 	// Idle with a run -> the next action.
 	m.phase = ""
 	m.progress = &runProgress{Next: "/compare or /adopt"}
-	if got := m.evaPhaseReadout(); got != "▶ AWAITING · /compare or /adopt" {
+	if got := m.phaseReadout(); got != "▶ AWAITING · /compare or /adopt" {
 		t.Fatalf("idle: got %q", got)
 	}
 }

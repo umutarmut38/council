@@ -67,10 +67,10 @@ func (m Model) renderHeader() string {
 // the title/status/rail occupy the remaining width to its left.
 const headBandHeadWidth = 22
 
-// renderHeaderBand lays out the themed NERV header as three columns: the COUNCIL
-// block banner on the left, the compact NERV logo centered in the gap between
-// them (and vertically centered in the band), and the rotating 3D EVA-01 head
-// docked on the right. A single NERV operational-status line (the current phase,
+// renderHeaderBand lays out the themed retro header as three columns: the COUNCIL
+// block banner on the left, the compact retro logo centered in the gap between
+// them (and vertically centered in the band), and the rotating 3D head
+// docked on the right. A single retro operational-status line (the current phase,
 // pulsing while live) runs along the bottom of the left+middle region. Every row
 // is exactly m.Width columns so the View invariant holds.
 func (m Model) renderHeaderBand(c chromeStyles) string {
@@ -85,12 +85,12 @@ func (m Model) renderHeaderBand(c chromeStyles) string {
 	}
 	beforeW := m.Width - headW // the left + middle region, before the docked head
 
-	head := anim.Head(headW, headH, m.animFrame)
+	head := anim.Mesh(headW, headH, m.animFrame)
 
 	// Left: COUNCIL in block letters. When a phase is live and the band is wide
 	// enough, the current phase — with its count — sits right next to it in the
 	// same bold block letters, in green; the count joins the block when it fits,
-	// else it is dropped. The NERV logo always stays centered in the gap between
+	// else it is dropped. The retro logo always stays centered in the gap between
 	// the wordmark(s) and the head; narrow bands drop the phase to the thin
 	// status line below.
 	council := anim.Banner("COUNCIL")
@@ -121,7 +121,7 @@ func (m Model) renderHeaderBand(c chromeStyles) string {
 		phaseW = anim.BannerWidth(b)
 	}
 	// Only place the phase beside COUNCIL if room remains (>=18) for the centered
-	// NERV logo.
+	// retro logo.
 	phaseBeside := phaseW > 0 && cW+2+phaseW+18 <= beforeW
 
 	leftW := cW
@@ -129,9 +129,9 @@ func (m Model) renderHeaderBand(c chromeStyles) string {
 		leftW = cW + 2 + phaseW
 	}
 	gapW := beforeW - leftW
-	logo := nervLogoBlock(gapW)
+	logo := logoBlock(gapW)
 	logoTop := (headH - len(logo)) / 2
-	phaseStyle := lipgloss.NewStyle().Bold(true).Foreground(idxColor(anim.DataGreen))
+	phaseStyle := lipgloss.NewStyle().Bold(true).Foreground(idxColor(anim.Green))
 
 	before := make([]string, headH)
 	for i := range before {
@@ -156,7 +156,7 @@ func (m Model) renderHeaderBand(c chromeStyles) string {
 	// the thin phase readout (green) on narrow bands, the next action (cyan) when
 	// idle, nothing when there is no run.
 	if headH >= 2 && !phaseBeside {
-		if detail := m.evaPhaseReadout(); detail != "" {
+		if detail := m.phaseReadout(); detail != "" {
 			style := c.rail
 			if m.phase != "" {
 				style = c.status // green
@@ -172,23 +172,23 @@ func (m Model) renderHeaderBand(c chromeStyles) string {
 	return strings.Join(rows, "\n")
 }
 
-// NERV logo text: the wordmark with a small half-leaf motif (block elements, all
+// retro logo text: the wordmark with a small emblem motif (block elements, all
 // display-width 1) evoking the institutional emblem, plus the motto (kept as one
 // line when wide enough, split across two when the gap is narrower).
 const (
-	nervEmblem = "N E R V  ▞▟█▙"
-	nervMotto  = "GOD'S IN HIS HEAVEN, ALL'S RIGHT WITH THE WORLD"
-	nervMotto1 = "GOD'S IN HIS HEAVEN,"
-	nervMotto2 = "ALL'S RIGHT WITH THE WORLD"
+	emblemMark = "N E R V  ▞▟█▙"
+	motto      = "GOD'S IN HIS HEAVEN, ALL'S RIGHT WITH THE WORLD"
+	motto1     = "GOD'S IN HIS HEAVEN,"
+	motto2     = "ALL'S RIGHT WITH THE WORLD"
 )
 
-// nervLogoBlock renders the centered NERV logo to fit a gapW-wide column: a big
+// logoBlock renders the centered retro logo to fit a gapW-wide column: a big
 // red block wordmark when the gap is wide enough, the compact emblem otherwise,
 // then the dim motto below (one line, or two when narrower). Each returned row is
 // exactly gapW visible columns; nil if the gap is too small for even the emblem.
-func nervLogoBlock(gapW int) []string {
-	logo := lipgloss.NewStyle().Bold(true).Foreground(idxColor(anim.EvaRed))
-	sub := lipgloss.NewStyle().Foreground(idxColor(anim.NervOrangeDim))
+func logoBlock(gapW int) []string {
+	logo := lipgloss.NewStyle().Bold(true).Foreground(idxColor(anim.Crimson))
+	sub := lipgloss.NewStyle().Foreground(idxColor(anim.AmberDim))
 
 	var rows []string
 	if banner := anim.Banner("NERV"); gapW >= anim.BannerWidth(banner)+2 {
@@ -196,19 +196,19 @@ func nervLogoBlock(gapW int) []string {
 		for _, line := range banner {
 			rows = append(rows, logo.Render(centerLine(line, gapW)))
 		}
-	} else if gapW >= lipgloss.Width(nervEmblem)+2 {
-		rows = append(rows, logo.Render(centerLine(nervEmblem, gapW)))
+	} else if gapW >= lipgloss.Width(emblemMark)+2 {
+		rows = append(rows, logo.Render(centerLine(emblemMark, gapW)))
 	} else {
 		return nil
 	}
 
 	switch {
-	case gapW >= lipgloss.Width(nervMotto)+2:
-		rows = append(rows, sub.Render(centerLine(nervMotto, gapW)))
-	case gapW >= lipgloss.Width(nervMotto2)+2:
+	case gapW >= lipgloss.Width(motto)+2:
+		rows = append(rows, sub.Render(centerLine(motto, gapW)))
+	case gapW >= lipgloss.Width(motto2)+2:
 		rows = append(rows,
-			sub.Render(centerLine(nervMotto1, gapW)),
-			sub.Render(centerLine(nervMotto2, gapW)))
+			sub.Render(centerLine(motto1, gapW)),
+			sub.Render(centerLine(motto2, gapW)))
 	}
 	return rows
 }
@@ -227,7 +227,7 @@ func centerLine(s string, width int) string {
 
 func (m Model) renderFooter() string {
 	c := m.chrome()
-	eva := m.evaThemed()
+	retro := m.retroThemed()
 	if m.ScreenMode != ScreenPanes {
 		hint := "Esc back"
 		switch m.ScreenMode {
@@ -244,9 +244,9 @@ func (m Model) renderFooter() string {
 		}
 		return strings.Join([]string{
 			c.suggest.Render(fitText(hint, m.Width)),
-			inputBoxTop(m.screenModeName(), m.Width, c.border, eva),
-			inputBoxContent(m.Status, m.Width, c.border, c.input, eva),
-			inputBoxBottom(m.Width, c.border, eva),
+			inputBoxTop(m.screenModeName(), m.Width, c.border, retro),
+			inputBoxContent(m.Status, m.Width, c.border, c.input, retro),
+			inputBoxBottom(m.Width, c.border, retro),
 		}, "\n")
 	}
 
@@ -254,7 +254,7 @@ func (m Model) renderFooter() string {
 		hint := c.suggest.Render(fitText("DIRECT MODE — keystrokes go straight to the pane. Esc/F2 returns to the composer.", m.Width))
 		label := "direct: " + m.focusedName()
 		content := "keys → " + m.focusedName()
-		return strings.Join([]string{hint, inputBoxTop(label, m.Width, c.border, eva), inputBoxContent(content, m.Width, c.border, c.input, eva), inputBoxBottom(m.Width, c.border, eva)}, "\n")
+		return strings.Join([]string{hint, inputBoxTop(label, m.Width, c.border, retro), inputBoxContent(content, m.Width, c.border, c.input, retro), inputBoxBottom(m.Width, c.border, retro)}, "\n")
 	}
 
 	label := m.targetLabel()
@@ -267,9 +267,9 @@ func (m Model) renderFooter() string {
 
 	lines := m.suggestionBlock(c)
 	lines = append(lines,
-		inputBoxTop(label, m.Width, c.border, eva),
-		inputBoxContent(content, m.Width, c.border, c.input, eva),
-		inputBoxBottom(m.Width, c.border, eva),
+		inputBoxTop(label, m.Width, c.border, retro),
+		inputBoxContent(content, m.Width, c.border, c.input, retro),
+		inputBoxBottom(m.Width, c.border, retro),
 	)
 	return strings.Join(lines, "\n")
 }
@@ -348,9 +348,9 @@ func (m Model) targetPrompt() string {
 	}
 }
 
-func inputBoxTop(label string, width int, border lipgloss.Style, eva bool) string {
+func inputBoxTop(label string, width int, border lipgloss.Style, retro bool) string {
 	tl, tr, hbar := "╭", "╮", "─"
-	if eva {
+	if retro {
 		tl, tr, hbar = "┏", "┓", "━"
 	}
 	if width < 2 {
@@ -369,9 +369,9 @@ func inputBoxTop(label string, width int, border lipgloss.Style, eva bool) strin
 	return border.Render(tl + lbl + strings.Repeat(hbar, pad) + tr)
 }
 
-func inputBoxBottom(width int, border lipgloss.Style, eva bool) string {
+func inputBoxBottom(width int, border lipgloss.Style, retro bool) string {
 	bl, br, hbar := "╰", "╯", "─"
-	if eva {
+	if retro {
 		bl, br, hbar = "┗", "┛", "━"
 	}
 	if width < 2 {
@@ -380,9 +380,9 @@ func inputBoxBottom(width int, border lipgloss.Style, eva bool) string {
 	return border.Render(bl + strings.Repeat(hbar, width-2) + br)
 }
 
-func inputBoxContent(text string, width int, border, input lipgloss.Style, eva bool) string {
+func inputBoxContent(text string, width int, border, input lipgloss.Style, retro bool) string {
 	vbar := "│"
-	if eva {
+	if retro {
 		vbar = "┃"
 	}
 	if width < 2 {
@@ -607,11 +607,11 @@ func (m Model) renderPane(index int, width int, height int) []string {
 		marker = ">"
 		style = c.focus
 	}
-	if m.evaThemed() {
-		// EVA mode overrides the configured agent colors entirely: the focused
-		// pane is full orange, the rest cycle across the NERV accents (muted
+	if m.retroThemed() {
+		// retro mode overrides the configured agent colors entirely: the focused
+		// pane is full orange, the rest cycle across the retro accents (muted
 		// while unfocused). Toggling /eva off restores the configured path.
-		style = evaPaneStyle(index, focused)
+		style = retroPaneStyle(index, focused)
 	} else if colorValue := m.paneColor(view.Session.Name); colorValue != "" {
 		// A configured agent color tints the border only — the pane looks normal
 		// otherwise. Focused: full-strength color; unfocused: a computed muted
@@ -642,8 +642,8 @@ func (m Model) renderPane(index int, width int, height int) []string {
 	side := style.Render("│")
 	topLine := titleStyleForPane.Render(topBorder(fmt.Sprintf(" %s %s [%s] ", marker, view.Session.Name, state), width))
 	botLine := style.Render("╰" + strings.Repeat("─", width-2) + "╯")
-	if m.evaThemed() {
-		// Angular NERV frame: heavy box, a classification code on the top rail,
+	if m.retroThemed() {
+		// Angular retro frame: heavy box, a classification code on the top rail,
 		// and a bilingual status tag on the bottom rail.
 		side = style.Render("┃")
 		code := fmt.Sprintf("NERV//%02d", index+1)
@@ -652,8 +652,8 @@ func (m Model) renderPane(index int, width int, height int) []string {
 			jp = "警告" // WARNING
 		}
 		title := fmt.Sprintf("%s %s [%s]", strings.TrimSpace(marker), view.Session.Name, state)
-		topLine = titleStyleForPane.Render(evaTopBorder(title, code, width))
-		botLine = style.Render(evaBottomBorder(jp, width))
+		topLine = titleStyleForPane.Render(retroTopBorder(title, code, width))
+		botLine = style.Render(retroBottomBorder(jp, width))
 	}
 
 	lines := make([]string, 0, height)
@@ -667,9 +667,9 @@ func (m Model) renderPane(index int, width int, height int) []string {
 	return lines
 }
 
-// evaTopBorder draws the heavy NERV top rail: ┏━ TITLE ━…━ CODE ━┓, exactly
+// retroTopBorder draws the heavy retro top rail: ┏━ TITLE ━…━ CODE ━┓, exactly
 // width visible columns.
-func evaTopBorder(title, code string, width int) string {
+func retroTopBorder(title, code string, width int) string {
 	if width < 8 {
 		return strings.Repeat("━", max0(width))
 	}
@@ -688,9 +688,9 @@ func evaTopBorder(title, code string, width int) string {
 	return "┏━" + label + strings.Repeat("━", fill) + tag + "━┓"
 }
 
-// evaBottomBorder draws the heavy NERV bottom rail: ┗━ LABEL ━…━┛, exactly
+// retroBottomBorder draws the heavy retro bottom rail: ┗━ LABEL ━…━┛, exactly
 // width visible columns. label may contain CJK (width-aware).
-func evaBottomBorder(label string, width int) string {
+func retroBottomBorder(label string, width int) string {
 	if width < 8 {
 		return strings.Repeat("━", max0(width))
 	}
