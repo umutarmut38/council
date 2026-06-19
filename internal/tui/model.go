@@ -495,7 +495,8 @@ func (m *Model) kickAnimLoop() tea.Cmd {
 // full-screen activation intro and then leaves the UI recolored until toggled
 // off; turning it off reverts cleanly to the configured colors and header
 // height. It kicks the frame loop when needed; when turning off, the loop
-// stops itself on the next tick unless ui.animation keeps it live.
+// stops itself on the next tick once nothing on screen still needs frames
+// (see animationLive).
 func (m *Model) toggleRetro(loop bool) tea.Cmd {
 	m.retroActive = !m.retroActive
 	if m.retroActive {

@@ -84,6 +84,26 @@ func TestRetroHeadBandSuppressedOnSmallTerminal(t *testing.T) {
 	}
 }
 
+// TestRetroHeadBandSuppressedOnNarrowTerminal keeps the band off terminals that
+// are tall enough but too narrow for the COUNCIL banner beside the docked head:
+// rendering it there used to overflow m.Width and break the view invariant.
+func TestRetroHeadBandSuppressedOnNarrowTerminal(t *testing.T) {
+	m := retroTestModel(t, headerBandMinWidth-5, 30) // narrow, but plenty of height
+	themed(&m)
+	if m.headShown() {
+		t.Fatalf("headShown should be false below headerBandMinWidth=%d at width %d", headerBandMinWidth, m.Width)
+	}
+	if m.headerLines() != headerHeight {
+		t.Fatalf("headerLines = %d, want compact %d", m.headerLines(), headerHeight)
+	}
+	// The compact header must still hold the exact-width invariant at this size.
+	for i, line := range plainLines(m) {
+		if got := lipgloss.Width(line); got != m.Width {
+			t.Fatalf("line %d width = %d, want %d: %q", i, got, m.Width, line)
+		}
+	}
+}
+
 // TestRetroToggleIntroSkipRevert walks the full /eva lifecycle: engage -> intro
 // plays full-screen -> any key skips into themed mode (without exiting) ->
 // second /eva reverts cleanly to the normal header.

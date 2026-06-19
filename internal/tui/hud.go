@@ -307,8 +307,8 @@ func (m Model) railPhase(p *runProgress) *phaseInfo {
 
 // phaseReadout is the single-line operational-status line shown in the retro
 // header band: the live phase + its artifact count while a phase runs, the next
-// action when idle/between/complete, or the retro standby marking with no run. It
-// is the simplified replacement for the full phase rail in themed mode.
+// action when idle/between/complete, or empty when there is no run. It is the
+// simplified replacement for the full phase rail in themed mode.
 func (m Model) phaseReadout() string {
 	p := m.progress
 	if p != nil && m.phase != "" { // a phase is live

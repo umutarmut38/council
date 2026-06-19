@@ -67,6 +67,14 @@ func (m Model) renderHeader() string {
 // the title/status/rail occupy the remaining width to its left.
 const headBandHeadWidth = 22
 
+// headerBandMinWidth is the narrowest terminal the docked band fits without
+// overflowing m.Width. The 34-column COUNCIL block banner sits beside the
+// 22-column head, so the left region (Width-head) must be at least the banner
+// width — a 56-column hard floor. 60 clears it with a few columns of slack;
+// below it the compact header is used instead. (The centered logo only appears
+// once that gap grows wider still.)
+const headerBandMinWidth = 60
+
 // renderHeaderBand lays out the themed retro header as three columns: the COUNCIL
 // block banner on the left, the compact retro logo centered in the gap between
 // them (and vertically centered in the band), and the rotating 3D head

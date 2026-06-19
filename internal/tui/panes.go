@@ -26,9 +26,10 @@ func (m Model) headerLines() int {
 
 // headShown reports whether the docked rotating 3D head is rendered in
 // the header band: retro mode is themed (intro finished) and the terminal has
-// room for the band without starving the agent panes below it.
+// room for the band (see headerBandMinWidth) without starving the agent panes
+// below it.
 func (m Model) headShown() bool {
-	return m.retroThemed() && m.Width >= 48 && m.Height >= 20
+	return m.retroThemed() && m.Width >= headerBandMinWidth && m.Height >= 20
 }
 
 func (m *Model) focusNext() {
