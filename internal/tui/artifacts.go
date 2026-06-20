@@ -286,6 +286,7 @@ func (m *Model) viewingAdoptPreview() bool {
 }
 
 func (m Model) renderArtifacts(bodyHeight int) []string {
+	c := m.chrome()
 	lines := make([]string, 0, bodyHeight)
 	if m.artifactView != "" {
 		// Viewer mode: wrapped content with a scroll window.
@@ -307,7 +308,7 @@ func (m Model) renderArtifacts(bodyHeight int) []string {
 			hint = "y apply · n cancel · e edit diff · ↑/↓ scroll · Esc back"
 		}
 		header := fmt.Sprintf("%s (%d lines) — %s", m.artifactPath, len(wrapped), hint)
-		lines = append(lines, headingStyle.Render(fitText(header, m.Width)))
+		lines = append(lines, c.heading.Render(fitText(header, m.Width)))
 		for i := top; i < len(wrapped) && len(lines) < bodyHeight; i++ {
 			line := fitText(wrapped[i], m.Width)
 			if m.artifactIsDiff {
@@ -318,8 +319,8 @@ func (m Model) renderArtifacts(bodyHeight int) []string {
 		return fitBlock(lines, m.Width, bodyHeight)
 	}
 
-	lines = append(lines, headingStyle.Render(fitText("Run artifacts", m.Width)))
-	lines = append(lines, faintStyle.Render(fitText(transcriptPrivacyNote(m.Config.Sessions.Redact), m.Width)))
+	lines = append(lines, c.heading.Render(fitText("Run artifacts", m.Width)))
+	lines = append(lines, c.faint.Render(fitText(transcriptPrivacyNote(m.Config.Sessions.Redact), m.Width)))
 	start := 0
 	visible := bodyHeight - 1
 	if visible > 0 && m.ArtifactIndex >= visible {
@@ -330,7 +331,7 @@ func (m Model) renderArtifacts(bodyHeight int) []string {
 		marker := "  "
 		text := fmt.Sprintf("%s%s", marker, entry.Label)
 		if i == m.ArtifactIndex {
-			text = focusStyle.Render(fitText("> "+entry.Label+"  ·  "+entry.Path, m.Width))
+			text = c.focus.Render(fitText("> "+entry.Label+"  ·  "+entry.Path, m.Width))
 		} else {
 			text = fitText(text, m.Width)
 		}

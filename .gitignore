@@ -19,3 +19,7 @@ coverage.out
 # JavaScript examples
 node_modules/
 *.tsbuildinfo
+
+# 3D source model — bake input only (attribution in NOTICE). The committed,
+# decimated cloud is internal/tui/anim/mesh_data.go (see meshgen.go).
+internal/tui/anim/testdata/

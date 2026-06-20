@@ -178,7 +178,7 @@ func (m *Model) nextCommand(p *runProgress, plans, diffs []string) string {
 
 // phaseRail renders the compact progress line shown in the header:
 //
-//	Plan 2/2 ✓  Vote 0/2 ●  Build ○  Review ○  Adopt ○ · Next: /vote
+//	Plan 2/2 ✓ Vote 0/2 ● Build ○ Review ○ Adopt ○ · Next: /vote
 func (p *runProgress) phaseRail() string {
 	if p == nil {
 		return ""
@@ -303,6 +303,25 @@ func (m Model) railPhase(p *runProgress) *phaseInfo {
 		}
 	}
 	return nil
+}
+
+// phaseReadout is the single-line operational-status line shown in the retro
+// header band: the live phase + its artifact count while a phase runs, the next
+// action when idle/between/complete, or empty when there is no run. It is the
+// simplified replacement for the full phase rail in themed mode.
+func (m Model) phaseReadout() string {
+	p := m.progress
+	if p != nil && m.phase != "" { // a phase is live
+		name := strings.ToUpper(m.phase) // PLAN/REFINE/VOTE/BUILD/REVIEW
+		if ph := m.railPhase(p); ph != nil && ph.Counted && ph.Expected > 0 {
+			return fmt.Sprintf("▶ %s · %d/%d", name, ph.Done, ph.Expected)
+		}
+		return "▶ " + name
+	}
+	if p != nil && p.Next != "" { // idle/between/complete → next step
+		return "▶ AWAITING · " + p.Next
+	}
+	return "" // no run → nothing
 }
 
 // paneBadge builds the pane title state: process state plus, during an

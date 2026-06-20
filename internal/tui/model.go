@@ -14,6 +14,7 @@ import (
 	"github.com/umutarmut38/council/internal/orchestrate"
 	runstore "github.com/umutarmut38/council/internal/session"
 	"github.com/umutarmut38/council/internal/setup"
+	"github.com/umutarmut38/council/internal/tui/anim"
 )
 
 type TargetMode int
@@ -66,6 +67,10 @@ type initialPromptMsg string
 type initialAgentPromptsMsg map[string]string
 type phasePromptsMsg map[string]string
 type pollArtifactsMsg struct{}
+
+// animTickMsg drives the activity-animation frame loop (the rotating 3D head
+// and the /eva intro). The loop reschedules itself while it is live.
+type animTickMsg time.Time
 
 // reviewReadyMsg carries the result of the (async) build-check gate.
 type reviewReadyMsg struct {
@@ -176,6 +181,27 @@ type Model struct {
 	interruptArmed   string
 	interruptArmedAt time.Time
 
+	// activity animation + retro mode. animFrame is the monotonically increasing
+	// frame counter that drives the rotating 3D head and the /eva intro;
+	// animLoopRunning guards against stacking multiple self-rescheduling tick
+	// chains. retroActive toggles the persistent retro theme; while it is on but
+	// retroIntroDone is false the activation intro plays full-screen, advanced by
+	// retroIntroFrame.
+	animFrame       int
+	animLoopRunning bool
+	retroActive     bool
+	retroIntroFrame int
+	retroIntroDone  bool
+	// retroIntroLoop keeps the activation intro playing indefinitely (it never
+	// auto-advances into themed mode; a key still skips it). crtOff disables the
+	// CRT scanline overlay while themed.
+	retroIntroLoop bool
+	crtOff         bool
+	// activeChrome caches the chrome style set for the current frame so the
+	// render tree doesn't rebuild it for every pane. View sets it; chrome()
+	// returns it when present (nil falls back to computing on demand).
+	activeChrome *chromeStyles
+
 	// artifact browser (/artifacts)
 	Artifacts          []artifactEntry
 	ArtifactIndex      int
@@ -224,10 +250,16 @@ var (
 )
 
 const (
+	// headerHeight is the compact header: title + status (a phase rail adds a
+	// third row during a run).
 	headerHeight = 2
+	// headerBandHeight is the taller header used when the activity animation is
+	// on; it must be tall enough to dock the 3D head grid. Capped so the body
+	// still clears its minimum at the headShown floor (Height>=20): band(10) +
+	// footer(4) + body(6) == 20.
+	headerBandHeight = 10
 	// footer = suggestion line + input box (top border, content, bottom border)
 	footerHeight = 4
-	chromeHeight = headerHeight + footerHeight
 )
 
 // interruptArmWindow is how long the first Ctrl+C stays armed before a second
@@ -395,11 +427,95 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.pollArtifacts()
 	case reviewReadyMsg:
 		return m.handleReviewReady(msg)
+	case animTickMsg:
+		m.animFrame++
+		if m.retroActive && !m.retroIntroDone {
+			m.retroIntroFrame++
+			// In loop mode the intro never auto-advances (a key still skips it).
+			if !m.retroIntroLoop && m.retroIntroFrame >= retroIntroFrames {
+				m.retroIntroDone = true
+				// The themed header band now appears, shrinking the body; resize
+				// the panes' PTYs to match so they don't render stale until the
+				// next terminal resize.
+				m.resizeAgents()
+			}
+		}
+		if m.animationLive() {
+			return m, m.animTick()
+		}
+		// Nothing wants frames anymore: stop the loop so a later /eva can
+		// cleanly restart it.
+		m.animLoopRunning = false
+		return m, nil
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
 
 	return m, nil
+}
+
+// retroIntroFrames is how many frames the activation intro plays before it
+// auto-advances into themed mode (any key skips it sooner). It spans the full
+// stepped retro sequence in anim.Splash (the last beat, ACTIVATION, lands a few
+// frames before this).
+const retroIntroFrames = 64
+
+// animationLive reports whether the frame loop is needed: it runs only while
+// retro mode is active (the intro, then the themed UI with its rotating head and
+// CRT sweep). Outside retro mode there is no repaint.
+func (m Model) animationLive() bool {
+	return m.retroActive
+}
+
+// animInterval is the per-frame cadence (~14 fps) for the retro-mode animation
+// loop — the rotating head and the CRT sweep. The loop only runs while retro mode
+// is active (see animationLive), so there is no animation, and no repaint,
+// outside it.
+const animInterval = 70 * time.Millisecond
+
+// animTick schedules the next frame.
+func (m Model) animTick() tea.Cmd {
+	return tea.Tick(animInterval, func(t time.Time) tea.Msg {
+		return animTickMsg(t)
+	})
+}
+
+// kickAnimLoop starts the self-rescheduling frame loop if it should run and
+// isn't already, returning the tick command (or nil). The animLoopRunning guard
+// prevents stacking multiple tick chains (which would multiply the frame rate).
+func (m *Model) kickAnimLoop() tea.Cmd {
+	if m.animLoopRunning || !m.animationLive() {
+		return nil
+	}
+	m.animLoopRunning = true
+	return m.animTick()
+}
+
+// toggleRetro flips the persistent retro theme. Turning it on (re)plays the
+// full-screen activation intro and then leaves the UI recolored until toggled
+// off; turning it off reverts cleanly to the configured colors and header
+// height. It kicks the frame loop when needed; when turning off, the loop
+// stops itself on the next tick once nothing on screen still needs frames
+// (see animationLive).
+func (m *Model) toggleRetro(loop bool) tea.Cmd {
+	m.retroActive = !m.retroActive
+	if m.retroActive {
+		m.retroIntroFrame = 0
+		m.retroIntroDone = false
+		m.retroIntroLoop = loop
+		if loop {
+			m.Status = "EVA mode — activation intro looping (any key to enter)"
+		} else {
+			m.Status = "EVA mode engaged"
+		}
+		return m.kickAnimLoop()
+	}
+	m.retroIntroDone = false
+	m.retroIntroLoop = false
+	m.Status = "EVA mode disengaged"
+	// The header band is gone; restore the panes to the full body height.
+	m.resizeAgents()
+	return nil
 }
 
 func (m Model) View() string {
@@ -409,6 +525,18 @@ func (m Model) View() string {
 	if m.Width < 48 || m.Height < 14 {
 		return "Window too small for council. Resize to at least 48x14."
 	}
+
+	// While retro mode is engaging, the activation intro takes over the whole
+	// screen until it finishes (or a key skips it).
+	if m.retroActive && !m.retroIntroDone {
+		return anim.Splash(m.Width, m.Height, m.retroIntroFrame)
+	}
+
+	// Build the frame's chrome set once; chrome() hands this cached copy to every
+	// sub-renderer (header, footer, body, and each pane) so it isn't rebuilt per
+	// pane.
+	cs := m.chrome()
+	m.activeChrome = &cs
 
 	header := m.renderHeader()
 	footer := m.renderFooter()
@@ -427,7 +555,14 @@ func (m Model) View() string {
 			body = strings.Join(lines[:len(lines)-extra], "\n")
 		}
 	}
-	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+	screen := lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+	if m.retroThemed() && !m.crtOff {
+		// CRT scanline overlay across the whole screen — panes included — for the
+		// full in-console look. Zero-width SGR keeps the exact dimensions, and
+		// crtRowBG leaves any agent-set background intact. Toggle off with /crt.
+		screen = applyCRT(screen, m.animFrame)
+	}
+	return screen
 }
 
 func (m *Model) appendOutput(view *agentView, chunk string) {

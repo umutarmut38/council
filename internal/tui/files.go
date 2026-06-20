@@ -90,9 +90,10 @@ func (m Model) filePaletteActive() bool {
 // renderFilePalette is the vertical @file list, a sibling of the command
 // palette: ↑/↓ select, Enter inserts the path.
 func (m Model) renderFilePalette() []string {
+	c := m.chrome()
 	matches := m.fileSuggestionMatches()
 	if len(matches) == 0 {
-		return []string{suggestStyle.Render(fitText("@file: no matches — Esc closes the picker", m.Width))}
+		return []string{c.suggest.Render(fitText("@file: no matches — Esc closes the picker", m.Width))}
 	}
 	index := m.FileSuggestIndex
 	if index < 0 {
@@ -104,12 +105,12 @@ func (m Model) renderFilePalette() []string {
 	lines := make([]string, 0, len(matches)+1)
 	for i, match := range matches {
 		if i == index {
-			lines = append(lines, focusStyle.Render(fitText(" > "+match, m.Width)))
+			lines = append(lines, c.focus.Render(fitText(" > "+match, m.Width)))
 		} else {
-			lines = append(lines, faintStyle.Render(fitText("   "+match, m.Width)))
+			lines = append(lines, c.faint.Render(fitText("   "+match, m.Width)))
 		}
 	}
-	lines = append(lines, faintStyle.Render(fitText(fmt.Sprintf("@file %d/%d · ↑/↓ select · Enter insert · Esc close", index+1, len(matches)), m.Width)))
+	lines = append(lines, c.faint.Render(fitText(fmt.Sprintf("@file %d/%d · ↑/↓ select · Enter insert · Esc close", index+1, len(matches)), m.Width)))
 	return lines
 }
 

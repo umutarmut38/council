@@ -17,6 +17,22 @@ func interruptArmStatus(name string) string {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// While the retro activation intro is playing, any key skips straight into
+	// themed mode. It does NOT exit retro mode (exit is /eva again); the key is
+	// consumed so it doesn't also act on the panes underneath. Ctrl+X still
+	// quits, so the user is never trapped waiting out the intro.
+	if m.retroActive && !m.retroIntroDone {
+		if msg.String() == "ctrl+x" {
+			m.terminateAgents()
+			return m, tea.Quit
+		}
+		m.retroIntroDone = true
+		// Skipping into themed mode reveals the header band; resize the panes to
+		// the reduced body so they don't render stale until a manual resize.
+		m.resizeAgents()
+		return m, nil
+	}
+
 	// Any key other than Ctrl+C cancels a pending interrupt arm (see the ctrl+c
 	// branch below). handleKey is a value receiver, so this persists across keys.
 	if msg.String() != "ctrl+c" && m.interruptArmed != "" {

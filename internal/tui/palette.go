@@ -163,9 +163,10 @@ func (m Model) stageCommandNames() []string {
 // recently-used rows with ↺, each row shows its keybinding (when any), and
 // commands that can't run yet are dimmed with the reason.
 func (m Model) renderPalette() []string {
+	c := m.chrome()
 	matches := m.paletteMatches()
 	if len(matches) == 0 {
-		return []string{suggestStyle.Render(fitText("no matching command — Esc clears", m.Width))}
+		return []string{c.suggest.Render(fitText("no matching command — Esc clears", m.Width))}
 	}
 
 	recommended := map[string]bool{}
@@ -185,7 +186,7 @@ func (m Model) renderPalette() []string {
 	// palette shrinks so the panes always keep at least a few lines.
 	start := 0
 	visible := paletteMaxRows
-	if room := m.Height - chromeHeight - 10; room < visible {
+	if room := m.Height - m.chromeLines() - 10; room < visible {
 		visible = room
 	}
 	if visible < 3 {
@@ -200,44 +201,44 @@ func (m Model) renderPalette() []string {
 
 	lines := make([]string, 0, visible+3)
 	if hint := m.paletteNextHint(); hint != "" {
-		lines = append(lines, headingStyle.Render(fitText("▸ "+hint, m.Width)))
+		lines = append(lines, c.heading.Render(fitText("▸ "+hint, m.Width)))
 	}
 	rows := 0
 	for i := start; i < len(matches) && rows < visible; i++ {
 		rows++
-		c := matches[i]
-		usage := "/" + c.Name
-		if c.Args != "" {
-			usage += " " + c.Args
+		cmd := matches[i]
+		usage := "/" + cmd.Name
+		if cmd.Args != "" {
+			usage += " " + cmd.Args
 		}
 		mark := " "
 		switch {
-		case recommended[c.Name]:
+		case recommended[cmd.Name]:
 			mark = "●"
-		case recent[c.Name]:
+		case recent[cmd.Name]:
 			mark = "↺"
 		}
-		desc := c.Desc
-		disabled := m.commandDisabledReason(c.Name)
+		desc := cmd.Desc
+		disabled := m.commandDisabledReason(cmd.Name)
 		if disabled != "" {
 			desc = "disabled — " + disabled
 		}
-		row := fmt.Sprintf(" %s %-22s %-9s %s", mark, usage, c.Key, desc)
+		row := fmt.Sprintf(" %s %-22s %-9s %s", mark, usage, cmd.Key, desc)
 		switch {
 		case i == selected:
-			lines = append(lines, focusStyle.Render(fitText(">"+row[1:], m.Width)))
+			lines = append(lines, c.focus.Render(fitText(">"+row[1:], m.Width)))
 		case disabled != "":
-			lines = append(lines, faintStyle.Render(fitText(row, m.Width)))
-		case recommended[c.Name]:
-			lines = append(lines, suggestStyle.Render(fitText(row, m.Width)))
+			lines = append(lines, c.faint.Render(fitText(row, m.Width)))
+		case recommended[cmd.Name]:
+			lines = append(lines, c.suggest.Render(fitText(row, m.Width)))
 		default:
-			lines = append(lines, faintStyle.Render(fitText(row, m.Width)))
+			lines = append(lines, c.faint.Render(fitText(row, m.Width)))
 		}
 	}
 	if rest := len(matches) - (start + visible); rest > 0 {
-		lines = append(lines, faintStyle.Render(fitText(fmt.Sprintf("   … %d more — keep typing to filter", rest), m.Width)))
+		lines = append(lines, c.faint.Render(fitText(fmt.Sprintf("   … %d more — keep typing to filter", rest), m.Width)))
 	}
-	lines = append(lines, faintStyle.Render(fitText("↑/↓ select · Tab/Enter complete · ● = suggested for this stage · ↺ = recent", m.Width)))
+	lines = append(lines, c.faint.Render(fitText("↑/↓ select · Tab/Enter complete · ● = suggested for this stage · ↺ = recent", m.Width)))
 	return lines
 }
 

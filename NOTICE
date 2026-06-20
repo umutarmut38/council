@@ -1,0 +1,13 @@
+council — third-party asset attribution
+========================================
+
+3D model
+--------
+The rotating 3D head used by the application's themed display mode is derived
+from the model "Evangelion Unit 01 head Printable" by ngkirto
+  https://sketchfab.com/3d-models/evangelion-unit-01-head-printable-3a8d3a39f72740fcb08760a12f97b0a3
+licensed under CC-BY-4.0
+  https://creativecommons.org/licenses/by/4.0/
+
+Changes: the mesh was decimated into a compact point cloud
+(internal/tui/anim/mesh_data.go). The original mesh is not redistributed.

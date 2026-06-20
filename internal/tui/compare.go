@@ -212,9 +212,10 @@ func (m Model) renderCompare(bodyHeight int) []string {
 	if m.compareFiles != nil {
 		return m.renderCompareFiles(bodyHeight)
 	}
+	c := m.chrome()
 	lines := make([]string, 0, bodyHeight)
-	lines = append(lines, headingStyle.Render(fitText("Compare builds", m.Width)))
-	lines = append(lines, faintStyle.Render(fitText(fmt.Sprintf("  %-2s %-18s %-5s %-6s %-6s %-7s %s", "", "AGENT", "PLAN", "FILES", "CHECK", "POINTS", "WORKTREE"), m.Width)))
+	lines = append(lines, c.heading.Render(fitText("Compare builds", m.Width)))
+	lines = append(lines, c.faint.Render(fitText(fmt.Sprintf("  %-2s %-18s %-5s %-6s %-6s %-7s %s", "", "AGENT", "PLAN", "FILES", "CHECK", "POINTS", "WORKTREE"), m.Width)))
 	for i, row := range m.CompareRows {
 		marker := "  "
 		if row.Winner {
@@ -237,22 +238,23 @@ func (m Model) renderCompare(bodyHeight int) []string {
 		text := fmt.Sprintf("  %s%-18s %-5s %-6d %-6s %-7d %s", marker, name, letter, row.Files, row.CheckStatus, row.Points, worktree)
 		switch {
 		case i == m.CompareIndex:
-			lines = append(lines, focusStyle.Render(fitText(">"+text[1:], m.Width)))
+			lines = append(lines, c.focus.Render(fitText(">"+text[1:], m.Width)))
 		case m.compareMarked == row.Agent:
-			lines = append(lines, suggestStyle.Render(fitText(text, m.Width)))
+			lines = append(lines, c.suggest.Render(fitText(text, m.Width)))
 		default:
 			lines = append(lines, fitText(text, m.Width))
 		}
 	}
 	lines = append(lines, "")
-	lines = append(lines, faintStyle.Render(fitText("Enter: changed files · d: full diff vs base · x: mark, then Enter on another build to diff the two · e: open worktree in $EDITOR · ★ review winner", m.Width)))
+	lines = append(lines, c.faint.Render(fitText("Enter: changed files · d: full diff vs base · x: mark, then Enter on another build to diff the two · e: open worktree in $EDITOR · ★ review winner", m.Width)))
 	return fitBlock(lines, m.Width, bodyHeight)
 }
 
 func (m Model) renderCompareFiles(bodyHeight int) []string {
+	c := m.chrome()
 	set := m.compareFiles
 	lines := make([]string, 0, bodyHeight)
-	lines = append(lines, headingStyle.Render(fitText(set.Title, m.Width)))
+	lines = append(lines, c.heading.Render(fitText(set.Title, m.Width)))
 	start := 0
 	visible := bodyHeight - 3
 	if visible > 0 && m.CompareFileIndex >= visible {
@@ -262,21 +264,21 @@ func (m Model) renderCompareFiles(bodyHeight int) []string {
 		file := set.Files[i]
 		stat := fmt.Sprintf("  %-2s %-50s +%d -%d", file.Status, file.Path, file.Added, file.Deleted)
 		if i == m.CompareFileIndex {
-			lines = append(lines, focusStyle.Render(fitText("> "+strings.TrimPrefix(stat, "  "), m.Width)))
+			lines = append(lines, c.focus.Render(fitText("> "+strings.TrimPrefix(stat, "  "), m.Width)))
 		} else {
-			style := faintStyle
+			style := c.faint
 			switch file.Status {
 			case "A":
-				style = statusStyle
+				style = c.status
 			case "D":
-				style = warnStyle
+				style = c.warn
 			default:
-				style = suggestStyle
+				style = c.suggest
 			}
 			lines = append(lines, style.Render(fitText(stat, m.Width)))
 		}
 	}
 	lines = append(lines, "")
-	lines = append(lines, faintStyle.Render(fitText("Enter: file diff · e: open the file in $EDITOR · Esc: back to builds", m.Width)))
+	lines = append(lines, c.faint.Render(fitText("Enter: file diff · e: open the file in $EDITOR · Esc: back to builds", m.Width)))
 	return fitBlock(lines, m.Width, bodyHeight)
 }

@@ -2,16 +2,34 @@ package tui
 
 import "fmt"
 
-// chromeLines is the dynamic chrome height: the phase rail adds a third
-// header line while an orchestration run is active. The command/file palettes
-// are deliberately NOT counted — they overlay the bottom of the body (View
-// trims the covered rows) so open/close never reflows the agent panes.
+// chromeLines is the dynamic chrome height: the header (compact, or the taller
+// animation band) plus the footer. The command/file palettes are deliberately
+// NOT counted — they overlay the bottom of the body (View trims the covered
+// rows) so open/close never reflows the agent panes.
 func (m Model) chromeLines() int {
-	c := chromeHeight
-	if m.progress != nil {
-		c++
+	return m.headerLines() + footerHeight
+}
+
+// headerLines is the header height: the compact title/status header (plus a
+// phase-rail row while a run is active), or the taller band that docks the
+// rotating 3D head while retro mode is themed.
+func (m Model) headerLines() int {
+	if m.headShown() {
+		return headerBandHeight
 	}
-	return c
+	h := headerHeight
+	if m.progress != nil {
+		h++
+	}
+	return h
+}
+
+// headShown reports whether the docked rotating 3D head is rendered in
+// the header band: retro mode is themed (intro finished) and the terminal has
+// room for the band (see headerBandMinWidth) without starving the agent panes
+// below it.
+func (m Model) headShown() bool {
+	return m.retroThemed() && m.Width >= headerBandMinWidth && m.Height >= 20
 }
 
 func (m *Model) focusNext() {
