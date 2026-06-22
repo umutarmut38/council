@@ -190,7 +190,8 @@ type UIConfig struct {
 	Editor string `yaml:"editor,omitempty"`
 	// EditorOpenCmd is the keystroke template sent to the already-running
 	// integrated editor to open a file selected in the tree ({path} is replaced
-	// with the repo-relative path). Nil (unset) uses the vim/nvim default
+	// with the file's absolute path, vim-escaped). Nil (unset) uses the vim/nvim
+	// default
 	// "<Esc>:e {path}<CR>"; an explicit empty string disables in-place opening
 	// and relaunches the editor on each file instead (for non-vim editors). A
 	// pointer so unset and empty are distinguishable.

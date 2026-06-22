@@ -120,7 +120,7 @@ The editor-pane keys above apply on the right.
 | `Up` / `Down` | Select an artifact. |
 | `Enter` | Open the selected artifact in the editor pane (editable). |
 | `Tab` | Jump into the editor pane (`F2` / `Ctrl+O` returns to the list). |
-| `e` | Open the artifact in the external `$VISUAL` / `$EDITOR` instead. |
+| `e` | Open the artifact in the external configured editor (`ui.editor`, else `$VISUAL` / `$EDITOR` / `vim`) instead. |
 | `Esc` | Back to the panes view. |
 
 Synthetic views — `/preview`, `/compare` diffs, and adopt previews — stay a

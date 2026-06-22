@@ -249,8 +249,13 @@ func (m Model) renderFooter() string {
 			switch {
 			case m.artifactView != "":
 				// A synthetic viewer (preview/diff) is the read-only pager even if
-				// the editor pane was focused before it opened — its hint wins.
-				hint = "Artifacts: ↑/↓ scroll · e $EDITOR · Esc back"
+				// the editor pane was focused before it opened — its hint wins. e/i
+				// only when a real file backs the view (e.g. a compare diff).
+				if m.artifactFile != "" {
+					hint = "Artifacts: ↑/↓ scroll · e $EDITOR · i editor · Esc back"
+				} else {
+					hint = "Artifacts: ↑/↓ scroll · Esc back"
+				}
 			case m.editorPaneFocused:
 				hint = "Artifacts: keys → editor · Esc passes through · F2/Ctrl+O back to list"
 			default:

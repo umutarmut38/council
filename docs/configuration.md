@@ -389,7 +389,7 @@ How the agent participates in the plan/vote/build phases.
 | `group_by` | string | `none` | `none`, `personality`, or `category` — orders panes and the overview. |
 | `initial_prompt_delay_ms` | int | `3000` | Wait this long after launch before broadcasting the `ask` prompt. |
 | `editor` | string | — | Command (argv) to open files in `/artifacts`, `/compare`, and the integrated `/edit` pane; takes precedence over $VISUAL/$EDITOR/vim. e.g. `nvim` or `code -w`. |
-| `editor_open_cmd` | string | `<Esc>:e {path}<CR>` | Keystrokes sent to the live `/edit` editor to open a tree-selected file (`{path}` = repo-relative). Default suits vim/nvim; set empty to relaunch the editor per file instead. |
+| `editor_open_cmd` | string | `<Esc>:e {path}<CR>` | Keystrokes sent to the live `/edit` editor to open a tree-selected file (`{path}` = the file's absolute path, vim-escaped). Default suits vim/nvim; set empty to relaunch the editor per file instead. |
 
 ### `env, setup, experimental`
 
