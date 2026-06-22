@@ -279,7 +279,7 @@ func (m Model) renderFooter() string {
 	}
 
 	if m.InputMode == InputDirect {
-		hint := c.suggest.Render(fitText("DIRECT MODE — keystrokes go straight to the pane. Esc/F2 returns to the composer.", m.Width))
+		hint := c.suggest.Render(fitText("DIRECT MODE — keystrokes go straight to the pane (Esc included). F2/Ctrl+O to exit.", m.Width))
 		label := "direct: " + m.focusedName()
 		content := "keys → " + m.focusedName()
 		return strings.Join([]string{hint, inputBoxTop(label, m.Width, c.border, retro), inputBoxContent(content, m.Width, c.border, c.input, retro), inputBoxBottom(m.Width, c.border, retro)}, "\n")
