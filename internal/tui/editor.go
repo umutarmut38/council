@@ -507,11 +507,11 @@ func (m Model) joinColumns(left, right []string, leftW, height int) []string {
 
 // renderEditorTree renders the sidebar: a header line plus a scrolling window of
 // tree rows that always keeps the selection visible.
-func (m Model) renderEditorTree(height, width int) []string {
-	c := m.chrome()
-	lines := make([]string, 0, height)
-	lines = append(lines, c.heading.Render(fitText("FILES  "+compressPath(m.editorRoot), width)))
-
+// editorTreeVisibleTop returns the first tree row index rendered in a tree pane
+// of the given height (one row is the FILES heading), scrolled to keep the
+// selection visible. Shared by the renderer and mouse hit-testing so a click
+// maps to the same entry the user sees.
+func (m Model) editorTreeVisibleTop(height int) int {
 	visible := max0(height - 1)
 	top := m.editorTreeTop
 	if m.editorTreeIndex < top {
@@ -523,6 +523,15 @@ func (m Model) renderEditorTree(height, width int) []string {
 	if top < 0 {
 		top = 0
 	}
+	return top
+}
+
+func (m Model) renderEditorTree(height, width int) []string {
+	c := m.chrome()
+	lines := make([]string, 0, height)
+	lines = append(lines, c.heading.Render(fitText("FILES  "+compressPath(m.editorRoot), width)))
+
+	top := m.editorTreeVisibleTop(height)
 
 	for i := top; i < len(m.editorTree) && len(lines) < height; i++ {
 		n := m.editorTree[i]

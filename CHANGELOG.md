@@ -6,11 +6,22 @@ This project follows semantic versioning once `v0.1.0` is tagged.
 
 ## Unreleased
 
-Configurable and integrated editing: choose your editor, edit files in a
-VSCode-style PTY pane with a file tree, and edit run artifacts in place.
+Mouse support and configurable, integrated editing: scroll/click with the
+mouse, choose your editor, edit files in a VSCode-style PTY pane with a file
+tree, and edit run artifacts in place.
 
 ### Added
 
+- **Mouse support (`ui.mouse`, default on).** Wheel scrolls the pane under the
+  cursor through its history (a `↑N` marker shows when a pane isn't live; new
+  output stays anchored while scrolled), and a click focuses a pane. The wheel
+  also scrolls the list/pager screens (overview, settings, runs, artifacts,
+  compare). In direct mode and the integrated editor, mouse events are forwarded
+  to the agent's PTY (as SGR reports with pane-local coordinates) when that
+  program has enabled mouse tracking — so `nvim` (`mouse=a`), `less`, and agent
+  TUIs receive them; otherwise the wheel falls back to council's own scrollback.
+  `Ctrl+W` toggles mouse capture at runtime to restore native text selection;
+  set `ui.mouse: false` to start with it off.
 - **Configurable editor (`ui.editor`).** Choose the editor used to open files
   from `/artifacts`, `/compare`, and the integrated editor — e.g. `nvim` or
   `code -w`. It takes precedence over `$VISUAL`/`$EDITOR`, falling back to `vim`.
@@ -39,6 +50,10 @@ VSCode-style PTY pane with a file tree, and edit run artifacts in place.
   tracks cursor visibility (DECTCEM `?25h`/`?25l`) and the focused integrated
   editor pane draws a block cursor; `Esc` is forwarded to the PTY so vim/nvim
   leave insert mode.
+- **Composer: leaked mouse reports no longer type into the input.** On terminals
+  that emit wheel reports council's runtime can't parse as mouse events (or when
+  the escape is split across reads), the fragment is dropped instead of being
+  typed into the composer as text.
 
 ## v0.4.0 - 2026-06-17
 

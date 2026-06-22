@@ -102,9 +102,13 @@ type agentView struct {
 	// visible. The integrated editor pane renders a block cursor when it is
 	// focused and the program has not hidden the cursor.
 	CursorHidden bool
-	ScrollTop    int
-	ScrollBot    int
-	CurrentSGR   string
+	// MouseModeOn tracks whether the child program enabled X11 mouse tracking
+	// (DECSET ?1000/?1002/?1003). Mouse events are only forwarded to the PTY
+	// while this is set.
+	MouseModeOn bool
+	ScrollTop   int
+	ScrollBot   int
+	CurrentSGR  string
 
 	// pending holds an escape/OSC sequence that was split across read buffers,
 	// to be completed by the next chunk instead of leaking as literal text.
@@ -123,6 +127,12 @@ type agentView struct {
 	AttentionManual bool
 	// lastOutputAt drives the idle check of the approval-prompt detection.
 	lastOutputAt time.Time
+
+	// ScrollOffset is how many wrapped lines the pane is scrolled up from the
+	// live bottom (0 = live tail). While > 0 the pane renders from the plain-text
+	// transcript (v.Lines) so it can show history the VT100 screen no longer
+	// holds; at 0 it renders live (screen emulation or transcript) as normal.
+	ScrollOffset int
 }
 
 type Model struct {
@@ -175,6 +185,7 @@ type Model struct {
 	pendingClean bool
 	progress     *runProgress // cached HUD state; refreshProgress() updates it
 	layoutLocked bool         // user adjusted rows/cols in settings: adaptive off
+	mouseOn      bool         // mouse capture is active (Ctrl+W toggles it)
 	// attentionCheckPending debounces the delayed approval-prompt re-check.
 	attentionCheckPending bool
 
@@ -329,6 +340,7 @@ func NewModelWithConfig(sessions []*agent.Session, store *runstore.Store, cfg co
 		Target:             TargetAll,
 		Status:             status,
 		FileChoices:        discoverFileChoices(),
+		mouseOn:            cfg.UI.MouseEnabled(),
 	}
 	model.sortAgents()
 	return model
@@ -479,6 +491,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// cleanly restart it.
 		m.animLoopRunning = false
 		return m, nil
+	case tea.MouseMsg:
+		return m.handleMouseMsg(msg)
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}
@@ -618,6 +632,15 @@ func (v *agentView) appendTranscript(chunk string, maxScrollback int) {
 		v.Lines = append(v.Lines, part)
 	}
 	v.Partial = parts[len(parts)-1]
+
+	// While scrolled up, keep the viewed content anchored as new lines land
+	// below the fold: ScrollOffset counts lines up from the live bottom, so it
+	// must grow by the number of newly finalized lines. (Measured in raw lines;
+	// rendering re-clamps to the wrapped window, so the offset stays bounded and
+	// pins at the top once there's nothing older to show.)
+	if v.ScrollOffset > 0 {
+		v.ScrollOffset += len(parts) - 1
+	}
 
 	if len(v.Lines) > maxScrollback {
 		v.Lines = v.Lines[len(v.Lines)-maxScrollback:]

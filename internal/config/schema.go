@@ -89,6 +89,7 @@ func Schema() []SchemaSection {
 				{"initial_prompt_delay_ms", "int", "`3000`", "Wait this long after launch before broadcasting the `ask` prompt."},
 				{"editor", "string", "—", "Command (argv) to open files in `/artifacts`, `/compare`, and the integrated `/edit` pane; takes precedence over $VISUAL/$EDITOR/vim. e.g. `nvim` or `code -w`."},
 				{"editor_open_cmd", "string", "`<Esc>:e {path}<CR>`", "Keystrokes sent to the live `/edit` editor to open a tree-selected file (`{path}` = the file's absolute path, vim-escaped). Default suits vim/nvim; set empty to relaunch the editor per file instead."},
+				{"mouse", "bool", "`true`", "Capture the mouse: wheel scrolls a pane's history / the active list, click focuses a pane. Disables native terminal text selection; toggle at runtime with Ctrl+W."},
 			},
 		},
 		{
