@@ -9,7 +9,8 @@ import (
 	"github.com/umutarmut38/council/internal/agent"
 )
 
-// mouseScrollStep is how many transcript lines one wheel notch scrolls a pane.
+// mouseScrollStep is how many wrapped lines one wheel notch scrolls a pane
+// (the unit of agentView.ScrollOffset).
 const mouseScrollStep = 3
 
 // mouseReportRE matches the body of an SGR mouse report (with an optional

@@ -106,6 +106,15 @@ func (m Model) bodyHeight() int {
 	return h
 }
 
+// max1 clamps to at least 1, matching the minimum PTY/content size enforced in
+// resizeAgents so scroll/mouse geometry never collapses to 0 on tiny panes.
+func max1(x int) int {
+	if x < 1 {
+		return 1
+	}
+	return x
+}
+
 // paneInnerSize returns the content width and height (inside the border) of the
 // pane drawn for the given agent index, matching renderPane's geometry. Used to
 // clamp wheel scrolling. ok is false if the index isn't on the current page.
@@ -115,7 +124,7 @@ func (m Model) paneInnerSize(index int) (width int, height int, ok bool) {
 		if index != m.FocusedIndex {
 			return 0, 0, false
 		}
-		return max0(m.Width - 2), max0(bodyHeight - 2), true
+		return max1(m.Width - 2), max1(bodyHeight - 2), true
 	}
 	indexes := m.visibleAgentIndexes()
 	pos := -1
@@ -138,7 +147,7 @@ func (m Model) paneInnerSize(index int) (width int, height int, ok bool) {
 	}
 	widths := distribute(m.Width, cols)
 	heights := distribute(bodyHeight, rows)
-	return max0(widths[col] - 2), max0(heights[row] - 2), true
+	return max1(widths[col] - 2), max1(heights[row] - 2), true
 }
 
 // paneContentRect returns the absolute screen rectangle of a pane's content
@@ -151,7 +160,7 @@ func (m Model) paneContentRect(index int) (x0 int, y0 int, w int, h int, ok bool
 		if index != m.FocusedIndex {
 			return 0, 0, 0, 0, false
 		}
-		return 1, top + 1, max0(m.Width - 2), max0(bodyHeight - 2), true
+		return 1, top + 1, max1(m.Width - 2), max1(bodyHeight - 2), true
 	}
 	indexes := m.visibleAgentIndexes()
 	pos := -1
@@ -183,7 +192,7 @@ func (m Model) paneContentRect(index int) (x0 int, y0 int, w int, h int, ok bool
 		paneY += heights[r]
 	}
 	// Content sits inside the 1-cell border (left "│" and top rail).
-	return paneX + 1, paneY + 1, max0(widths[col] - 2), max0(heights[row] - 2), true
+	return paneX + 1, paneY + 1, max1(widths[col] - 2), max1(heights[row] - 2), true
 }
 
 // hitTestPane maps a screen cell (x, y) to the agent index of the pane drawn
