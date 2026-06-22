@@ -233,6 +233,53 @@ func TestComposerDropsLeakedMouseFragment(t *testing.T) {
 	}
 }
 
+// TestDirectModeFallsBackWhenChildMouseOff verifies that when the focused
+// program has not enabled mouse tracking, direct-mode wheel scrolls council's
+// own pane history instead of forwarding garbage to the PTY.
+func TestDirectModeFallsBackWhenChildMouseOff(t *testing.T) {
+	model, view := transcriptModel(t, 50)
+	model.ScreenMode = ScreenPanes
+	model.InputMode = InputDirect
+	view.MouseModeOn = false // child did not opt into mouse
+
+	up := tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp, X: 5, Y: model.headerLines() + 1}
+	updated, _ := model.Update(up)
+	if got := updated.(Model).Agents[0].ScrollOffset; got != mouseScrollStep {
+		t.Fatalf("child mouse off: wheel should scroll council history, ScrollOffset = %d, want %d", got, mouseScrollStep)
+	}
+}
+
+// TestDirectModeForwardsWhenChildMouseOn verifies that when the program enabled
+// mouse tracking, direct-mode wheel is forwarded to the PTY (so council does
+// not also scroll its own history).
+func TestDirectModeForwardsWhenChildMouseOn(t *testing.T) {
+	model, view := transcriptModel(t, 50)
+	model.ScreenMode = ScreenPanes
+	model.InputMode = InputDirect
+	view.MouseModeOn = true
+
+	x0, y0, _, _, _ := model.paneContentRect(0)
+	up := tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp, X: x0 + 1, Y: y0 + 1}
+	updated, _ := model.Update(up)
+	if got := updated.(Model).Agents[0].ScrollOffset; got != 0 {
+		t.Fatalf("child mouse on: wheel should forward to PTY, not scroll; ScrollOffset = %d", got)
+	}
+}
+
+func TestEditorMouseIgnoresOutsideBody(t *testing.T) {
+	model, _ := transcriptModel(t, 1)
+	model.ScreenMode = ScreenEditor
+	model.editorTree = []editorNode{{Name: "a"}, {Name: "b"}, {Name: "c"}}
+	model.editorTreeIndex = 1
+
+	// A click in the header (above the editor body) must not move the tree.
+	click := tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 1, Y: 0}
+	updated, _ := model.Update(click)
+	if got := updated.(Model).editorTreeIndex; got != 1 {
+		t.Fatalf("header click should be ignored, editorTreeIndex = %d, want 1", got)
+	}
+}
+
 func TestEditorTreeWheelMovesSelection(t *testing.T) {
 	model, _ := transcriptModel(t, 1)
 	model.ScreenMode = ScreenEditor

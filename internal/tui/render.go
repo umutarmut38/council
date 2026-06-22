@@ -782,9 +782,10 @@ func (v *agentView) transcriptLines(height int, width int) []string {
 	wrapped := v.transcriptWrapped(width)
 
 	// Clamp the scroll offset to the available history, then slice the window
-	// `offset` wrapped lines up from the live bottom.
+	// `offset` wrapped lines up from the live bottom. Derive the max directly
+	// from len(wrapped) so we don't wrap the transcript a second time.
 	offset := v.ScrollOffset
-	if max := v.maxScrollOffset(height, width); offset > max {
+	if max := len(wrapped) - height; offset > max {
 		offset = max
 	}
 	if offset < 0 {

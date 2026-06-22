@@ -457,6 +457,11 @@ func (v *agentView) handleCSI(rawParams string, command byte) {
 				case 25:
 					// DECTCEM: ?25h shows the cursor, ?25l hides it.
 					v.CursorHidden = command == 'l'
+				case 1000, 1002, 1003:
+					// X11 mouse tracking modes: the child program opts into mouse
+					// reporting. Only then do we forward mouse events to its PTY
+					// (otherwise the SGR sequence would land as garbage at a prompt).
+					v.MouseModeOn = command == 'h'
 				}
 			}
 		}

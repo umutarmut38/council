@@ -102,9 +102,13 @@ type agentView struct {
 	// visible. The integrated editor pane renders a block cursor when it is
 	// focused and the program has not hidden the cursor.
 	CursorHidden bool
-	ScrollTop    int
-	ScrollBot    int
-	CurrentSGR   string
+	// MouseModeOn tracks whether the child program enabled X11 mouse tracking
+	// (DECSET ?1000/?1002/?1003). Mouse events are only forwarded to the PTY
+	// while this is set.
+	MouseModeOn bool
+	ScrollTop   int
+	ScrollBot   int
+	CurrentSGR  string
 
 	// pending holds an escape/OSC sequence that was split across read buffers,
 	// to be completed by the next chunk instead of leaking as literal text.

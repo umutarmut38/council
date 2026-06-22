@@ -58,60 +58,72 @@ func (m Model) handleMouseMsg(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleDirectMouse forwards mouse events to the focused agent's PTY while in
-// direct mode. A click on a different pane refocuses instead, so the keyboard-
-// free workflow still works.
+// direct mode — but only when that program has enabled mouse tracking. If it
+// hasn't (a plain shell/CLI), forwarding the SGR report would land as garbage
+// at the prompt, so we fall back to council's own pane mouse (scroll/focus).
 func (m Model) handleDirectMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	idx := m.FocusedIndex
-	if idx < 0 || idx >= len(m.Agents) {
-		return m, nil
+	if idx < 0 || idx >= len(m.Agents) || !m.Agents[idx].MouseModeOn {
+		return m.handlePanesMouse(msg)
 	}
 	x0, y0, w, h, ok := m.paneContentRect(idx)
-	inFocused := ok && msg.X >= x0 && msg.X < x0+w && msg.Y >= y0 && msg.Y < y0+h
-	if !inFocused {
-		// A left-click elsewhere refocuses that pane (and that becomes the new
-		// direct-input target); other events outside the pane are ignored.
-		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
-			if hit, hok := m.hitTestPane(msg.X, msg.Y); hok {
-				m.FocusedIndex = hit
-				m.ensurePageForFocus()
-				m.Status = "direct input to " + m.Agents[hit].Session.Name
-			}
-		}
+	if ok && msg.X >= x0 && msg.X < x0+w && msg.Y >= y0 && msg.Y < y0+h {
+		m.forwardMouseToPTY(m.Agents[idx].Session, msg, x0, y0)
 		return m, nil
 	}
-	m.forwardMouseToPTY(m.Agents[idx].Session, msg, x0, y0)
+	// A left-click outside the focused pane refocuses that pane (and it becomes
+	// the new direct-input target); other out-of-pane events are ignored.
+	if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
+		if hit, hok := m.hitTestPane(msg.X, msg.Y); hok {
+			m.FocusedIndex = hit
+			m.ensurePageForFocus()
+			m.Status = "direct input to " + m.Agents[hit].Session.Name
+		}
+	}
 	return m, nil
 }
 
-// handleEditorMouse forwards mouse to the integrated editor PTY when the event
-// is over the editor pane; over the file tree the wheel moves the tree
-// selection and a click selects/opens.
+// handleEditorMouse routes mouse over the integrated editor: the file tree
+// (left of the split) moves/selects, the editor pane forwards to its PTY when
+// that program enabled mouse tracking. Events outside the editor body
+// (header/footer) are ignored.
 func (m Model) handleEditorMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	treeW := m.editorTreeWidth()
 	top := m.headerLines()
-	overTree := msg.X < treeW
+	bodyHeight := m.bodyHeight()
+	if msg.Y < top || msg.Y >= top+bodyHeight {
+		return m, nil
+	}
 
-	if overTree {
+	treeW := m.editorTreeWidth()
+	if msg.X < treeW {
 		switch {
 		case msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown:
 			m.editorTreeIndex = clampIndex(m.editorTreeIndex+wheelDelta(msg), len(m.editorTree))
 		case msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress:
 			m.editorPaneFocused = false
-			row := msg.Y - top - 1 // first tree row is the "FILES" heading
-			if target := m.editorTreeTop + row; row >= 0 && target >= 0 && target < len(m.editorTree) {
+			// Pane row 0 is the "FILES" heading; entries start at row 1 from the
+			// same scroll top the renderer uses.
+			paneRow := msg.Y - top
+			treeTop := m.editorTreeVisibleTop(bodyHeight)
+			if target := treeTop + paneRow - 1; paneRow >= 1 && target >= 0 && target < len(m.editorTree) {
 				m.editorTreeIndex = target
 			}
 		}
 		return m, nil
 	}
 
-	// Over the editor pane: focus it and forward to its PTY.
 	if m.editorView == nil {
 		return m, nil
 	}
-	m.editorPaneFocused = true
-	x0 := treeW + 1 // tree + 1-column separator
-	m.forwardMouseToPTY(m.editorView.Session, msg, x0, top)
+	// A click focuses the editor pane regardless; only forward to the PTY when
+	// the editor program (e.g. nvim with `mouse=a`) actually wants mouse input.
+	if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
+		m.editorPaneFocused = true
+	}
+	if m.editorView.MouseModeOn {
+		x0 := treeW + 1 // tree + 1-column separator
+		m.forwardMouseToPTY(m.editorView.Session, msg, x0, top)
+	}
 	return m, nil
 }
 
