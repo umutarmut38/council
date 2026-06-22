@@ -78,6 +78,9 @@ More seriously:
   agent's own UI.
 - **Paged layouts** because apparently I collect more agents than fit on one
   screen.
+- **Mouse support** (`ui.mouse`): wheel to scroll a pane's history, click to
+  focus, and pass-through to mouse-aware programs in direct mode and the editor.
+  `Ctrl+W` toggles it when you'd rather select text the old-fashioned way.
 - **Overview and settings screens** for navigation, visibility filters, and grid
   sizing.
 - **File references** with `@path/to/file` expansion.
@@ -310,7 +313,7 @@ The full docs are in `docs/` and can be published with GitHub Pages.
 |---|---|
 | [Demo](docs/demo.md) | A reproducible VHS terminal recording of the orchestration workflow. |
 | [Commands](docs/commands.md) | In-chat commands and CLI subcommands. |
-| [Shortcuts](docs/shortcuts.md) | Keyboard shortcuts for panes, pages, overview, settings, and run browsing. |
+| [Shortcuts](docs/shortcuts.md) | Keyboard and mouse shortcuts for panes, pages, overview, settings, and run browsing. |
 | [Workflows](docs/workflows.md) | Multiplexer use, orchestration, roles, personalities, targeting, resume, artifacts. |
 | [Configuration](docs/configuration.md) | YAML reference for agents, terminal quirks, roles, personalities, and local overrides. |
 | [Requirements](docs/requirements.md) | Platform support and runtime requirements. |

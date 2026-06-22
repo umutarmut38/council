@@ -3,6 +3,23 @@
 Shortcuts depend on which screen/mode you're in. The default screen is the
 **panes** view with the composer focused.
 
+## Mouse
+
+Mouse support is on by default (`ui.mouse`); toggle it at runtime with `Ctrl+W`
+(turning it off restores your terminal's native text selection / copy-paste),
+or set `ui.mouse: false` to start with it off.
+
+| Action | Effect |
+|---|---|
+| Wheel over a pane | Scroll that pane's history. A `↑N` marker on the border shows the pane isn't live; new output keeps accumulating below and the view stays put until you wheel back to the bottom. |
+| Click a pane | Focus it. |
+| Wheel on a list/pager screen | Scroll the selection or pager (overview, settings, runs, artifacts, compare). |
+
+In **direct mode** and the **integrated editor**, mouse events are forwarded to
+the agent's program when it has enabled mouse tracking (e.g. `nvim` with
+`set mouse=a`, or `less`); otherwise the wheel falls back to scrolling council's
+own pane history.
+
 ## Panes view (composer mode)
 
 | Key | Action |
@@ -18,6 +35,7 @@ Shortcuts depend on which screen/mode you're in. The default screen is the
 | `Ctrl+P` | Previous page of panes. |
 | `F2` or `Ctrl+O` | Enter **direct mode** (raw keystrokes to the focused pane). |
 | `Ctrl+S` | Save transcripts to the run directory. |
+| `Ctrl+W` | Toggle mouse capture on/off (off restores native terminal text selection). |
 | `Ctrl+U` | Clear the composer input. |
 | `Ctrl+C` | Clear the input if non-empty; otherwise send `Ctrl+C` to the focused pane. |
 | `Ctrl+D` | If the input is empty, send `Ctrl+D` (EOF) to the focused pane. |
