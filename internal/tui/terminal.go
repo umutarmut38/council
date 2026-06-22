@@ -163,6 +163,51 @@ func (v *agentView) screenLines(height int, width int) []string {
 	return lines
 }
 
+// screenLinesCursor renders like screenLines but overlays a block cursor
+// (reverse video) at the emulator's cursor position, unless the program hid the
+// cursor (DECTCEM ?25l). Used by the focused integrated-editor pane so the
+// editor's cursor is visible — the plain panes don't draw one.
+func (v *agentView) screenLinesCursor(height int, width int) []string {
+	if width < 1 {
+		width = 1
+	}
+	if height < 1 {
+		return nil
+	}
+	if v.Width != width || v.Height != height {
+		v.setScreenSize(width, height)
+	}
+	lines := make([]string, height)
+	for i := 0; i < height; i++ {
+		var cells []screenCell
+		if i < len(v.Screen) {
+			cells = trimCells(v.Screen[i], width)
+		}
+		cells = v.decorateDisplayCells(cells, width)
+		if !v.CursorHidden && i == v.CursorRow && v.CursorCol >= 0 && v.CursorCol < width {
+			cells = overlayCursor(cells, v.CursorCol, width)
+		}
+		lines[i] = renderCells(cells, width)
+	}
+	return lines
+}
+
+// overlayCursor returns cells padded to width with a reverse-video block at col,
+// representing the text cursor (so it shows even past the line's last character).
+func overlayCursor(cells []screenCell, col int, width int) []screenCell {
+	out := make([]screenCell, width)
+	for i := 0; i < width; i++ {
+		if i < len(cells) {
+			out[i] = cells[i]
+		}
+		if out[i].Ch == 0 {
+			out[i].Ch = ' '
+		}
+	}
+	out[col].SGR += "\x1b[7m"
+	return out
+}
+
 func (v *agentView) decorateDisplayCells(cells []screenCell, width int) []screenCell {
 	if width <= 0 || v.Session == nil || v.Session.Name != "codex" || !isCodexPromptRow(cells) {
 		return cells
@@ -321,6 +366,21 @@ func (v *agentView) consumeEscape(raw string, index int) (int, bool) {
 		v.CursorCol = v.SavedCol
 		v.clampCursor()
 		return index + 2, true
+	case ' ', '#', '%', '(', ')', '*', '+', '-', '.', '/':
+		// Escape sequences carrying intermediate bytes (0x20-0x2F) before a
+		// final byte (0x30-0x7E): charset designation (ESC ( B), 7/8-bit
+		// controls (ESC SP F), DEC line size (ESC # 8), etc. We don't emulate
+		// alternate charsets, but we must consume the WHOLE sequence (including
+		// the final byte) so it isn't rendered as literal text — e.g. nvim's
+		// frequent "ESC ( B" would otherwise leak a stray "B" onto the screen.
+		j := index + 1
+		for j < len(raw) && raw[j] >= 0x20 && raw[j] <= 0x2f {
+			j++
+		}
+		if j >= len(raw) {
+			return index, false // final byte not in this chunk yet; buffer it
+		}
+		return j + 1, true
 	default:
 		return index + 2, true
 	}
@@ -388,6 +448,10 @@ func (v *agentView) handleCSI(rawParams string, command byte) {
 	case 'h', 'l':
 		if strings.Contains(rawParams, "?1049") || strings.Contains(rawParams, "?1047") || strings.Contains(rawParams, "?47") {
 			v.clearScreen()
+		}
+		if strings.Contains(rawParams, "?25") {
+			// DECTCEM: ESC[?25h shows the cursor, ESC[?25l hides it.
+			v.CursorHidden = command == 'l'
 		}
 	case 's':
 		v.SavedRow = v.CursorRow

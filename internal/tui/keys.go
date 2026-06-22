@@ -55,6 +55,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleArtifactsKey(msg)
 	case ScreenCompare:
 		return m.handleCompareKey(msg)
+	case ScreenEditor:
+		return m.handleEditorKey(msg)
 	}
 
 	if m.InputMode == InputDirect {
@@ -211,16 +213,7 @@ func (m Model) handleDirectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	value := keyToPTY(msg, session.Config.Terminal.SubmitSequence)
-	if value == "" {
-		return m, nil
-	}
-	if msg.String() == "enter" {
-		value += optionalSequence(session.Config.Terminal.AfterSubmitSequence)
-	}
-	if err := session.WriteString(value); err != nil {
-		m.Status = err.Error()
-	}
+	m.sendKeyToSession(session, msg)
 	// Direct keystrokes mean the user is handling whatever the pane asked for.
 	if view := m.findAgentForMessage(session.Name, session); view != nil {
 		view.clearAttention()
@@ -325,6 +318,11 @@ func keyToPTY(msg tea.KeyMsg, enterSequence string) string {
 	switch value {
 	case "enter":
 		return submitSequence(enterSequence)
+	case "esc":
+		// Pass Escape through to the program (e.g. vim/nvim leaving insert mode).
+		// Direct mode intercepts Esc before this is reached, so it still exits
+		// there; the integrated editor pane relies on this passthrough.
+		return "\x1b"
 	case "backspace":
 		return "\x7f"
 	case "tab":

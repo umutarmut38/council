@@ -157,6 +157,15 @@ func (m *Model) handleCompareKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.Status = row.Agent + "'s worktree is gone (cleaned?) — only the captured diff is available (d)"
 		}
+	case "i":
+		// Browse the live worktree in the integrated editor (tree + pane).
+		if row := m.selectedCompareRow(); row != nil && m.orch != nil {
+			if wt, ok := m.orch.WorktreePath(row.Agent); ok {
+				m.openInIntegratedEditor(wt, ScreenCompare)
+				return m, nil
+			}
+			m.Status = row.Agent + "'s worktree is gone (cleaned?) — only the captured diff is available (d)"
+		}
 	case "ctrl+c", "ctrl+x":
 		m.terminateAgents()
 		return m, tea.Quit
@@ -191,6 +200,15 @@ func (m *Model) handleCompareFilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			file := set.Files[m.CompareFileIndex]
 			if path, ok := m.compareWorktreeFile(set, file); ok {
 				return m, m.openInEditor(path)
+			}
+			m.Status = "no live worktree file for " + file.Path
+		}
+	case "i":
+		if m.CompareFileIndex < len(set.Files) {
+			file := set.Files[m.CompareFileIndex]
+			if path, ok := m.compareWorktreeFile(set, file); ok {
+				m.openInIntegratedEditor(path, ScreenCompare)
+				return m, nil
 			}
 			m.Status = "no live worktree file for " + file.Path
 		}

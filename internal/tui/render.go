@@ -246,9 +246,22 @@ func (m Model) renderFooter() string {
 		case ScreenRuns:
 			hint = "Runs: ↑/↓ select · Enter resume · Esc back"
 		case ScreenArtifacts:
-			hint = "Artifacts: ↑/↓ select/scroll · Enter open · e $EDITOR · Esc back"
+			switch {
+			case m.editorPaneFocused:
+				hint = "Artifacts: keys → editor · Esc passes through · F2/Ctrl+O back to list"
+			case m.artifactView != "":
+				hint = "Artifacts: ↑/↓ scroll · e $EDITOR · Esc back"
+			default:
+				hint = "Artifacts: ↑/↓ select · Enter edit · Tab editor · e $EDITOR · Esc back"
+			}
 		case ScreenCompare:
-			hint = "Compare: ↑/↓ select · Enter files/diff · d full diff · x mark pair · e $EDITOR · Esc back"
+			hint = "Compare: ↑/↓ select · Enter files/diff · d full diff · x mark pair · e $EDITOR · i editor · Esc back"
+		case ScreenEditor:
+			if m.editorPaneFocused {
+				hint = "Editor: keys → editor · Esc passes through · F2/Ctrl+O back to tree"
+			} else {
+				hint = "Editor: ↑/↓ move · Enter open · → expand · ← collapse · Tab editor · Esc back"
+			}
 		}
 		return strings.Join([]string{
 			c.suggest.Render(fitText(hint, m.Width)),
@@ -419,6 +432,8 @@ func (m Model) renderBody(bodyHeight int) string {
 		return strings.Join(m.renderArtifacts(bodyHeight), "\n")
 	case ScreenCompare:
 		return strings.Join(m.renderCompare(bodyHeight), "\n")
+	case ScreenEditor:
+		return strings.Join(m.renderEditor(bodyHeight), "\n")
 	default:
 		return m.renderGrid(bodyHeight)
 	}
@@ -762,6 +777,8 @@ func (m Model) screenModeName() string {
 		return "artifacts"
 	case ScreenCompare:
 		return "compare"
+	case ScreenEditor:
+		return "editor"
 	default:
 		return "panes"
 	}

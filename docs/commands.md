@@ -58,7 +58,7 @@ See [Workflows → Personalities](workflows.md#personalities-categories-and-targ
 | `/start-build` | Send the build prompt staged by `/build`. |
 | `/review` | Run the check command in each build worktree, drop failures, then in-scope agents vote the best diff. |
 | `/refine` | Consensus round: the winning planner reads the reviewers' critiques and rewrites its plan before `/build`. |
-| `/compare` | **Interactive build inspector.** ↑/↓ selects a build (files touched, check result, review points, live/cleaned worktree, ★ winner). `Enter` drills into its changed files vs the run base; `Enter` on a file shows its git-style colored diff; `e` opens the worktree file (or the whole worktree from the build list) in `$EDITOR`. Press `x` to mark a build, then `Enter` on another to diff the **two implementations against each other** (computed natively via git trees). `d` shows the full diff vs base. Esc unwinds: diff → files → builds → panes. |
+| `/compare` | **Interactive build inspector.** ↑/↓ selects a build (files touched, check result, review points, live/cleaned worktree, ★ winner). `Enter` drills into its changed files vs the run base; `Enter` on a file shows its git-style colored diff; `e` opens the worktree file (or the whole worktree from the build list) in `$EDITOR` (`i` opens it in the integrated editor instead). Press `x` to mark a build, then `Enter` on another to diff the **two implementations against each other** (computed natively via git trees). `d` shows the full diff vs base. Esc unwinds: diff → files → builds → panes. |
 | `/preview [agent]` | Show exactly what `/adopt` would change: files, dirty-tree overlap, the `git apply --check` result, **and the full diff**. A clean preview is staged — press `y` in the viewer to apply, `n` to cancel, `e` to open the diff in `$EDITOR`. |
 | `/adopt [agent]` | Opens the same full-screen preview and waits for `y` to apply the diff as uncommitted changes (`n` cancels). Name an agent to override the reviewed winner. `policy.mode: aggressive` applies immediately without the preview. |
 | `/judge plan <agent\|letter>` | Record a human-picked plan winner (override or stand in for the vote). |
@@ -66,7 +66,8 @@ See [Workflows → Personalities](workflows.md#personalities-categories-and-targ
 | `/finish` | Force-collect the current phase now (use if a pane finished but auto-detect didn't fire). |
 | `/status` | Show the active run and phase. |
 | `/report` | Write `report.md` for the run and open it in the viewer. |
-| `/artifacts` | Browse the run's plans, votes, diffs, check logs, reviews, and transcripts in-app. `Enter` views in the pager; `e` opens the file in `$VISUAL`/`$EDITOR` (vim by default). |
+| `/artifacts` | Browse the run's plans, votes, diffs, check logs, reviews, and transcripts in a split view: the list on the left, the selected file open in the **integrated editor** (`ui.editor`) on the right. `↑/↓` select · `Enter` opens it in the editor pane (editable) · `Tab` jumps into the pane · `F2`/`Ctrl+O` back to the list · `e` opens it in the external `$VISUAL`/`$EDITOR` instead. |
+| `/edit [path]` | **Integrated editor.** A collapsible file-tree sidebar on the left and the configured editor (`ui.editor`, e.g. `nvim`) running inside council as a PTY pane on the right. `↑/↓` move, `→`/`Enter` expand a folder or open a file, `←` collapse, `Tab` jump to the editor pane. In the pane, keystrokes (including `Esc`) go to the editor; `F2`/`Ctrl+O` returns to the tree. Selecting another file opens it in the live editor via `ui.editor_open_cmd` (default `:e {path}`, tuned for vim/nvim). With a `path` argument that file is opened immediately. |
 | `/clean` | Two-step removal: first call previews the worktrees/branches; `/clean confirm` removes them. |
 
 ### Recovery

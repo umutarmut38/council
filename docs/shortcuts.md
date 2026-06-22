@@ -80,3 +80,48 @@ YAML.
 | `Up` / `Down` | Select a run. |
 | `Enter` | Resume the selected run. |
 | `Esc` | Back. |
+
+## Integrated editor (`/edit`)
+
+A VSCode-style split: a collapsible file tree on the left and the configured
+editor (`ui.editor`, e.g. `nvim`) running in a PTY pane on the right. `/edit
+<path>` opens a file immediately.
+
+### File tree (left column, default focus)
+
+| Key | Action |
+|---|---|
+| `Up` / `Down` (`k` / `j`) | Move the selection. |
+| `→` / `Enter` / `l` | Expand a folder, or open the selected file in the editor pane. |
+| `←` / `h` | Collapse the folder, or jump to its parent. |
+| `g` / `Home`, `G` / `End` | Jump to the top / bottom. |
+| `Tab` | Jump into the editor pane. |
+| `Esc` | Leave the editor screen. |
+
+### Editor pane (right column, after opening a file or `Tab`)
+
+| Key | Action |
+|---|---|
+| any key, incl. `Esc` | Forwarded raw to the editor (so `Esc` leaves insert mode, `:q` quits, etc.). |
+| `F2` / `Ctrl+O` | Return focus to the left column (the editor stays live). |
+| `Ctrl+X` | Quit. |
+
+Selecting another file opens it in the same live editor via `ui.editor_open_cmd`
+(default `:e {path}`, tuned for vim/nvim; set it empty to relaunch the editor per
+file for non-vim editors).
+
+## Artifacts browser (`/artifacts`)
+
+The same split, with the run's artifact list on the left instead of a file tree.
+The editor-pane keys above apply on the right.
+
+| Key | Action |
+|---|---|
+| `Up` / `Down` | Select an artifact. |
+| `Enter` | Open the selected artifact in the editor pane (editable). |
+| `Tab` | Jump into the editor pane (`F2` / `Ctrl+O` returns to the list). |
+| `e` | Open the artifact in the external `$VISUAL` / `$EDITOR` instead. |
+| `Esc` | Back to the panes view. |
+
+Synthetic views — `/preview`, `/compare` diffs, and adopt previews — stay a
+full-width read-only pager (`↑` / `↓` scroll, `Esc` back).

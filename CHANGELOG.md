@@ -4,6 +4,42 @@ All notable changes will be documented here.
 
 This project follows semantic versioning once `v0.1.0` is tagged.
 
+## Unreleased
+
+Configurable and integrated editing: choose your editor, edit files in a
+VSCode-style PTY pane with a file tree, and edit run artifacts in place.
+
+### Added
+
+- **Configurable editor (`ui.editor`).** Choose the editor used to open files
+  from `/artifacts`, `/compare`, and the integrated editor — e.g. `nvim` or
+  `code -w`. It takes precedence over `$VISUAL`/`$EDITOR`, falling back to `vim`.
+- **Integrated editor with a file tree (`/edit [path]`).** A VSCode-style split:
+  a collapsible file-tree sidebar on the left and the configured editor running
+  inside council as a PTY pane on the right, reusing the existing agent terminal
+  stack. Navigate the tree (`↑/↓`, `→`/`Enter` to expand/open, `←` to collapse),
+  jump into the pane with `Tab`, and route keystrokes — including `Esc` — to the
+  editor; `F2`/`Ctrl+O` returns to the tree while the editor stays live.
+  Selecting another file opens it in the same editor via `ui.editor_open_cmd`
+  (default `:e {path}` for vim/nvim; set empty to relaunch per file).
+  `/edit <path>` opens a file directly.
+- **Editable `/artifacts` browser.** The artifacts browser is now a split — the
+  artifact list on the left, the selected file open in the integrated editor on
+  the right — so plans, votes, diffs, and reports can be edited in place. `e`
+  still opens the external editor; synthetic views (preview/diff/adopt) remain a
+  read-only pager. `/compare` gains an `i` action that opens a build's worktree
+  (or a file) in the integrated editor.
+
+### Fixed
+
+- **Terminal emulator: charset-designation leak.** Intermediate-byte escape
+  sequences such as nvim's frequent `ESC ( B` no longer leak their final byte as
+  a literal character into a pane.
+- **Terminal emulator: cursor rendering and `Esc` passthrough.** The emulator now
+  tracks cursor visibility (DECTCEM `?25h`/`?25l`) and the focused integrated
+  editor pane draws a block cursor; `Esc` is forwarded to the PTY so vim/nvim
+  leave insert mode.
+
 ## v0.4.0 - 2026-06-17
 
 Agent inheritance and keyboard-driven broadcast targeting, plus config schema

@@ -150,6 +150,7 @@ var composerCommands = []Composer{
 	{Name: "judge", Args: "plan|build <agent|letter>", Desc: "council: pick a winner yourself"},
 	{Name: "refine", Args: "", Desc: "council: winner improves its plan from the vote critiques"},
 	{Name: "artifacts", Args: "", Desc: "browse this run's plans/votes/diffs/logs"},
+	{Name: "edit", Args: "[path]", Desc: "integrated editor + file tree"},
 	{Name: "report", Args: "", Desc: "write report.md for the run"},
 	{Name: "restart", Args: "agent", Desc: "terminate + relaunch one pane"},
 	{Name: "resend", Args: "agent", Desc: "resend the current phase prompt"},
