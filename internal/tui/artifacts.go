@@ -85,6 +85,12 @@ func (m *Model) cmdArtifacts() {
 	m.ScreenMode = ScreenArtifacts
 	m.InputMode = InputComposer
 	m.PromptInput = ""
+	// The split's right column edits files in the editor pane; root it at the
+	// repo so launchEditor's CWD and the :e relative paths resolve. Start with
+	// the list focused (the pane opens on Enter).
+	m.editorRoot = detectEditorRoot()
+	m.editorPaneFocused = false
+	m.editorReturnScreen = ScreenPanes
 	m.Status = fmt.Sprintf("%d artifact(s) — run %s", len(entries), run.Stamp)
 }
 
@@ -145,10 +151,15 @@ func (m *Model) closeArtifactView() {
 	}
 }
 
-// openInEditor suspends the TUI and opens path in $VISUAL/$EDITOR (vim by
-// default), so diffs and artifacts can be inspected with full tooling.
-func (m *Model) openInEditor(path string) tea.Cmd {
-	editor := os.Getenv("VISUAL")
+// editorArgv resolves the editor command as argv (space-split), with
+// precedence ui.editor → $VISUAL → $EDITOR → vim. It always returns at least
+// one element. Shared by the external editor (openInEditor) and the integrated
+// editor pane (/edit).
+func (m *Model) editorArgv() []string {
+	editor := strings.TrimSpace(m.Config.UI.Editor)
+	if editor == "" {
+		editor = os.Getenv("VISUAL")
+	}
 	if editor == "" {
 		editor = os.Getenv("EDITOR")
 	}
@@ -156,89 +167,118 @@ func (m *Model) openInEditor(path string) tea.Cmd {
 		editor = "vim"
 	}
 	parts := strings.Fields(editor)
-	parts = append(parts, path)
+	if len(parts) == 0 {
+		parts = []string{"vim"}
+	}
+	return parts
+}
+
+// openInEditor suspends the TUI and opens path in the configured editor
+// (ui.editor, else $VISUAL/$EDITOR, else vim), so diffs and artifacts can be
+// inspected with full tooling.
+func (m *Model) openInEditor(path string) tea.Cmd {
+	parts := append(m.editorArgv(), path)
 	cmd := exec.Command(parts[0], parts[1:]...)
 	m.Status = "opened " + path + " in " + parts[0]
 	return tea.ExecProcess(cmd, func(err error) tea.Msg { return editorDoneMsg{err: err} })
 }
 
 func (m *Model) handleArtifactsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	viewing := m.artifactView != ""
+	// Synthetic views (preview, compare diffs, adopt preview, setup) stay a
+	// full-width read-only pager with their own key handling.
+	if m.artifactView != "" {
+		return m.handleArtifactViewerKey(msg)
+	}
+
+	// Artifact list split: list (left) + editable editor pane (right). When the
+	// pane is focused, keys go straight to the editor (Esc passes through).
+	if model, cmd, handled := m.routeEditorPaneKey(msg, "artifacts — ↑/↓ select · Enter edit · Tab editor"); handled {
+		return model, cmd
+	}
+	switch msg.String() {
+	case "esc", "q":
+		m.ScreenMode = ScreenPanes
+		m.resizeAgents()
+	case "up", "k":
+		if m.ArtifactIndex > 0 {
+			m.ArtifactIndex--
+		}
+	case "down", "j":
+		if m.ArtifactIndex < len(m.Artifacts)-1 {
+			m.ArtifactIndex++
+		}
+	case "g", "home":
+		m.ArtifactIndex = 0
+	case "G", "end":
+		m.ArtifactIndex = max0(len(m.Artifacts) - 1)
+	case "enter":
+		// Open the selected artifact in the editor pane (editable) and focus it.
+		if len(m.Artifacts) > 0 {
+			m.openInEditorPane(m.Artifacts[m.ArtifactIndex].Path)
+		}
+	case "tab":
+		if m.editorView != nil && !m.editorView.Session.Done {
+			m.editorPaneFocused = true
+			m.Status = "editor — Esc passes through · F2/Ctrl+O back to list"
+		}
+	case "e", "o":
+		// Alternative: open the selected artifact in the external $EDITOR.
+		if len(m.Artifacts) > 0 {
+			return m, m.openInEditor(m.Artifacts[m.ArtifactIndex].Path)
+		}
+	case "ctrl+c", "ctrl+x":
+		m.terminateAgents()
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+// handleArtifactViewerKey drives the read-only pager used for synthetic views
+// (preview, compare diffs, adopt preview, setup status) — content that has no
+// editable file behind it.
+func (m *Model) handleArtifactViewerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	pageStep := max0(m.Height-m.chromeLines()) - 1
 	if pageStep < 1 {
 		pageStep = 10
 	}
 	switch msg.String() {
 	case "esc", "q":
-		if viewing {
-			m.closeArtifactView()
-		} else {
-			m.ScreenMode = ScreenPanes
-			m.resizeAgents()
-		}
-		return m, nil
+		m.closeArtifactView()
 	case "up", "k":
-		if viewing {
-			m.artifactTop = max0(m.artifactTop - 1)
-		} else if m.ArtifactIndex > 0 {
-			m.ArtifactIndex--
-		}
-		return m, nil
+		m.artifactTop = max0(m.artifactTop - 1)
 	case "down", "j":
-		if viewing {
-			m.artifactTop++
-		} else if m.ArtifactIndex < len(m.Artifacts)-1 {
-			m.ArtifactIndex++
-		}
-		return m, nil
+		m.artifactTop++
 	case "pgup":
-		if viewing {
-			m.artifactTop = max0(m.artifactTop - pageStep)
-		}
-		return m, nil
+		m.artifactTop = max0(m.artifactTop - pageStep)
 	case "pgdown", " ":
-		if viewing {
-			m.artifactTop += pageStep
-		}
-		return m, nil
+		m.artifactTop += pageStep
 	case "g", "home":
 		m.artifactTop = 0
-		return m, nil
-	case "enter":
-		if !viewing && len(m.Artifacts) > 0 {
-			m.openArtifactFile(m.Artifacts[m.ArtifactIndex])
-		}
-		return m, nil
 	case "e", "o":
-		// Open the file behind the view (or the selected list entry) in
-		// $EDITOR — vim/neovim for real inspection instead of the pager.
-		if viewing && m.artifactFile != "" {
+		if m.artifactFile != "" {
 			return m, m.openInEditor(m.artifactFile)
 		}
-		if !viewing && len(m.Artifacts) > 0 {
-			return m, m.openInEditor(m.Artifacts[m.ArtifactIndex].Path)
+		m.Status = "no file behind this view — /preview <agent> has the diff, or open from /artifacts"
+	case "i":
+		// A diff view backed by a real worktree file (from /compare) can still
+		// open in the integrated editor, returning to its origin screen.
+		if m.artifactFile != "" {
+			m.openInIntegratedEditor(m.artifactFile, m.viewerReturnScreen)
 		}
-		if viewing {
-			m.Status = "no file behind this view — /preview <agent> has the diff, or open from /artifacts"
-		}
-		return m, nil
 	case "y":
-		// In a staged adopt preview, `y` applies the diff right here.
-		if viewing && m.viewingAdoptPreview() {
+		if m.viewingAdoptPreview() {
 			cmd := m.applyAdopt(m.pendingAdopt.Agent)
 			m.closeArtifactView()
 			m.ScreenMode = ScreenPanes
 			return m, cmd
 		}
-		return m, nil
 	case "n":
-		if viewing && m.viewingAdoptPreview() {
+		if m.viewingAdoptPreview() {
 			m.pendingAdopt = nil
 			m.closeArtifactView()
 			m.ScreenMode = ScreenPanes
 			m.Status = "adopt cancelled"
 		}
-		return m, nil
 	case "ctrl+c", "ctrl+x":
 		m.terminateAgents()
 		return m, tea.Quit
@@ -302,7 +342,7 @@ func (m Model) renderArtifacts(bodyHeight int) []string {
 		}
 		hint := "↑/↓ scroll · Esc back"
 		if m.artifactFile != "" {
-			hint = "e open in $EDITOR · " + hint
+			hint = "e $EDITOR · i editor · " + hint
 		}
 		if m.viewingAdoptPreview() {
 			hint = "y apply · n cancel · e edit diff · ↑/↓ scroll · Esc back"
@@ -319,23 +359,45 @@ func (m Model) renderArtifacts(bodyHeight int) []string {
 		return fitBlock(lines, m.Width, bodyHeight)
 	}
 
-	lines = append(lines, c.heading.Render(fitText("Run artifacts", m.Width)))
-	lines = append(lines, c.faint.Render(fitText(transcriptPrivacyNote(m.Config.Sessions.Redact), m.Width)))
+	// Artifact list split: list (left) + editable editor pane (right).
+	listW := m.editorTreeWidth()
+	paneW := max0(m.Width - listW - 1)
+	left := m.renderArtifactList(bodyHeight, listW)
+	right := m.renderEditorPane(bodyHeight, paneW, "Enter on an artifact to edit it")
+	return m.joinColumns(left, right, listW, bodyHeight)
+}
+
+// renderArtifactList renders the left column of the artifacts split: a heading
+// plus a scrolling, selectable list of the run's artifacts. The selection reads
+// pink when the list has focus, dimmer when the editor pane does.
+func (m Model) renderArtifactList(height, width int) []string {
+	c := m.chrome()
+	lines := make([]string, 0, height)
+	title := "ARTIFACTS"
+	if m.orch != nil && m.orch.Run() != nil {
+		title = "ARTIFACTS  " + m.orch.Run().Stamp
+	}
+	lines = append(lines, c.heading.Render(fitText(title, width)))
+
+	visible := max0(height - 1)
 	start := 0
-	visible := bodyHeight - 1
 	if visible > 0 && m.ArtifactIndex >= visible {
 		start = m.ArtifactIndex - visible + 1
 	}
-	for i := start; i < len(m.Artifacts) && len(lines) < bodyHeight; i++ {
-		entry := m.Artifacts[i]
-		marker := "  "
-		text := fmt.Sprintf("%s%s", marker, entry.Label)
+	for i := start; i < len(m.Artifacts) && len(lines) < height; i++ {
+		row := m.Artifacts[i].Label
 		if i == m.ArtifactIndex {
-			text = c.focus.Render(fitText("> "+entry.Label+"  ·  "+entry.Path, m.Width))
-		} else {
-			text = fitText(text, m.Width)
+			style := c.focus
+			if m.editorPaneFocused {
+				style = c.suggest
+			}
+			lines = append(lines, style.Render(fitText("> "+row, width)))
+			continue
 		}
-		lines = append(lines, text)
+		lines = append(lines, fitText("  "+row, width))
 	}
-	return fitBlock(lines, m.Width, bodyHeight)
+	for len(lines) < height {
+		lines = append(lines, fitText("", width))
+	}
+	return lines
 }

@@ -42,6 +42,7 @@ const (
 	ScreenRuns
 	ScreenArtifacts
 	ScreenCompare
+	ScreenEditor
 )
 
 type AgentOutputMsg struct {
@@ -90,16 +91,20 @@ type agentView struct {
 	Lines   []string
 	Partial string
 
-	Screen     [][]screenCell
-	Width      int
-	Height     int
-	CursorRow  int
-	CursorCol  int
-	SavedRow   int
-	SavedCol   int
-	ScrollTop  int
-	ScrollBot  int
-	CurrentSGR string
+	Screen    [][]screenCell
+	Width     int
+	Height    int
+	CursorRow int
+	CursorCol int
+	SavedRow  int
+	SavedCol  int
+	// CursorHidden tracks DECTCEM (ESC[?25l / ESC[?25h). Zero value false =
+	// visible. The integrated editor pane renders a block cursor when it is
+	// focused and the program has not hidden the cursor.
+	CursorHidden bool
+	ScrollTop    int
+	ScrollBot    int
+	CurrentSGR   string
 
 	// pending holds an escape/OSC sequence that was split across read buffers,
 	// to be completed by the next chunk instead of leaking as literal text.
@@ -220,6 +225,18 @@ type Model struct {
 	CompareFileIndex int
 	compareMarked    string // build marked with `x` for a pairwise diff
 	compareFiles     *compareFileSet
+
+	// integrated editor screen (/edit). editorView hosts the editor PTY (nil
+	// until a file is opened) and is deliberately kept out of m.Agents.
+	editorView         *agentView
+	editorRoot         string          // repo root the tree is anchored at
+	editorSessionRoot  string          // editorRoot the live editorView was launched in (CWD); relaunch when it changes
+	editorTree         []editorNode    // flattened visible tree rows
+	editorExpanded     map[string]bool // expanded directories (absolute paths)
+	editorTreeIndex    int             // selected tree row
+	editorTreeTop      int             // first visible tree row (scroll)
+	editorPaneFocused  bool            // false = tree focus, true = PTY focus
+	editorReturnScreen ScreenMode      // where Esc returns (panes, or the originating screen)
 }
 
 // editorDoneMsg returns control after an external $EDITOR session.
@@ -347,6 +364,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Width = msg.Width
 		m.Height = msg.Height
 		m.resizeAgents()
+		m.resizeEditor()
 		if !m.agentsStarted && m.launch != nil {
 			m.agentsStarted = true
 			return m, func() tea.Msg {
@@ -356,6 +374,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case AgentOutputMsg:
+		// The integrated editor's PTY is not in m.Agents, so route it explicitly.
+		if m.editorView != nil && msg.Session == m.editorView.Session {
+			m.appendOutput(m.editorView, string(msg.Data))
+			return m, nil
+		}
 		if view := m.findAgentForMessage(msg.Name, msg.Session); view != nil {
 			m.appendOutput(view, string(msg.Data))
 			if m.noteAttentionOutput(view) {
@@ -366,6 +389,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case attentionCheckMsg:
 		return m, m.runAttentionCheck()
 	case AgentExitMsg:
+		// The integrated editor closed (e.g. :q): drop back to the file tree.
+		if m.editorView != nil && msg.Session == m.editorView.Session {
+			m.editorView = nil
+			m.editorPaneFocused = false
+			if m.ScreenMode == ScreenEditor {
+				m.Status = "editor closed — pick a file to reopen"
+			}
+			return m, nil
+		}
 		if view := m.findAgentForMessage(msg.Name, msg.Session); view != nil {
 			if msg.ExitCode != nil {
 				view.Session.ExitCode = msg.ExitCode
@@ -743,6 +775,11 @@ func (v *agentView) transcript() string {
 func (m Model) terminateAgents() {
 	for _, view := range m.Agents {
 		_ = view.Session.Terminate()
+	}
+	// The integrated editor session is not in m.Agents; tear it down too so no
+	// editor process is leaked on quit.
+	if m.editorView != nil {
+		_ = m.editorView.Session.Terminate()
 	}
 }
 

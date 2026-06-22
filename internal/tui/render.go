@@ -246,9 +246,29 @@ func (m Model) renderFooter() string {
 		case ScreenRuns:
 			hint = "Runs: ↑/↓ select · Enter resume · Esc back"
 		case ScreenArtifacts:
-			hint = "Artifacts: ↑/↓ select/scroll · Enter open · e $EDITOR · Esc back"
+			switch {
+			case m.artifactView != "":
+				// A synthetic viewer (preview/diff) is the read-only pager even if
+				// the editor pane was focused before it opened — its hint wins. e/i
+				// only when a real file backs the view (e.g. a compare diff).
+				if m.artifactFile != "" {
+					hint = "Artifacts: ↑/↓ scroll · e $EDITOR · i editor · Esc back"
+				} else {
+					hint = "Artifacts: ↑/↓ scroll · Esc back"
+				}
+			case m.editorPaneFocused:
+				hint = "Artifacts: keys → editor · Esc passes through · F2/Ctrl+O back to list"
+			default:
+				hint = "Artifacts: ↑/↓ select · Enter edit · Tab editor · e $EDITOR · Esc back"
+			}
 		case ScreenCompare:
-			hint = "Compare: ↑/↓ select · Enter files/diff · d full diff · x mark pair · e $EDITOR · Esc back"
+			hint = "Compare: ↑/↓ select · Enter files/diff · d full diff · x mark pair · e $EDITOR · i editor · Esc back"
+		case ScreenEditor:
+			if m.editorPaneFocused {
+				hint = "Editor: keys → editor · Esc passes through · F2/Ctrl+O back to tree"
+			} else {
+				hint = "Editor: ↑/↓ move · Enter open · → expand · ← collapse · Tab editor · Esc back"
+			}
 		}
 		return strings.Join([]string{
 			c.suggest.Render(fitText(hint, m.Width)),
@@ -419,6 +439,8 @@ func (m Model) renderBody(bodyHeight int) string {
 		return strings.Join(m.renderArtifacts(bodyHeight), "\n")
 	case ScreenCompare:
 		return strings.Join(m.renderCompare(bodyHeight), "\n")
+	case ScreenEditor:
+		return strings.Join(m.renderEditor(bodyHeight), "\n")
 	default:
 		return m.renderGrid(bodyHeight)
 	}
@@ -762,6 +784,8 @@ func (m Model) screenModeName() string {
 		return "artifacts"
 	case ScreenCompare:
 		return "compare"
+	case ScreenEditor:
+		return "editor"
 	default:
 		return "panes"
 	}

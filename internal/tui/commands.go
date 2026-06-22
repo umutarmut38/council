@@ -330,6 +330,8 @@ func (m *Model) handleCommand(text string) (bool, tea.Cmd) {
 		return true, m.cmdRefine()
 	case "artifacts":
 		m.cmdArtifacts()
+	case "edit":
+		m.cmdEdit(rest)
 	case "report":
 		m.cmdReport()
 	case "restart":

@@ -183,6 +183,19 @@ type UIConfig struct {
 	// the `council ask` prompt, giving each agent's TUI time to finish booting
 	// and start accepting input. Too short and the prompt is dropped.
 	InitialPromptDelayMs int `yaml:"initial_prompt_delay_ms"`
+	// Editor is the argv (space-split) used to open files: the external editor
+	// from `/artifacts`/`/compare` and the integrated `/edit` pane. It takes
+	// precedence over $VISUAL/$EDITOR; empty falls through to those and finally
+	// to `vim`. e.g. "nvim" or "code -w".
+	Editor string `yaml:"editor,omitempty"`
+	// EditorOpenCmd is the keystroke template sent to the already-running
+	// integrated editor to open a file selected in the tree ({path} is replaced
+	// with the file's absolute path, vim-escaped). Nil (unset) uses the vim/nvim
+	// default
+	// "<Esc>:e {path}<CR>"; an explicit empty string disables in-place opening
+	// and relaunches the editor on each file instead (for non-vim editors). A
+	// pointer so unset and empty are distinguishable.
+	EditorOpenCmd *string `yaml:"editor_open_cmd,omitempty"`
 }
 
 // AdaptiveEnabled reports whether the adaptive grid is on (the default).

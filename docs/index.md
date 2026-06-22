@@ -10,7 +10,7 @@ can orchestrate a plan → vote → build → review → adopt workflow.
   plan → vote → build → review → adopt workflow.
 - [Commands](commands.md) — in-chat commands and CLI subcommands.
 - [Shortcuts](shortcuts.md) — keyboard shortcuts for panes, pages, direct input,
-  overview, settings, and run browsing.
+  overview, settings, run browsing, and the integrated editor.
 - [Workflows](workflows.md) — multiplexer usage, council orchestration, roles,
   personalities, targeting, resume, and artifact locations.
 - [Configuration](configuration.md) — full YAML reference for agents, terminal
