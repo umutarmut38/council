@@ -446,12 +446,19 @@ func (v *agentView) handleCSI(rawParams string, command byte) {
 			v.CursorCol = 0
 		}
 	case 'h', 'l':
-		if strings.Contains(rawParams, "?1049") || strings.Contains(rawParams, "?1047") || strings.Contains(rawParams, "?47") {
-			v.clearScreen()
-		}
-		if strings.Contains(rawParams, "?25") {
-			// DECTCEM: ESC[?25h shows the cursor, ESC[?25l hides it.
-			v.CursorHidden = command == 'l'
+		// DEC private modes (ESC[?<n>h sets, ESC[?<n>l resets). Parse exact mode
+		// numbers so multi-param sequences like ESC[?1;25l are handled and modes
+		// like ESC[?2500h do not false-match a substring.
+		if strings.HasPrefix(rawParams, "?") {
+			for _, mode := range parseCSIParams(rawParams) {
+				switch mode {
+				case 47, 1047, 1049:
+					v.clearScreen()
+				case 25:
+					// DECTCEM: ?25h shows the cursor, ?25l hides it.
+					v.CursorHidden = command == 'l'
+				}
+			}
 		}
 	case 's':
 		v.SavedRow = v.CursorRow

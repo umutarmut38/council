@@ -95,4 +95,15 @@ func TestEditorCursorHiddenByDECTCEM(t *testing.T) {
 	if view.CursorHidden {
 		t.Fatal("expected cursor visible after ESC[?25h")
 	}
+
+	// Multi-param private mode (ESC[?1;25l) must still toggle mode 25...
+	model.appendOutput(view, "\x1b[?1;25l")
+	if !view.CursorHidden {
+		t.Fatal("ESC[?1;25l should hide the cursor (mode 25 in a multi-param set)")
+	}
+	// ...and a superstring like ESC[?2500h must NOT false-match mode 25.
+	model.appendOutput(view, "\x1b[?2500h")
+	if !view.CursorHidden {
+		t.Fatal("ESC[?2500h must not affect the cursor (no ?25 substring match)")
+	}
 }

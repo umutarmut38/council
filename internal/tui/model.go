@@ -230,6 +230,7 @@ type Model struct {
 	// until a file is opened) and is deliberately kept out of m.Agents.
 	editorView         *agentView
 	editorRoot         string          // repo root the tree is anchored at
+	editorSessionRoot  string          // editorRoot the live editorView was launched in (CWD); relaunch when it changes
 	editorTree         []editorNode    // flattened visible tree rows
 	editorExpanded     map[string]bool // expanded directories (absolute paths)
 	editorTreeIndex    int             // selected tree row

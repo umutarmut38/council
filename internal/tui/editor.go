@@ -247,7 +247,8 @@ func (m *Model) launchEditor(path string) {
 	sess := agent.NewSession(editorSessionName, cfg, editorRawLogPath(m))
 	m.editorView = &agentView{Session: sess, Width: 80, Height: 24}
 	m.editorView.setScreenSize(80, 24)
-	m.resizeEditor() // size the PTY to the real pane before Start reads startupSize
+	m.editorSessionRoot = m.editorRoot // CWD this session runs in (see openInEditorPane)
+	m.resizeEditor()                   // size the PTY to the real pane before Start reads startupSize
 	if m.launch != nil {
 		m.launch(sess)
 	}
@@ -265,20 +266,23 @@ func editorRawLogPath(m *Model) string {
 	return filepath.Join(os.TempDir(), "council-editor-raw.log")
 }
 
-// openInEditorPane opens abs in the running editor (via ui.editor_open_cmd), or
-// launches/relaunches the editor when there is none or in-place open is disabled.
+// openInEditorPane opens abs (an absolute path) in the running editor via
+// ui.editor_open_cmd, or launches/relaunches the editor. It relaunches when
+// there is no live editor, in-place open is disabled, or the editor is running
+// in a different root: its CWD would be stale, so the open command (and the
+// editor's own relative ops) would resolve against the wrong directory.
 func (m *Model) openInEditorPane(abs string) {
-	if m.editorView == nil || m.editorView.Session.Done {
+	live := m.editorView != nil && !m.editorView.Session.Done
+	if !live || m.editorSessionRoot != m.editorRoot {
+		if live {
+			_ = m.editorView.Session.Terminate()
+		}
+		m.editorView = nil
 		m.launchEditor(abs)
 		return
 	}
-	rel, err := filepath.Rel(m.editorRoot, abs)
-	if err != nil {
-		rel = abs
-	}
-	rel = filepath.ToSlash(rel)
 
-	seq, inPlace := m.editorOpenSequence(rel)
+	seq, inPlace := m.editorOpenSequence(abs)
 	if !inPlace {
 		_ = m.editorView.Session.Terminate()
 		m.editorView = nil
@@ -290,12 +294,14 @@ func (m *Model) openInEditorPane(abs string) {
 		return
 	}
 	m.editorPaneFocused = true
-	m.Status = "opened " + rel
+	m.Status = "opened " + filepath.Base(abs)
 }
 
-// editorOpenSequence resolves ui.editor_open_cmd into the keystrokes to open
-// relPath. The bool is false when in-place opening is disabled (relaunch).
-func (m *Model) editorOpenSequence(relPath string) (string, bool) {
+// editorOpenSequence resolves ui.editor_open_cmd into the keystrokes that open
+// path in the live editor. path is absolute (CWD-independent) and vim-escaped so
+// names with spaces or Ex metacharacters (e.g. `|`) open correctly. The bool is
+// false when in-place opening is disabled (relaunch instead).
+func (m *Model) editorOpenSequence(path string) (string, bool) {
 	tmpl := "\x1b:e {path}\r" // default: <Esc>:e {path}<CR>
 	if m.Config.UI.EditorOpenCmd != nil {
 		tmpl = *m.Config.UI.EditorOpenCmd
@@ -303,7 +309,25 @@ func (m *Model) editorOpenSequence(relPath string) (string, bool) {
 	if strings.TrimSpace(tmpl) == "" {
 		return "", false
 	}
-	return strings.ReplaceAll(tmpl, "{path}", relPath), true
+	return strings.ReplaceAll(tmpl, "{path}", vimEscapePath(path)), true
+}
+
+// vimEscapeSpecial is vim's command-line filename special set (the common subset
+// of fnameescape): these break `:e {path}` unless backslash-escaped.
+const vimEscapeSpecial = " \t\n*?[{`$\\%#'\"|!<>()&;"
+
+// vimEscapePath backslash-escapes characters special to vim's Ex command line so
+// `:e {path}` opens files whose names contain spaces, `|`, `%`, `#`, etc.
+func vimEscapePath(path string) string {
+	var b strings.Builder
+	b.Grow(len(path) + 8)
+	for _, r := range path {
+		if r < 128 && strings.ContainsRune(vimEscapeSpecial, r) {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // closeEditor leaves the editor screen, returning to its origin. The editor
@@ -317,7 +341,7 @@ func (m *Model) closeEditor() {
 	if ret == ScreenPanes {
 		m.resizeAgents()
 	}
-	m.Status = "panes"
+	m.Status = m.screenModeName() // panes / compare / artifacts — wherever we returned
 }
 
 // ---- key handling ----

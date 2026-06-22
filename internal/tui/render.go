@@ -247,10 +247,12 @@ func (m Model) renderFooter() string {
 			hint = "Runs: ↑/↓ select · Enter resume · Esc back"
 		case ScreenArtifacts:
 			switch {
+			case m.artifactView != "":
+				// A synthetic viewer (preview/diff) is the read-only pager even if
+				// the editor pane was focused before it opened — its hint wins.
+				hint = "Artifacts: ↑/↓ scroll · e $EDITOR · Esc back"
 			case m.editorPaneFocused:
 				hint = "Artifacts: keys → editor · Esc passes through · F2/Ctrl+O back to list"
-			case m.artifactView != "":
-				hint = "Artifacts: ↑/↓ scroll · e $EDITOR · Esc back"
 			default:
 				hint = "Artifacts: ↑/↓ select · Enter edit · Tab editor · e $EDITOR · Esc back"
 			}
