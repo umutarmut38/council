@@ -123,6 +123,12 @@ type agentView struct {
 	AttentionManual bool
 	// lastOutputAt drives the idle check of the approval-prompt detection.
 	lastOutputAt time.Time
+
+	// ScrollOffset is how many wrapped lines the pane is scrolled up from the
+	// live bottom (0 = live tail). While > 0 the pane renders from the plain-text
+	// transcript (v.Lines) so it can show history the VT100 screen no longer
+	// holds; at 0 it renders live (screen emulation or transcript) as normal.
+	ScrollOffset int
 }
 
 type Model struct {
@@ -175,6 +181,7 @@ type Model struct {
 	pendingClean bool
 	progress     *runProgress // cached HUD state; refreshProgress() updates it
 	layoutLocked bool         // user adjusted rows/cols in settings: adaptive off
+	mouseOn      bool         // mouse capture is active (Ctrl+W toggles it)
 	// attentionCheckPending debounces the delayed approval-prompt re-check.
 	attentionCheckPending bool
 
@@ -329,6 +336,7 @@ func NewModelWithConfig(sessions []*agent.Session, store *runstore.Store, cfg co
 		Target:             TargetAll,
 		Status:             status,
 		FileChoices:        discoverFileChoices(),
+		mouseOn:            cfg.UI.MouseEnabled(),
 	}
 	model.sortAgents()
 	return model
@@ -479,6 +487,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// cleanly restart it.
 		m.animLoopRunning = false
 		return m, nil
+	case tea.MouseMsg:
+		return m.handleMouseMsg(msg)
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}

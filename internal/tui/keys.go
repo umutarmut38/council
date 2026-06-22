@@ -105,6 +105,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.Status = "saved transcripts"
 		}
 		return m, nil
+	case "ctrl+w":
+		// Toggle mouse capture at runtime. Capturing the mouse disables native
+		// terminal text selection, so this is the quick escape hatch to copy/paste.
+		m.mouseOn = !m.mouseOn
+		if m.mouseOn {
+			m.Status = "mouse on"
+			return m, tea.EnableMouseCellMotion
+		}
+		m.Status = "mouse off (text selection enabled)"
+		return m, tea.DisableMouse
 	case "ctrl+x":
 		m.terminateAgents()
 		return m, tea.Quit
@@ -188,6 +198,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	default:
 		if len(msg.Runes) > 0 {
+			// Guard against a mouse-report escape sequence leaking into the
+			// composer as text. This happens on terminals/multiplexers whose wheel
+			// reports bubbletea doesn't parse as a MouseMsg (or when the ESC is
+			// split across PTY reads): the body ("[<64;30;10M") would otherwise be
+			// typed into the input box.
+			if isMouseReportFragment(string(msg.Runes)) {
+				return m, nil
+			}
 			m.PromptInput += string(msg.Runes)
 			m.FileSuggestIndex = 0
 			m.CmdSuggestIndex = 0

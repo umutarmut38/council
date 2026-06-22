@@ -196,6 +196,12 @@ type UIConfig struct {
 	// and relaunches the editor on each file instead (for non-vim editors). A
 	// pointer so unset and empty are distinguishable.
 	EditorOpenCmd *string `yaml:"editor_open_cmd,omitempty"`
+	// Mouse captures the mouse so the wheel scrolls a pane's history (or the
+	// active list) and a click focuses a pane. Defaults to true. Mouse capture
+	// disables native terminal text selection; it can be toggled at runtime with
+	// Ctrl+W. A pointer so unset (default on) and an explicit false are
+	// distinguishable.
+	Mouse *bool `yaml:"mouse,omitempty"`
 }
 
 // AdaptiveEnabled reports whether the adaptive grid is on (the default).
@@ -207,6 +213,11 @@ func (u UIConfig) AdaptiveEnabled() bool {
 // detection is on (the default).
 func (u UIConfig) ApprovalDetectionEnabled() bool {
 	return u.DetectApprovalPrompts == nil || *u.DetectApprovalPrompts
+}
+
+// MouseEnabled reports whether mouse capture starts on (the default).
+func (u UIConfig) MouseEnabled() bool {
+	return u.Mouse == nil || *u.Mouse
 }
 
 type SessionConfig struct {

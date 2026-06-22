@@ -346,7 +346,7 @@ func (m Model) suggestionLine(c chromeStyles) string {
 		return c.suggest.Render(fitText(hint, m.Width))
 	}
 
-	help := "Enter send | Ctrl+G overview | F2 direct | Ctrl+B target | Ctrl+F zoom | Ctrl+N/P page | Tab focus | @file"
+	help := "Enter send | Ctrl+G overview | F2 direct | Ctrl+B target | Ctrl+F zoom | Ctrl+N/P page | Tab focus | Ctrl+W mouse | @file"
 	return c.faint.Render(fitText(help, m.Width))
 }
 
@@ -629,6 +629,11 @@ func (m Model) renderPane(index int, width int, height int) []string {
 	c := m.chrome()
 	view := m.Agents[index]
 	state := m.paneBadge(view)
+	// While scrolled up the view is not live: show a marker so it's obvious new
+	// output is landing below the fold.
+	if view.ScrollOffset > 0 {
+		state = fmt.Sprintf("%s ↑%d", state, view.ScrollOffset)
+	}
 	focused := index == m.FocusedIndex
 
 	marker := " "
@@ -737,25 +742,57 @@ func retroBottomBorder(label string, width int) string {
 }
 
 func (v *agentView) bodyLines(height int, width int) []string {
+	// Scrolled up: render from the plain-text transcript regardless of the
+	// configured renderer, since the VT100 screen grid keeps no history beyond
+	// the visible rows. At offset 0 the live renderer (screen or transcript)
+	// takes over again with full styling.
+	if v.ScrollOffset > 0 {
+		return v.transcriptLines(height, width)
+	}
 	if v.Session.Config.Terminal.Renderer == "transcript" {
 		return v.transcriptLines(height, width)
 	}
 	return v.screenLines(height, width)
 }
 
-func (v *agentView) transcriptLines(height int, width int) []string {
+// transcriptWrapped returns every wrapped transcript line (history + partial).
+func (v *agentView) transcriptWrapped(width int) []string {
 	lines := make([]string, 0, len(v.Lines)+1)
 	lines = append(lines, v.Lines...)
 	if v.Partial != "" {
 		lines = append(lines, v.Partial)
 	}
-
 	wrapped := make([]string, 0, len(lines))
 	for _, line := range lines {
 		wrapped = append(wrapped, hardWrap(line, width)...)
 	}
+	return wrapped
+}
+
+// maxScrollOffset is the largest ScrollOffset that still shows new content: the
+// number of wrapped lines above the live window of the given height.
+func (v *agentView) maxScrollOffset(height int, width int) int {
+	if max := len(v.transcriptWrapped(width)) - height; max > 0 {
+		return max
+	}
+	return 0
+}
+
+func (v *agentView) transcriptLines(height int, width int) []string {
+	wrapped := v.transcriptWrapped(width)
+
+	// Clamp the scroll offset to the available history, then slice the window
+	// `offset` wrapped lines up from the live bottom.
+	offset := v.ScrollOffset
+	if max := v.maxScrollOffset(height, width); offset > max {
+		offset = max
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	if len(wrapped) > height {
-		wrapped = wrapped[len(wrapped)-height:]
+		end := len(wrapped) - offset
+		wrapped = wrapped[end-height : end]
 	}
 	for len(wrapped) < height {
 		wrapped = append([]string{""}, wrapped...)

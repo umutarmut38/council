@@ -96,6 +96,136 @@ func (m Model) adaptiveLayout() bool {
 	return m.Config.UI.AdaptiveEnabled() && !m.layoutLocked
 }
 
+// bodyHeight is the height of the body region (the area below the header and
+// above the footer), matching the value View passes to the body renderers.
+func (m Model) bodyHeight() int {
+	h := m.Height - m.chromeLines()
+	if h < 6 {
+		h = 6
+	}
+	return h
+}
+
+// paneInnerSize returns the content width and height (inside the border) of the
+// pane drawn for the given agent index, matching renderPane's geometry. Used to
+// clamp wheel scrolling. ok is false if the index isn't on the current page.
+func (m Model) paneInnerSize(index int) (width int, height int, ok bool) {
+	bodyHeight := m.bodyHeight()
+	if m.Zoomed {
+		if index != m.FocusedIndex {
+			return 0, 0, false
+		}
+		return max0(m.Width - 2), max0(bodyHeight - 2), true
+	}
+	indexes := m.visibleAgentIndexes()
+	pos := -1
+	for i, idx := range indexes {
+		if idx == index {
+			pos = i
+			break
+		}
+	}
+	if pos < 0 {
+		return 0, 0, false
+	}
+	rows, cols := m.gridDims()
+	if cols <= 0 {
+		return 0, 0, false
+	}
+	row, col := pos/cols, pos%cols
+	if row >= rows {
+		return 0, 0, false
+	}
+	widths := distribute(m.Width, cols)
+	heights := distribute(bodyHeight, rows)
+	return max0(widths[col] - 2), max0(heights[row] - 2), true
+}
+
+// paneContentRect returns the absolute screen rectangle of a pane's content
+// area (inside the border), matching renderPane/resizeAgents geometry. Used to
+// translate mouse coordinates into the agent PTY's own coordinate space.
+func (m Model) paneContentRect(index int) (x0 int, y0 int, w int, h int, ok bool) {
+	top := m.headerLines()
+	bodyHeight := m.bodyHeight()
+	if m.Zoomed {
+		if index != m.FocusedIndex {
+			return 0, 0, 0, 0, false
+		}
+		return 1, top + 1, max0(m.Width - 2), max0(bodyHeight - 2), true
+	}
+	indexes := m.visibleAgentIndexes()
+	pos := -1
+	for i, idx := range indexes {
+		if idx == index {
+			pos = i
+			break
+		}
+	}
+	if pos < 0 {
+		return 0, 0, 0, 0, false
+	}
+	rows, cols := m.gridDims()
+	if cols <= 0 {
+		return 0, 0, 0, 0, false
+	}
+	row, col := pos/cols, pos%cols
+	if row >= rows {
+		return 0, 0, 0, 0, false
+	}
+	widths := distribute(m.Width, cols)
+	heights := distribute(bodyHeight, rows)
+	paneX := 0
+	for c := 0; c < col; c++ {
+		paneX += widths[c]
+	}
+	paneY := top
+	for r := 0; r < row; r++ {
+		paneY += heights[r]
+	}
+	// Content sits inside the 1-cell border (left "│" and top rail).
+	return paneX + 1, paneY + 1, max0(widths[col] - 2), max0(heights[row] - 2), true
+}
+
+// hitTestPane maps a screen cell (x, y) to the agent index of the pane drawn
+// there, mirroring renderGrid's layout. It returns ok=false for clicks in the
+// header, footer, or an empty grid cell.
+func (m Model) hitTestPane(x int, y int) (index int, ok bool) {
+	top := m.headerLines()
+	bodyHeight := m.bodyHeight()
+	if y < top || y >= top+bodyHeight || x < 0 || x >= m.Width {
+		return 0, false
+	}
+	if m.Zoomed {
+		return m.FocusedIndex, true
+	}
+
+	rows, cols := m.gridDims()
+	widths := distribute(m.Width, cols)
+	heights := distribute(bodyHeight, rows)
+	indexes := m.visibleAgentIndexes()
+
+	// Find the grid row containing y, then the column containing x.
+	rowY := top
+	for row := 0; row < rows; row++ {
+		if y < rowY+heights[row] {
+			colX := 0
+			for col := 0; col < cols; col++ {
+				if x < colX+widths[col] {
+					pos := row*cols + col
+					if pos < 0 || pos >= len(indexes) {
+						return 0, false
+					}
+					return indexes[pos], true
+				}
+				colX += widths[col]
+			}
+			return 0, false
+		}
+		rowY += heights[row]
+	}
+	return 0, false
+}
+
 func (m Model) pageSize() int {
 	rows, cols := m.gridDims()
 	size := rows * cols

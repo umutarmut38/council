@@ -173,7 +173,14 @@ func launchTUIWithTranscripts(sessions []*agent.Session, store *runstore.Store, 
 	model.LoadTranscripts(transcripts)
 	// 120 FPS (bubbletea's max): agent PTYs stream constantly, and the default
 	// frame budget makes scrolling output feel choppy.
-	program = tea.NewProgram(model, tea.WithAltScreen(), tea.WithFPS(120))
+	opts := []tea.ProgramOption{tea.WithAltScreen(), tea.WithFPS(120)}
+	if cfg.UI.MouseEnabled() {
+		// Cell motion (not all motion): we only need wheel + click, not a flood
+		// of drag-motion events. Capture disables native text selection, so it is
+		// toggleable at runtime (Ctrl+W).
+		opts = append(opts, tea.WithMouseCellMotion())
+	}
+	program = tea.NewProgram(model, opts...)
 
 	_, err := program.Run()
 	return err
