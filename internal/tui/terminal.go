@@ -461,6 +461,8 @@ func (v *agentView) handleCSI(rawParams string, command byte) {
 					// X11 mouse tracking modes: the child program opts into mouse
 					// reporting. Only then do we forward mouse events to its PTY
 					// (otherwise the SGR sequence would land as garbage at a prompt).
+					// Note: ?1006/?1015 only select the report *encoding* and don't
+					// themselves enable reporting, so they aren't tracked here.
 					v.MouseModeOn = command == 'h'
 				}
 			}

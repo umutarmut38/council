@@ -214,6 +214,10 @@ func TestComposerDropsLeakedMouseFragment(t *testing.T) {
 	if isMouseReportFragment("hello") {
 		t.Fatal("plain text must not be treated as a mouse fragment")
 	}
+	// Without the "<" introducer it's plausible user input, not a leaked report.
+	if isMouseReportFragment("64;30;10M") {
+		t.Fatal("plain numeric input must not be treated as a mouse fragment")
+	}
 
 	model, _ := transcriptModel(t, 1)
 	model.ScreenMode = ScreenPanes
@@ -298,6 +302,55 @@ func TestEditorTreeWheelMovesSelection(t *testing.T) {
 	updated, _ = model.Update(up)
 	if got := updated.(Model).editorTreeIndex; got != 0 {
 		t.Fatalf("wheel up over tree: editorTreeIndex = %d, want 0", got)
+	}
+}
+
+// TestScrollAnchorsOnNewOutput checks that output arriving while scrolled up
+// keeps the viewed content anchored (ScrollOffset grows by the new line count)
+// rather than letting the window drift toward the live bottom.
+func TestScrollAnchorsOnNewOutput(t *testing.T) {
+	model, view := transcriptModel(t, 50)
+	view.ScrollOffset = 10
+	model.appendOutput(view, "x1\nx2\nx3\n") // 3 new finalized lines
+	if view.ScrollOffset != 13 {
+		t.Fatalf("ScrollOffset after 3 new lines = %d, want 13", view.ScrollOffset)
+	}
+	// A partial line (no newline) adds nothing yet.
+	model.appendOutput(view, "partial")
+	if view.ScrollOffset != 13 {
+		t.Fatalf("partial output must not move the anchor, ScrollOffset = %d", view.ScrollOffset)
+	}
+	// At the live tail (offset 0) new output is not anchored.
+	view.ScrollOffset = 0
+	model.appendOutput(view, "y1\n")
+	if view.ScrollOffset != 0 {
+		t.Fatalf("live tail must stay at 0, got %d", view.ScrollOffset)
+	}
+}
+
+// TestRenderClampsStaleOffset checks that rendering clamps and persists an
+// over-large ScrollOffset to the current content window.
+func TestRenderClampsStaleOffset(t *testing.T) {
+	model, view := transcriptModel(t, 50)
+	view.ScrollOffset = 9999
+	_ = model.renderPane(0, model.Width, model.bodyHeight())
+	if view.ScrollOffset >= 9999 || view.ScrollOffset < 0 {
+		t.Fatalf("stale offset should be clamped, got %d", view.ScrollOffset)
+	}
+}
+
+func TestEditorSeparatorIgnored(t *testing.T) {
+	model, _ := transcriptModel(t, 1)
+	model.ScreenMode = ScreenEditor
+	model.editorTree = []editorNode{{Name: "a"}, {Name: "b"}}
+	model.editorTreeIndex = 1
+	treeW := model.editorTreeWidth()
+
+	// A click on the 1-column separator is ignored (no tree move, no panic).
+	click := tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: treeW, Y: model.headerLines() + 1}
+	updated, _ := model.Update(click)
+	if got := updated.(Model).editorTreeIndex; got != 1 {
+		t.Fatalf("separator click should be ignored, editorTreeIndex = %d, want 1", got)
 	}
 }
 

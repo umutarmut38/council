@@ -633,6 +633,15 @@ func (v *agentView) appendTranscript(chunk string, maxScrollback int) {
 	}
 	v.Partial = parts[len(parts)-1]
 
+	// While scrolled up, keep the viewed content anchored as new lines land
+	// below the fold: ScrollOffset counts lines up from the live bottom, so it
+	// must grow by the number of newly finalized lines. (Measured in raw lines;
+	// rendering re-clamps to the wrapped window, so the offset stays bounded and
+	// pins at the top once there's nothing older to show.)
+	if v.ScrollOffset > 0 {
+		v.ScrollOffset += len(parts) - 1
+	}
+
 	if len(v.Lines) > maxScrollback {
 		v.Lines = v.Lines[len(v.Lines)-maxScrollback:]
 	}

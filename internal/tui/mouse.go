@@ -12,11 +12,12 @@ import (
 // mouseScrollStep is how many transcript lines one wheel notch scrolls a pane.
 const mouseScrollStep = 3
 
-// mouseReportRE matches the body of an SGR/urxvt mouse report (with an optional
-// leading ESC, "[", and "<"), e.g. "\x1b[<64;30;10M", "[<0;5;5m", or
-// "64;30;10M". Used to drop such fragments if they leak into text input. Real
-// keyboard input never matches this exact shape.
-var mouseReportRE = regexp.MustCompile(`^\x1b?\[?<?[0-9]{1,4};[0-9]{1,4};[0-9]{1,4}[Mm]$`)
+// mouseReportRE matches the body of an SGR mouse report (with an optional
+// leading ESC and "["), e.g. "\x1b[<64;30;10M", "[<0;5;5m", or "<3;9;2M". The
+// "<" introducer is required so plain numeric input like "64;30;10M" is not
+// mistaken for a leaked report. Used to drop such fragments if they leak into
+// text input.
+var mouseReportRE = regexp.MustCompile(`^\x1b?\[?<[0-9]{1,4};[0-9]{1,4};[0-9]{1,4}[Mm]$`)
 
 // isMouseReportFragment reports whether s is a leaked mouse-report escape body.
 func isMouseReportFragment(s string) bool {
@@ -109,6 +110,13 @@ func (m Model) handleEditorMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				m.editorTreeIndex = target
 			}
 		}
+		return m, nil
+	}
+
+	if msg.X == treeW {
+		// The 1-column separator between the tree and the editor: not part of
+		// either, so ignore clicks/wheel there rather than treating them as
+		// editor-pane input at a clamped column.
 		return m, nil
 	}
 

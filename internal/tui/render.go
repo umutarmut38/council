@@ -628,6 +628,11 @@ func (m Model) renderPane(index int, width int, height int) []string {
 
 	c := m.chrome()
 	view := m.Agents[index]
+	// Render the body first: bodyLines clamps and persists ScrollOffset to the
+	// pane's current content size, so the ↑N marker below reflects the window
+	// actually shown (e.g. after a resize or scrollback trim).
+	bodyHeight := height - 2
+	body := view.bodyLines(bodyHeight, width-2)
 	state := m.paneBadge(view)
 	// While scrolled up the view is not live: show a marker so it's obvious new
 	// output is landing below the fold.
@@ -693,8 +698,6 @@ func (m Model) renderPane(index int, width int, height int) []string {
 
 	lines := make([]string, 0, height)
 	lines = append(lines, topLine)
-	bodyHeight := height - 2
-	body := view.bodyLines(bodyHeight, width-2)
 	for _, line := range body {
 		lines = append(lines, side+fitText(line, width-2)+side)
 	}
@@ -791,6 +794,9 @@ func (v *agentView) transcriptLines(height int, width int) []string {
 	if offset < 0 {
 		offset = 0
 	}
+	// Persist the clamped value so the marker and the next wheel step agree with
+	// the rendered window (otherwise a stale large offset lingers after a resize).
+	v.ScrollOffset = offset
 	if len(wrapped) > height {
 		end := len(wrapped) - offset
 		wrapped = wrapped[end-height : end]
