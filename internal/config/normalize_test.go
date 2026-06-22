@@ -55,7 +55,7 @@ func TestNormalizeUIPreservesExplicitValues(t *testing.T) {
 	c := Config{UI: UIConfig{Layout: "grid", PageRows: 3, PageCols: 4, GroupBy: "personality", MaxScrollbackLines: 1000, InitialPromptDelayMs: 8000}}
 	c.normalizeUI()
 	want := UIConfig{Layout: "grid", PageRows: 3, PageCols: 4, GroupBy: "personality", MaxScrollbackLines: 1000, InitialPromptDelayMs: 8000}
-	if c.UI != want {
+	if !reflect.DeepEqual(c.UI, want) {
 		t.Fatalf("explicit UI values changed: %+v", c.UI)
 	}
 }

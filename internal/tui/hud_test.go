@@ -699,13 +699,14 @@ func TestCompareScreenNavigationAndDiffPager(t *testing.T) {
 }
 
 func TestColorDiffLineStyles(t *testing.T) {
-	if colorDiffLine("+added line", 80) == "+added line" {
+	c := defaultChrome()
+	if colorDiffLine("+added line", 80, c) == "+added line" {
 		t.Fatal("added lines should be styled")
 	}
-	if colorDiffLine("-removed", 80) == "-removed" {
+	if colorDiffLine("-removed", 80, c) == "-removed" {
 		t.Fatal("removed lines should be styled")
 	}
-	if colorDiffLine("plain context", 80) != fitText("plain context", 80) {
+	if colorDiffLine("plain context", 80, c) != fitText("plain context", 80) {
 		t.Fatal("context lines stay unstyled")
 	}
 }

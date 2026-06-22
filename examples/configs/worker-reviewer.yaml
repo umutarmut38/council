@@ -9,6 +9,19 @@ ui:
   page_cols: 4
   group_by: category
   initial_prompt_delay_ms: 8000
+  # Overall palette: a built-in (default, mono, nord, solarized) or a name
+  # defined under themes below. The per-agent/personality color still wins for
+  # pane borders.
+  theme: nord
+  # Custom palettes. Each role is an optional 256-color index or "#rrggbb";
+  # unset roles inherit the default palette. Indexed-256 only (no truecolor).
+  themes:
+    midnight:
+      title: "117"
+      status: "114"
+      border: "238"
+      focus: "213"
+      warn: "203"
 
 review:
   # Set this per repo, for example ["go", "test", "./..."] or ["npm", "test"].

@@ -8,7 +8,7 @@ This project follows semantic versioning once `v0.1.0` is tagged.
 
 Mouse support and configurable, integrated editing: scroll/click with the
 mouse, choose your editor, edit files in a VSCode-style PTY pane with a file
-tree, and edit run artifacts in place.
+tree, and edit run artifacts in place. Plus configurable color themes.
 
 ### Added
 
@@ -40,6 +40,14 @@ tree, and edit run artifacts in place.
   still opens the external editor; synthetic views (preview/diff/adopt) remain a
   read-only pager. `/compare` gains an `i` action that opens a build's worktree
   (or a file) in the integrated editor.
+- **Color themes (`ui.theme`).** Recolor the whole UI chrome — header, footer,
+  pane borders, dividers, suggestions, and the diff viewer — with a built-in
+  palette (`default`, `nord`, `solarized`, `mono`) or a custom one defined under
+  `ui.themes.<name>`. Each role (`title`, `status`, `border`, `focus`, …) is a
+  256-color index or hex; unset roles inherit `default`. Per-agent/personality
+  `color` still wins for pane borders, and `council doctor`'s color strip renders
+  in the active theme. Indexed-256 only, so themes render identically across
+  terminals.
 
 ### Fixed
 

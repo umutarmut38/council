@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/umutarmut38/council/internal/cmdrun"
+	"github.com/umutarmut38/council/internal/theme"
 	"gopkg.in/yaml.v3"
 )
 
@@ -202,6 +203,15 @@ type UIConfig struct {
 	// Ctrl+W. A pointer so unset (default on) and an explicit false are
 	// distinguishable.
 	Mouse *bool `yaml:"mouse,omitempty"`
+	// Theme selects the overall color palette: a built-in name (see
+	// theme.BuiltinNames) or a key defined under Themes. Empty defaults to
+	// "default" (the historical palette). The per-agent/personality pane color
+	// still layers on top.
+	Theme string `yaml:"theme,omitempty"`
+	// Themes are custom palettes keyed by name. Each names a subset of color
+	// roles (title, status, border, …) as a 256-index or "#rrggbb"; unset roles
+	// inherit the default palette. Reference one via Theme.
+	Themes map[string]theme.Palette `yaml:"themes,omitempty"`
 }
 
 // AdaptiveEnabled reports whether the adaptive grid is on (the default).
