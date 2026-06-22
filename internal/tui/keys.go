@@ -217,7 +217,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleDirectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "esc", "f2", "ctrl+o":
+	case "f2", "ctrl+o":
+		// Exit direct mode via F2/Ctrl+O only. Esc deliberately falls through to
+		// the pane (see keyToPTY) so vim-like programs can leave insert mode.
 		m.InputMode = InputComposer
 		m.Status = "composer mode"
 		return m, nil
@@ -338,8 +340,9 @@ func keyToPTY(msg tea.KeyMsg, enterSequence string) string {
 		return submitSequence(enterSequence)
 	case "esc":
 		// Pass Escape through to the program (e.g. vim/nvim leaving insert mode).
-		// Direct mode intercepts Esc before this is reached, so it still exits
-		// there; the integrated editor pane relies on this passthrough.
+		// Direct mode no longer intercepts Esc — only F2/Ctrl+O exit — so Esc
+		// reaches the pane there too; the integrated editor pane also relies on
+		// this passthrough.
 		return "\x1b"
 	case "backspace":
 		return "\x7f"
