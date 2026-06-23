@@ -50,16 +50,33 @@ Formulae live in the `umutarmut38/homebrew-council` tap, so users can:
 brew install umutarmut38/council/council
 ```
 
-On every `v*` release, the release workflow regenerates `Formula/council.rb`
+On every final `v*` release, the release workflow regenerates `Formula/council.rb`
 from `packaging/homebrew/render_formula.sh` (using the release checksums) and
-pushes it to the tap. This step needs a repository secret named
-`HOMEBREW_TAP_TOKEN` — a token with `contents: write` on the tap repo. Without
-it the step logs a skip and the release still succeeds; bump the formula
-manually in that case:
+pushes it to the tap. Prerelease tags such as `v1.0.0-preview.1` update a
+matching versioned formula instead, `council@1.0.0-preview.1`, so the default
+Homebrew install can stay on the latest stable release while testers install the
+preview explicitly:
+
+```bash
+brew install umutarmut38/council/council@1.0.0-preview.1
+```
+
+This step needs a repository secret named `HOMEBREW_TAP_TOKEN` — a token with
+`contents: write` on the tap repo. Without it the step logs a skip and the
+release still succeeds; bump the formula manually in that case:
 
 ```bash
 gh release download vX.Y.Z --pattern checksums.txt
 bash packaging/homebrew/render_formula.sh vX.Y.Z checksums.txt > Formula/council.rb
+```
+
+For a prerelease formula, choose the matching versioned formula name and class.
+The `.rb` suffix below is only the Homebrew tap file extension; it is not part
+of the install name.
+
+```bash
+gh release download v1.0.0-preview.1 --pattern checksums.txt
+bash packaging/homebrew/render_formula.sh v1.0.0-preview.1 checksums.txt CouncilAT100Preview1 > Formula/council@1.0.0-preview.1.rb
 ```
 
 ## Local Snapshot Build
