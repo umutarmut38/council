@@ -1,9 +1,11 @@
 // Variable overrides applied before just-the-docs lays out the page.
 
-// Full-page view: widen the content column so the wide reference tables in
-// configuration.md / commands.md use the available horizontal space instead of
-// a narrow centered column. (Layout math is rem-based, so this must be rem.)
-$content-width: 100rem;
+// Width of the centered content column (just-the-docs centers `.main` within
+// this on large screens, expanding the sidebar to fill the left margin). Sized
+// to hold the prose measure + gap + the "On this page" TOC rail + the wrap's
+// 2rem side padding (≈ 2 + 56 + 2.5 + 13 + 2). Wide reference tables scroll
+// inside their .table-wrapper rather than forcing a wider column.
+$content-width: 76rem;
 
 // Typeface roles (faces loaded in _includes/head_custom.html):
 //   body  — IBM Plex Sans  (prose AND headings — clean, modern-docs feel)
