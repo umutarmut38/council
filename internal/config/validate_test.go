@@ -210,8 +210,10 @@ func TestValidateTheme(t *testing.T) {
 
 	invalid := map[string]struct{ src, wantSubstr string }{
 		"unknown theme name":      {"ui:\n  theme: bogus\n", "unknown"},
-		"retro is not selectable": {"ui:\n  theme: retro\n", "unknown"},
-		"bad color in palette":    {"ui:\n  themes:\n    mine:\n      focus: nope\n", "ui.themes.mine"},
+		"retro is not selectable": {"ui:\n  theme: retro\n", "selectable"},
+		// A custom palette named "retro" must not make it selectable either.
+		"retro reserved over custom": {"ui:\n  theme: retro\n  themes:\n    retro:\n      title: \"33\"\n", "selectable"},
+		"bad color in palette":       {"ui:\n  themes:\n    mine:\n      focus: nope\n", "ui.themes.mine"},
 	}
 	for name, tc := range invalid {
 		err := loadExample(t, tc.src)

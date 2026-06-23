@@ -11,40 +11,41 @@ import (
 )
 
 // themeToChrome must reproduce the historical defaultChrome for the default
-// theme — same foreground per role, and bold only on title/heading.
+// theme exactly — same foreground and bold for every role — so selecting (or
+// omitting) "default" is a no-op visual change. Expectations are read from
+// defaultChrome itself rather than hardcoded, so any accidental style drift in
+// either path is caught.
 func TestThemeToChromeMatchesDefault(t *testing.T) {
 	got := themeToChrome(theme.Default())
 	want := defaultChrome()
 	roles := []struct {
-		name             string
-		got, want        lipgloss.Style
-		wantBold         bool
-		checkBoldExactly bool
+		name      string
+		got, want lipgloss.Style
 	}{
-		{"title", got.title, want.title, true, true},
-		{"heading", got.heading, want.heading, true, true},
-		{"focus", got.focus, want.focus, false, true},
-		{"status", got.status, want.status, false, false},
-		{"rail", got.rail, want.rail, false, false},
-		{"border", got.border, want.border, false, false},
-		{"suggest", got.suggest, want.suggest, false, false},
-		{"input", got.input, want.input, false, false},
-		{"warn", got.warn, want.warn, false, false},
-		{"faint", got.faint, want.faint, false, false},
+		{"title", got.title, want.title},
+		{"heading", got.heading, want.heading},
+		{"status", got.status, want.status},
+		{"rail", got.rail, want.rail},
+		{"border", got.border, want.border},
+		{"focus", got.focus, want.focus},
+		{"suggest", got.suggest, want.suggest},
+		{"input", got.input, want.input},
+		{"warn", got.warn, want.warn},
+		{"faint", got.faint, want.faint},
 	}
 	for _, r := range roles {
 		if r.got.GetForeground() != r.want.GetForeground() {
 			t.Errorf("%s foreground = %v, want %v", r.name, r.got.GetForeground(), r.want.GetForeground())
 		}
-		if r.checkBoldExactly && r.got.GetBold() != r.wantBold {
-			t.Errorf("%s bold = %v, want %v", r.name, r.got.GetBold(), r.wantBold)
+		if r.got.GetBold() != r.want.GetBold() {
+			t.Errorf("%s bold = %v, want %v", r.name, r.got.GetBold(), r.want.GetBold())
 		}
 	}
 }
 
 // chrome() resolves to the configured base theme normally, the retro palette
-// while themed (the /eva easter egg wins at runtime), and the historical
-// default when no base theme is set (a Model built without NewModelWithConfig).
+// while themed (retro mode wins at runtime), and the historical default when no
+// base theme is set (a Model built without NewModelWithConfig).
 func TestChromeResolution(t *testing.T) {
 	nord, _ := theme.Get("nord")
 	base := themeToChrome(nord)
