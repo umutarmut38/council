@@ -21,4 +21,12 @@ exclude_loopback = true
 # flaky. Relative links between docs are still validated against the filesystem.
 exclude = [
   '^https://github\.com/umutarmut38/',
+  # Internal nav links in docs/index.md (the hero buttons and the "Start here"
+  # cards) are raw HTML <a href> tags pointing at the Jekyll-built pages
+  # (requirements.html, configuration.html, …). jekyll-relative-links only
+  # rewrites markdown link syntax, not HTML hrefs, so these must use .html — but
+  # those files exist only after the site is built, and no .html is committed, so
+  # lychee's source-tree check can never find them. The equivalent .md sources
+  # are still validated via the markdown links elsewhere in the docs.
+  '^file://.*\.html$',
 ]
