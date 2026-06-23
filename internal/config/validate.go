@@ -51,9 +51,9 @@ func (c Config) Validate() error {
 }
 
 // validateUITheme checks ui.theme names a known built-in or a defined
-// ui.themes.<name>, and that every custom palette's colors parse. An unknown
-// name (including "retro", which is a runtime-only in-app mode and never a
-// configurable theme) is rejected here.
+// ui.themes.<name>, and that every custom palette's colors parse. A reserved
+// name ("retro", the runtime-only in-app mode) is rejected even if a custom
+// palette of that name is defined, so it can never be selected via config.
 func validateUITheme(c Config) error {
 	custom := make([]string, 0, len(c.UI.Themes))
 	for name, palette := range c.UI.Themes {
@@ -62,7 +62,14 @@ func validateUITheme(c Config) error {
 			return fmt.Errorf("ui.themes.%s: %w", name, err)
 		}
 	}
-	if name := strings.TrimSpace(c.UI.Theme); name != "" && !theme.IsBuiltin(name) {
+	name := strings.TrimSpace(c.UI.Theme)
+	if name == "" {
+		return nil
+	}
+	if theme.IsReserved(name) {
+		return fmt.Errorf("ui.theme %q is not a selectable theme", name)
+	}
+	if !theme.IsBuiltin(name) {
 		if _, ok := c.UI.Themes[name]; !ok {
 			avail := "built-ins: " + strings.Join(theme.BuiltinNames(), ", ")
 			if len(custom) > 0 {

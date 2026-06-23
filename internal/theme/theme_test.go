@@ -27,6 +27,25 @@ func TestRetroIsNotABuiltin(t *testing.T) {
 	}
 }
 
+func TestRetroIsReserved(t *testing.T) {
+	for _, name := range []string{"retro", "RETRO", "  Retro "} {
+		if !IsReserved(name) {
+			t.Errorf("IsReserved(%q) = false, want true", name)
+		}
+	}
+	for _, name := range []string{"default", "nord", "mine", ""} {
+		if IsReserved(name) {
+			t.Errorf("IsReserved(%q) = true, want false", name)
+		}
+	}
+	// A reserved name resolves to the default palette even when a custom palette
+	// of that name is defined — it can never be selected.
+	customs := map[string]Palette{"retro": {Title: "33"}}
+	if got := Resolve("retro", customs); got != Default() {
+		t.Errorf("Resolve(retro) = %+v, want Default (reserved, not the custom palette)", got)
+	}
+}
+
 func TestDefaultMatchesHistoricalPalette(t *testing.T) {
 	// These indices reproduce the original internal/tui package styles; changing
 	// them is a visible UI change, so lock them.

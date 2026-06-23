@@ -111,6 +111,19 @@ var builtins = map[string]Theme{
 	"mono":      mono(),
 }
 
+// reserved are names that may never be selected as a config theme, even via a
+// custom ui.themes.<name> palette of that name — "retro" is the runtime-only
+// in-app mode, kept off the configurable surface entirely. Keys are lowercase.
+var reserved = map[string]bool{
+	"retro": true,
+}
+
+// IsReserved reports whether name is reserved and so can never be a selectable
+// theme. Lookup is case-insensitive and whitespace-trimmed.
+func IsReserved(name string) bool {
+	return reserved[strings.ToLower(strings.TrimSpace(name))]
+}
+
 // Get returns the named built-in theme. Lookup is case-insensitive and
 // whitespace-trimmed. ok is false for unknown names (including "retro").
 func Get(name string) (Theme, bool) {
@@ -141,7 +154,7 @@ func BuiltinNames() []string {
 // those at load time, so this is only reached for already-valid configs).
 func Resolve(name string, customs map[string]Palette) Theme {
 	name = strings.TrimSpace(name)
-	if name == "" {
+	if name == "" || IsReserved(name) {
 		return Default()
 	}
 	if t, ok := Get(name); ok {
