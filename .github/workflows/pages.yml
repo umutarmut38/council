@@ -31,6 +31,9 @@ jobs:
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.3"
+          # Pin Bundler to the lockfile's BUNDLED WITH so the runner's default
+          # Bundler major can't cause a lockfile-version mismatch on install.
+          bundler: "4.0.14"
           bundler-cache: true
           working-directory: docs
 

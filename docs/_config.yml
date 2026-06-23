@@ -54,12 +54,13 @@ footer_content: >-
   council — multi-agent terminal orchestration.
   <a href="https://github.com/umutarmut38/council/blob/main/LICENSE">MIT</a>.
 
-# Wrap every page in the just-the-docs layout (head, sidebar nav, search).
+# Wrap every page in the `page` layout: the just-the-docs `default` (head,
+# sidebar nav, search) plus a build-time prev/next pager (_layouts/page.html).
 defaults:
   - scope:
       path: ""
     values:
-      layout: default
+      layout: page
 
 markdown: kramdown
 kramdown:

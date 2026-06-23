@@ -28,5 +28,9 @@ exclude = [
   # those files exist only after the site is built, and no .html is committed, so
   # lychee's source-tree check can never find them. The equivalent .md sources
   # are still validated via the markdown links elsewhere in the docs.
-  '^file://.*\.html$',
+  #
+  # Scoped to the exact set of real doc pages (one entry per docs/<name>.md), so
+  # a typo'd internal link — e.g. requiremnts.html — is NOT excluded and still
+  # fails the check. Add new pages here when they gain a raw-HTML .html link.
+  '^file://.*/(architecture|commands|configuration|demo|release|requirements|shortcuts|troubleshooting|windows|workflows)\.html$',
 ]

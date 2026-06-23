@@ -1,0 +1,57 @@
+{%- comment -%}
+  Build-time prev/next pager. Mirrors the sidebar order in
+  components/site_nav.html — ungrouped pages first (Home), then each
+  `nav_section` group in `site.nav_sections` order, each sorted by `nav_order`.
+
+  Rendered server-side (not via JavaScript) so cross-page navigation survives
+  no-JS readers, strict CSP, and script-blocking extensions. Emitted by the
+  `page` layout after the page content.
+{%- endcomment -%}
+{%- assign nav_top = site.html_pages
+      | where_exp: "item", "item.title != nil"
+      | where_exp: "item", "item.parent == nil"
+      | where_exp: "item", "item.nav_exclude != true" -%}
+
+{%- assign ordered = "" | split: "" -%}
+{%- assign nav_ungrouped = nav_top
+      | where_exp: "item", "item.nav_section == nil"
+      | sort: "nav_order" -%}
+{%- for nav_page in nav_ungrouped -%}
+  {%- assign ordered = ordered | push: nav_page -%}
+{%- endfor -%}
+{%- for nav_section in site.nav_sections -%}
+  {%- assign nav_section_pages = nav_top
+        | where_exp: "item", "item.nav_section == nav_section"
+        | sort: "nav_order" -%}
+  {%- for nav_page in nav_section_pages -%}
+    {%- assign ordered = ordered | push: nav_page -%}
+  {%- endfor -%}
+{%- endfor -%}
+
+{%- assign current = -1 -%}
+{%- for nav_page in ordered -%}
+  {%- if nav_page.url == page.url -%}{%- assign current = forloop.index0 -%}{%- endif -%}
+{%- endfor -%}
+
+{%- if current >= 0 and ordered.size > 1 -%}
+<nav class="page-nav" aria-label="Pagination">
+  {%- if current > 0 -%}
+    {%- assign prev_index = current | minus: 1 -%}
+    {%- assign prev_page = ordered[prev_index] -%}
+    <a class="page-nav-prev" href="{{ prev_page.url | relative_url }}">
+      <span class="page-nav-label">← Previous</span>
+      <span class="page-nav-title">{{ prev_page.title }}</span>
+    </a>
+  {%- else -%}
+    <span class="page-nav-spacer"></span>
+  {%- endif -%}
+  {%- assign next_index = current | plus: 1 -%}
+  {%- if next_index < ordered.size -%}
+    {%- assign next_page = ordered[next_index] -%}
+    <a class="page-nav-next" href="{{ next_page.url | relative_url }}">
+      <span class="page-nav-label">Next →</span>
+      <span class="page-nav-title">{{ next_page.title }}</span>
+    </a>
+  {%- endif -%}
+</nav>
+{%- endif -%}

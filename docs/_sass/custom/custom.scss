@@ -335,15 +335,26 @@ $prose-measure: 56rem;
   overflow: hidden;
 }
 
-.hero-wordmark {
+// The wordmark is the home page's <h1>; the `.hero` scope keeps the VT323 amber
+// styling ahead of the generic `.main-content h1` (sans) rules.
+.hero .hero-wordmark {
+  margin: 0;
   font-family: "VT323", monospace;
-  font-size: 5rem;
+  // !important to beat just-the-docs' `h1 { @include fs-8 }`, which sets the
+  // heading font-size with !important now that the wordmark is an <h1>.
+  font-size: 5rem !important;
+  font-weight: 400;
   line-height: 0.9;
   color: $c-amber;
   text-shadow: 0 0 10px rgba(255, 180, 84, 0.3);
+
+  // Suppress the heading-anchor icon just-the-docs injects into in-content h1s.
+  .anchor-heading {
+    display: none;
+  }
 }
 
-.hero-wordmark .cursor {
+.hero .hero-wordmark .cursor {
   animation: crt-blink 1.1s steps(1) infinite;
 }
 
@@ -476,6 +487,10 @@ $prose-measure: 56rem;
     }
   }
 
+  .page-nav-spacer {
+    flex: 1 1 0;
+  }
+
   .page-nav-next {
     text-align: right;
   }
@@ -570,13 +585,13 @@ a:focus-visible,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hero-wordmark .cursor {
+  .hero .hero-wordmark .cursor {
     animation: none;
   }
 }
 
 @media (max-width: 30rem) {
-  .hero-wordmark {
-    font-size: 3.25rem;
+  .hero .hero-wordmark {
+    font-size: 3.25rem !important;
   }
 }

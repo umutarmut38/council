@@ -1,0 +1,10 @@
+---
+layout: default
+---
+{%- comment -%}
+  Wraps the just-the-docs `default` layout to append a build-time prev/next
+  pager after the page content (see components/page_nav.html). Applied site-wide
+  via the `layout: page` default in _config.yml.
+{%- endcomment -%}
+{{ content }}
+{% include components/page_nav.html %}

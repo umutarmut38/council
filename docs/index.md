@@ -5,7 +5,7 @@ permalink: /
 ---
 
 <div class="hero">
-  <div class="hero-wordmark">council<span class="cursor">█</span></div>
+  <h1 class="hero-wordmark">council<span class="cursor" aria-hidden="true">█</span></h1>
   <p class="hero-tagline">A terminal workbench for running a council of AI coding
   agents — each in its own live PTY pane, driven through one structured workflow.</p>
   <div class="pipeline" role="list" aria-label="Council workflow">
