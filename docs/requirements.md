@@ -1,3 +1,8 @@
+---
+title: Requirements
+nav_order: 2
+---
+
 # Requirements and Platform Support
 
 ## Supported Platforms

@@ -1,3 +1,8 @@
+---
+title: Windows Support
+nav_order: 10
+---
+
 # Windows Support
 
 `council` runs natively on Windows using the Windows pseudo-console

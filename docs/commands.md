@@ -1,3 +1,8 @@
+---
+title: Commands
+nav_order: 5
+---
+
 # Commands
 
 council has two command surfaces: **in-chat commands** typed into the composer

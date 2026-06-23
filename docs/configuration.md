@@ -1,3 +1,8 @@
+---
+title: Configuration
+nav_order: 7
+---
+
 # Configuration
 
 council reads `~/.council.yaml`. Create it with `council config init`. A repo may

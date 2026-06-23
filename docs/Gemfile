@@ -1,0 +1,20 @@
+source "https://rubygems.org"
+
+# Documentation site: Jekyll + just-the-docs (sidebar nav, client-side search,
+# custom color schemes). Built with Bundler in .github/workflows/pages.yml — not
+# the github-pages gem, so we can pin a modern Jekyll and theme version.
+gem "jekyll", "~> 4.3"
+gem "just-the-docs", "~> 0.10.0"
+
+# Plugins.
+group :jekyll_plugins do
+  gem "jekyll-seo-tag", "~> 2.8"
+  gem "jekyll-sitemap", "~> 1.4"
+  # Rewrites in-page `[text](other.md)` links to their built URLs so the many
+  # cross-page `.md` links keep working.
+  gem "jekyll-relative-links", "~> 0.6"
+end
+
+# Windows / JRuby timezone data (harmless elsewhere; keeps CI deterministic).
+gem "tzinfo-data", platforms: [:mingw, :mswin, :x64_mingw, :jruby]
+gem "wdm", "~> 0.1", platforms: [:mingw, :mswin, :x64_mingw]

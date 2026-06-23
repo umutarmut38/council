@@ -1,0 +1,7 @@
+// Variable overrides applied before just-the-docs lays out the page.
+//
+// Widen the content column for a "full page" view so the wide reference tables
+// in configuration.md / commands.md use the available horizontal space instead
+// of a narrow centered column. (custom/custom.scss removes the remaining cap on
+// large screens.)
+$content-width: 1600px;

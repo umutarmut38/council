@@ -1,0 +1,54 @@
+// Rule overrides applied last — retro terminal polish on top of just-the-docs.
+
+// Full-page view: on wide screens drop the content-column cap entirely so the
+// main area fills the space between the sidebar and the viewport edge.
+@media (min-width: 50rem) {
+  .main {
+    max-width: none;
+  }
+
+  .main-content-wrap {
+    max-width: none;
+  }
+}
+
+// Monospace, amber, faintly glowing headings + site title for a CRT feel.
+.site-title.lh-tight {
+  font-family: $mono-font-family;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: $body-heading-color;
+  text-shadow: 0 0 6px rgba(255, 180, 84, 0.35);
+}
+
+.main-content {
+  h1,
+  h2,
+  h3 {
+    font-family: $mono-font-family;
+    letter-spacing: 0.01em;
+  }
+
+  h1 {
+    text-shadow: 0 0 6px rgba(255, 180, 84, 0.25);
+  }
+
+  // Phosphor-green inline code, readable on the dark surface.
+  code.language-plaintext {
+    color: #8fe3ab;
+  }
+}
+
+// Slightly brighten the search box and give the sidebar a hairline glow edge.
+.search-input {
+  border: 1px solid $border-color;
+}
+
+.side-bar {
+  box-shadow: inset -1px 0 0 rgba(90, 212, 138, 0.08);
+}
+
+// Make external/aux GitHub link and nav active state read as amber accents.
+.nav-list .nav-list-item .nav-list-link.active {
+  color: $body-heading-color;
+}

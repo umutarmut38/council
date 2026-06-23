@@ -1,0 +1,33 @@
+// "retro" — a dark phosphor-terminal color scheme for the council docs.
+//
+// Inherits the built-in just-the-docs `dark` scheme (so code-block syntax
+// highlighting is already dark-tuned), then overrides the palette with a warm
+// near-black background, amber headings, and phosphor-green links — evoking a
+// CRT terminal, which suits a TUI tool.
+
+@import "./color_schemes/dark";
+
+// Tell the browser this is a dark UI (scrollbars, form controls).
+$color-scheme: dark;
+
+// Surfaces — warm near-black, slightly green-tinted.
+$body-background-color: #0d0f0c;
+$sidebar-color: #0a0c09;
+$search-background-color: #0a0c09;
+$table-background-color: #11140d;
+$code-background-color: #11140d;
+$feedback-color: #11140d;
+$border-color: #233018;
+
+// Text.
+$body-text-color: #c7d3bf;
+$body-heading-color: #ffb454; // amber phosphor
+$search-result-preview-color: #87a07c;
+
+// Links & nav — green phosphor.
+$link-color: #5ad48a;
+$nav-child-link-color: #9fb89a;
+
+// Buttons.
+$btn-primary-color: #2f7d4f;
+$base-button-color: #14180f;

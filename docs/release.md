@@ -1,3 +1,8 @@
+---
+title: Release Guide
+nav_order: 11
+---
+
 # Release Guide
 
 This guide prepares and publishes a GitHub release.

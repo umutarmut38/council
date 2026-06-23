@@ -1,3 +1,8 @@
+---
+title: Keyboard Shortcuts
+nav_order: 6
+---
+
 # Keyboard shortcuts
 
 Shortcuts depend on which screen/mode you're in. The default screen is the

@@ -1,3 +1,8 @@
+---
+title: Terminal Demo
+nav_order: 3
+---
+
 # Terminal Demo
 
 A short terminal recording explains the **plan → vote → build → review → adopt**

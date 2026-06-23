@@ -1,3 +1,8 @@
+---
+title: Architecture
+nav_order: 8
+---
+
 # Architecture
 
 `council` is intentionally small: one command, a handful of internal packages,
