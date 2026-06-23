@@ -56,8 +56,9 @@ A live run is driven by real agent CLIs doing real work, so phase durations vary
 wildly from machine to machine. Rather than guessing with fixed `Sleep`s, the
 tape uses VHS [`Wait+Screen`](https://github.com/charmbracelet/vhs#wait) to block
 until a stable marker that council actually prints on screen for each phase —
-the status-line text such as `collected N plan(s)`, `winner: …`, `ready in
-worktrees`, `best build: …`, and `uncommitted`. Each `Wait` carries a generous
+the status-line text such as `collected N plan(s)`, `winner: …`,
+`ready in worktrees`, `best build: …`, and `uncommitted`. Each `Wait` carries
+a generous
 `@timeout` that is a **safety ceiling, not the expected duration**; if a slow run
 trips one, raise that ceiling rather than shortening it.
 

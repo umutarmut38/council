@@ -59,6 +59,16 @@ kramdown:
     block:
       line_numbers: false
 
+# Silence Dart Sass deprecation noise from the just-the-docs gem (it still uses
+# @import and global built-ins, which we don't control).
+sass:
+  quiet_deps: true
+  silence_deprecations:
+    - import
+    - global-builtin
+    - color-functions
+    - slash-div
+
 plugins:
   - jekyll-seo-tag
   - jekyll-sitemap

@@ -106,8 +106,9 @@ Controls rendering and how prompts are delivered into the agent's live TUI.
 `csi-enter` and `csi-…-enter` variants (kitty keyboard protocol), `none`, or
 `raw:<bytes>` for an explicit sequence.
 
-> Tip: most interactive agents work with `send_mode: type`, `submit_sequence:
-> cr`, and `submit_delay_ms: 250`. `paste` is useful for multi-line input.
+> Tip: most interactive agents work with `send_mode: type`,
+> `submit_sequence: cr`, and `submit_delay_ms: 250`. `paste` is useful for
+> multi-line input.
 
 ### `agents.<name>.orchestration`
 
@@ -128,9 +129,9 @@ prompt is typed into the TUI or appended as an argv argument.
 > **Auto-approval flags** (`--dangerously-skip-permissions`,
 > `--allow-all-tools`, `--force`, …) are never configured by default. They make
 > unattended phases possible but bypass each tool's own permission prompts —
-> opt in per agent (the generated config has commented examples), and `council
-> doctor` will warn whenever one is configured. `policy.mode: safe` refuses to
-> run with them entirely.
+> opt in per agent (the generated config has commented examples), and
+> `council doctor` will warn whenever one is configured. `policy.mode: safe`
+> refuses to run with them entirely.
 
 ---
 

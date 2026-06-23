@@ -35,9 +35,9 @@ council                      # launch all enabled agents
 While a run is active the chrome carries its state, so you never have to
 reconstruct the workflow from memory:
 
-- **Phase rail** (third header line): `Plan 2/2 ✓  Vote 0/2 ●  Build ○ …
-  · Next: /vote` — artifact counts, the active phase, and the recommended
-  next command.
+- **Phase rail** (third header line):
+  `Plan 2/2 ✓  Vote 0/2 ●  Build ○ … · Next: /vote` — artifact counts, the
+  active phase, and the recommended next command.
 - **Pane badges** show what each agent owes: `vote · waiting for VOTE.md`,
   `vote · wrote VOTE.md`, `build · working`, `needs input`.
 - **Blocked panes** turn the border orange and put a recovery hint in the
@@ -142,10 +142,10 @@ what `git diff` would say).
 working tree has uncommitted changes; `/adopt confirm` applies it — still
 **uncommitted**, for you to review and commit. `/preview` opens the same
 preflight **plus the full diff** in the pager and stages it: press `y` there
-to apply, `n` to cancel. **`/adopt <agent>`** stages a
-different agent's build to override the recommendation, and `/judge build
-<agent>` records your own pick as the winner. The same flow exists in the
-shell: `council review`, `council adopt [run] [agent] [--dry-run] [--yes]`.
+to apply, `n` to cancel. **`/adopt <agent>`** stages a different agent's build
+to override the recommendation, and `/judge build <agent>` records your own
+pick as the winner. The same flow exists in the shell: `council review`,
+`council adopt [run] [agent] [--dry-run] [--yes]`.
 
 ### Optional: refine before building
 

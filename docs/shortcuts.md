@@ -107,8 +107,8 @@ YAML.
 ## Integrated editor (`/edit`)
 
 A VSCode-style split: a collapsible file tree on the left and the configured
-editor (`ui.editor`, e.g. `nvim`) running in a PTY pane on the right. `/edit
-<path>` opens a file immediately.
+editor (`ui.editor`, e.g. `nvim`) running in a PTY pane on the right.
+`/edit <path>` opens a file immediately.
 
 ### File tree (left column, default focus)
 
