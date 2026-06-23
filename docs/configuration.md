@@ -1,6 +1,7 @@
 ---
 title: Configuration
-nav_order: 7
+nav_section: Reference
+nav_order: 1
 ---
 
 # Configuration

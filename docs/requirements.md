@@ -1,6 +1,7 @@
 ---
 title: Requirements
-nav_order: 2
+nav_section: Getting Started
+nav_order: 1
 ---
 
 # Requirements and Platform Support

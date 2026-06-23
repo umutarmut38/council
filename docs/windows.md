@@ -1,6 +1,7 @@
 ---
 title: Windows Support
-nav_order: 10
+nav_section: Operations
+nav_order: 2
 ---
 
 # Windows Support

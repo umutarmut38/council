@@ -28,24 +28,35 @@ permalink: /
 
 ## Start here
 
-- [Requirements](requirements.md) — supported platforms, build and runtime
-  requirements, and agent-specific notes.
-- [Terminal Demo](demo.md) — a reproducible VHS recording of the full
-  plan → vote → build → review → adopt workflow.
-- [Workflows](workflows.md) — multiplexer usage, orchestration, roles,
-  personalities, targeting, resume, and artifact locations.
-- [Commands](commands.md) — in-chat composer commands and CLI subcommands.
-- [Keyboard Shortcuts](shortcuts.md) — keys for panes, pages, direct input,
-  overview, settings, run browsing, and the integrated editor.
-- [Configuration](configuration.md) — full `.council.yaml` reference: agents,
-  terminal quirks, orchestration roles, personalities, themes, and overrides.
-- [Architecture](architecture.md) — package layout, terminal model,
-  orchestration model, and trust boundaries.
-- [Troubleshooting](troubleshooting.md) — prompt delivery, rendering, folder
-  trust, resume, and worktree cleanup.
-- [Windows Support](windows.md) — what is supported, experimental, and
-  smoke-tested, plus ConPTY limitations.
-- [Release Guide](release.md) — release checklist, artifacts, and tagging.
+<div class="cards">
+  <a class="card" href="requirements.html">
+    <span class="card-title">Requirements</span>
+    <span class="card-desc">Supported platforms, build and runtime needs, and per-agent notes.</span>
+  </a>
+  <a class="card" href="demo.html">
+    <span class="card-title">Terminal Demo</span>
+    <span class="card-desc">A reproducible recording of the full plan → vote → build → review → adopt run.</span>
+  </a>
+  <a class="card" href="workflows.html">
+    <span class="card-title">Workflows</span>
+    <span class="card-desc">Orchestration, roles, personalities, targeting, resume, and artifacts.</span>
+  </a>
+  <a class="card" href="commands.html">
+    <span class="card-title">Commands</span>
+    <span class="card-desc">In-chat composer commands and the <code>council</code> CLI subcommands.</span>
+  </a>
+  <a class="card" href="configuration.html">
+    <span class="card-title">Configuration</span>
+    <span class="card-desc">The full <code>.council.yaml</code> reference — agents, quirks, roles, themes.</span>
+  </a>
+  <a class="card" href="architecture.html">
+    <span class="card-title">Architecture</span>
+    <span class="card-desc">Package layout, the terminal and orchestration models, trust boundaries.</span>
+  </a>
+</div>
+
+The sidebar lists everything else — keyboard shortcuts, troubleshooting,
+Windows support, and the release guide.
 
 ---
 

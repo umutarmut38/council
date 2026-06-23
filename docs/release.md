@@ -1,6 +1,7 @@
 ---
 title: Release Guide
-nav_order: 11
+nav_section: Operations
+nav_order: 3
 ---
 
 # Release Guide

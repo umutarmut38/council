@@ -1,0 +1,7 @@
+{%- comment -%}
+  Project override: serve the brand SVG favicon (a magenta cursor block on a
+  dark terminal surface, matching the wordmark). Replaces the theme's
+  favicon.ico probe, which otherwise leaves browsers requesting a missing
+  /favicon.ico.
+{%- endcomment -%}
+<link rel="icon" type="image/svg+xml" href="{{ '/assets/favicon.svg' | relative_url }}">

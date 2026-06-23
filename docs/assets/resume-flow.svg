@@ -1,41 +1,41 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="420" viewBox="0 0 1280 420" role="img" aria-labelledby="title desc">
   <title id="title">Resume flow for interrupted council phases</title>
   <desc id="desc">Diagram showing state.json, artifacts, and relaunching only unfinished agents.</desc>
-  <rect width="1280" height="420" fill="#0b0e14"/>
-  <text x="48" y="58" font-family="Inter,Arial,sans-serif" font-size="30" font-weight="700" fill="#f8f8f2">Resume from any orchestration step</text>
-  <text x="48" y="94" font-family="Inter,Arial,sans-serif" font-size="17" fill="#b7bcc7">Council stores phase state and artifacts so a fresh TUI can continue without starting over.</text>
+  <rect width="1280" height="420" fill="#14110c"/>
+  <text x="48" y="58" font-family="'IBM Plex Sans',Inter,Arial,sans-serif" font-size="30" font-weight="700" fill="#f0e2c0">Resume from any orchestration step</text>
+  <text x="48" y="94" font-family="'IBM Plex Sans',Inter,Arial,sans-serif" font-size="17" fill="#cfc7b3">Council stores phase state and artifacts so a fresh TUI can continue without starting over.</text>
 
-  <g font-family="SFMono-Regular,Consolas,monospace" font-size="17">
-    <rect x="48" y="132" width="346" height="214" rx="10" fill="#111827" stroke="#44475a" stroke-width="2"/>
-    <text x="74" y="166" fill="#8be9fd" font-weight="700">.council/runs/20260606-143000/</text>
-    <text x="74" y="204" fill="#f8f8f2">state.json</text>
-    <text x="110" y="234" fill="#9ca3af">{ "phase": "vote",</text>
-    <text x="110" y="264" fill="#9ca3af">  "prompt_sent": true }</text>
-    <text x="74" y="304" fill="#f8f8f2">plans/codex-worker.md</text>
-    <text x="74" y="334" fill="#f8f8f2">votes/plan-assignments.json</text>
+  <g font-family="'IBM Plex Mono',ui-monospace,monospace" font-size="17">
+    <rect x="48" y="132" width="346" height="214" rx="10" fill="#1d1810" stroke="#332b1e" stroke-width="2"/>
+    <text x="74" y="166" fill="#ffd9a0" font-weight="700">.council/runs/20260606-143000/</text>
+    <text x="74" y="204" fill="#e8dcc2">state.json</text>
+    <text x="110" y="234" fill="#8a8067">{ "phase": "vote",</text>
+    <text x="110" y="264" fill="#8a8067">  "prompt_sent": true }</text>
+    <text x="74" y="304" fill="#e8dcc2">plans/codex-worker.md</text>
+    <text x="74" y="334" fill="#e8dcc2">votes/plan-assignments.json</text>
 
-    <path d="M418 239 C492 239 492 239 562 239" stroke="#6272a4" stroke-width="4" fill="none" marker-end="url(#arrow)"/>
+    <path d="M418 239 C492 239 492 239 562 239" stroke="#8a8067" stroke-width="4" fill="none" marker-end="url(#arrow)"/>
 
-    <rect x="586" y="132" width="290" height="214" rx="10" fill="#111827" stroke="#50fa7b" stroke-width="2"/>
-    <text x="612" y="174" fill="#50fa7b" font-weight="700">/resume</text>
-    <text x="612" y="214" fill="#f8f8f2">1. open run</text>
-    <text x="612" y="246" fill="#f8f8f2">2. infer phase</text>
-    <text x="612" y="278" fill="#f8f8f2">3. keep artifacts</text>
-    <text x="612" y="310" fill="#f8f8f2">4. prompt missing agents</text>
+    <rect x="586" y="132" width="290" height="214" rx="10" fill="#1d1810" stroke="#ffb454" stroke-width="2"/>
+    <text x="612" y="174" fill="#ffb454" font-weight="700">/resume</text>
+    <text x="612" y="214" fill="#e8dcc2">1. open run</text>
+    <text x="612" y="246" fill="#e8dcc2">2. infer phase</text>
+    <text x="612" y="278" fill="#e8dcc2">3. keep artifacts</text>
+    <text x="612" y="310" fill="#e8dcc2">4. prompt missing agents</text>
 
-    <path d="M900 239 C974 239 974 239 1044 239" stroke="#6272a4" stroke-width="4" fill="none" marker-end="url(#arrow)"/>
+    <path d="M900 239 C974 239 974 239 1044 239" stroke="#8a8067" stroke-width="4" fill="none" marker-end="url(#arrow)"/>
 
-    <rect x="1068" y="132" width="164" height="214" rx="10" fill="#111827" stroke="#ff79c6" stroke-width="2"/>
-    <text x="1094" y="174" fill="#ff79c6" font-weight="700">Fresh panes</text>
-    <text x="1094" y="216" fill="#f8f8f2">vote phase</text>
-    <text x="1094" y="248" fill="#f8f8f2">same letters</text>
-    <text x="1094" y="280" fill="#f8f8f2">same run</text>
-    <text x="1094" y="312" fill="#f8f8f2">no reset</text>
+    <rect x="1068" y="132" width="164" height="214" rx="10" fill="#1d1810" stroke="#cf7f28" stroke-width="2"/>
+    <text x="1094" y="174" fill="#cf7f28" font-weight="700">Fresh panes</text>
+    <text x="1094" y="216" fill="#e8dcc2">vote phase</text>
+    <text x="1094" y="248" fill="#e8dcc2">same letters</text>
+    <text x="1094" y="280" fill="#e8dcc2">same run</text>
+    <text x="1094" y="312" fill="#e8dcc2">no reset</text>
   </g>
 
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6272a4"/>
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8a8067"/>
     </marker>
   </defs>
 </svg>

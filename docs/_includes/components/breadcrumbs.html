@@ -1,0 +1,12 @@
+{%- comment -%}
+  Project override: a context7-style section eyebrow above the page title.
+
+  Top-level pages here are grouped by `nav_section` front matter (see
+  components/site_nav.html) rather than by just-the-docs parent/child pages, so
+  the upstream breadcrumb trail is always empty. We instead surface the page's
+  section name as a small eyebrow in the same slot — directly above the H1 — so
+  every reference page is anchored to its place in the nav, like context7.
+{%- endcomment -%}
+{%- if page.nav_section and page.url != "/" -%}
+<div class="page-eyebrow">{{ page.nav_section }}</div>
+{%- endif -%}

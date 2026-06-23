@@ -1,6 +1,7 @@
 ---
 title: Keyboard Shortcuts
-nav_order: 6
+nav_section: Usage
+nav_order: 3
 ---
 
 # Keyboard shortcuts

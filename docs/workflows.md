@@ -1,6 +1,7 @@
 ---
 title: Workflows
-nav_order: 4
+nav_section: Usage
+nav_order: 1
 ---
 
 # Workflows

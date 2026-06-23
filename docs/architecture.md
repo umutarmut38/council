@@ -1,6 +1,7 @@
 ---
 title: Architecture
-nav_order: 8
+nav_section: Reference
+nav_order: 2
 ---
 
 # Architecture

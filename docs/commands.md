@@ -1,6 +1,7 @@
 ---
 title: Commands
-nav_order: 5
+nav_section: Usage
+nav_order: 2
 ---
 
 # Commands

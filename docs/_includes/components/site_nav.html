@@ -1,0 +1,63 @@
+{%- comment -%}
+  Project override of the theme's site navigation.
+
+  Upstream lists every top-level page in one flat list. To read like a real
+  reference-doc site (grouped sections with plain-text headers, à la
+  context7 / Mintlify) we render top-level pages grouped by their `nav_section`
+  front-matter value, in the order given by `site.nav_sections`.
+
+  Pages with no `nav_section` render first, header-less (e.g. Home). Within a
+  group, ordering follows the theme's usual `nav_order` rules: we reuse
+  components/nav/sorted.html + components/nav/links.html, so sorting, active
+  state, and any child pages behave exactly as upstream. Mirrors the upstream
+  include for everything else (external links, error report).
+{%- endcomment -%}
+
+<nav aria-label="Main" id="site-nav" class="site-nav">
+  {%- assign nav_top_pages = site.html_pages
+        | where_exp: "item", "item.title != nil"
+        | where_exp: "item", "item.parent == nil"
+        | where_exp: "item", "item.nav_exclude != true" -%}
+
+  {%- comment -%} Ungrouped pages first (no nav_section): Home, etc. {%- endcomment -%}
+  {%- assign nav_ungrouped = nav_top_pages
+        | where_exp: "item", "item.nav_section == nil" -%}
+  {%- if nav_ungrouped.size > 0 -%}
+    {%- include components/nav/sorted.html pages=nav_ungrouped -%}
+    {%- assign nav_ancestors = "" | split: "" -%}
+    {%- include components/nav/links.html pages=nav_sorted ancestors=nav_ancestors all=include.all -%}
+  {%- endif -%}
+
+  {%- comment -%} Then each configured section under a plain-text header. {%- endcomment -%}
+  {%- for nav_section in site.nav_sections -%}
+    {%- assign nav_section_pages = nav_top_pages
+          | where_exp: "item", "item.nav_section == nav_section" -%}
+    {%- if nav_section_pages.size > 0 -%}
+      <div class="nav-category">{{ nav_section }}</div>
+      {%- include components/nav/sorted.html pages=nav_section_pages -%}
+      {%- assign nav_ancestors = "" | split: "" -%}
+      {%- include components/nav/links.html pages=nav_sorted ancestors=nav_ancestors all=include.all -%}
+    {%- endif -%}
+  {%- endfor -%}
+
+  {%- if site.nav_external_links -%}
+    <ul class="nav-list">
+      {%- for node in site.nav_external_links -%}
+        <li class="nav-list-item external">
+          <a href="{{ node.url | absolute_url }}" class="nav-list-link external"
+            {% if node.opens_in_new_tab or node.opens_in_new_tab == nil and site.nav_external_links_new_tab %}
+              target="_blank" rel="noopener noreferrer"
+            {% endif %}
+          >
+            {{ node.title }}
+            {% unless node.hide_icon %}<svg viewBox="0 0 24 24" aria-labelledby="svg-external-link-title"><use xlink:href="#svg-external-link"></use></svg>{% endunless %}
+          </a>
+        </li>
+      {%- endfor -%}
+    </ul>
+  {%- endif -%}
+</nav>
+
+{% if site.nav_error_report %}
+{{ nav_error_report }}
+{%- endif %}

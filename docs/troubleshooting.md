@@ -1,6 +1,7 @@
 ---
 title: Troubleshooting
-nav_order: 9
+nav_section: Operations
+nav_order: 1
 ---
 
 # Troubleshooting

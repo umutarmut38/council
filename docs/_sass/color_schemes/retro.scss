@@ -1,43 +1,44 @@
-// "retro" — the docs color scheme, derived from council's own default TUI theme
-// (internal/theme/theme.go `Default()`). The TUI palette is indexed-256; the
-// hexes below are the xterm equivalents of those exact indices, so the website
-// reads as the same product:
+// "retro" — the docs color scheme: an amber-phosphor monochrome, like an amber
+// CRT at rest. A single warm accent (amber) carries links, the section eyebrow,
+// active nav and the wordmark; everything else is warm neutrals, and headings are
+// a near-white warm tone so titles stay legible.
 //
-//   Title   212  #ff87d7  magenta-pink  -> brand / wordmark / links
-//   Heading  81  #5fd7ff  cyan          -> section headings
-//   Status  114  #87d787  green         -> success accents
-//   Rail    117  #87d7ff  light cyan    -> hairline accents
-//   Focus   175  #d787af  mauve         -> focus/active
-//   Warn    214  #ffaf00  orange        -> warnings
-//   Border  238  #444444  gray          -> borders (the "muted" tone)
-//   Faint   241  #626262  gray          -> de-emphasized text
+// This intentionally diverges from council's TUI default theme (magenta-pink +
+// cyan): saturated cyan/magenta body-size text read poorly on the dark site, so
+// the website trades exact brand-match for legibility and a calmer, more
+// monochrome identity. The terminal feel lives in the typography + the amber hue,
+// not in competing neons.
 //
-// Dark, like a terminal at rest. A "slight retro" terminal feel is kept in the
-// typography (custom.scss), not in the color.
+//   Accent   amber       #FFB454  -> links / eyebrow / active nav / wordmark
+//   Heading  warm white  #F0E2C0  -> section headings, page titles
+//   Body     warm grey   #CFC7B3  -> prose
+//   Faint    warm grey   #8A8067  -> de-emphasized text, hairline labels
+//   Surface  warm dark   #1D1810  -> cards, code, tables
+//   Border   warm        #332B1E  -> borders
 
 @import "./color_schemes/dark";
 
 // Tell the browser this is a dark UI (scrollbars, form controls).
 $color-scheme: dark;
 
-// Surfaces — near-black with a faint cool tint, like a dark terminal.
-$body-background-color: #121317;
-$sidebar-color: #0e0f13;
-$search-background-color: #0e0f13;
-$table-background-color: #1a1b21;
-$code-background-color: #1a1b21;
-$feedback-color: #1a1b21;
-$border-color: #2b2c36;
+// Surfaces — warm near-black, like an amber terminal.
+$body-background-color: #14110c;
+$sidebar-color: #100e08;
+$search-background-color: #100e08;
+$table-background-color: #1d1810;
+$code-background-color: #1d1810;
+$feedback-color: #1d1810;
+$border-color: #332b1e;
 
 // Text.
-$body-text-color: #c9cbd6;
-$body-heading-color: #5fd7ff; // cyan — TUI Heading (81)
-$search-result-preview-color: #8a8c9a;
+$body-text-color: #cfc7b3; // warm grey
+$body-heading-color: #f0e2c0; // warm white — headings stay neutral, not accent
+$search-result-preview-color: #8a8067;
 
-// Links & nav — magenta-pink, the TUI brand (Title 212).
-$link-color: #ff87d7;
-$nav-child-link-color: #c9cbd6;
+// Links & nav — amber, the single accent.
+$link-color: #ffb454;
+$nav-child-link-color: #cfc7b3;
 
 // Buttons.
-$btn-primary-color: #7a2e63;
-$base-button-color: #1a1b21;
+$btn-primary-color: #6a4a18;
+$base-button-color: #1d1810;

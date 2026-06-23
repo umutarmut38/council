@@ -6,9 +6,9 @@
 $content-width: 100rem;
 
 // Typeface roles (faces loaded in _includes/head_custom.html):
-//   body  — IBM Plex Sans  (readable, computing heritage)
-//   mono  — IBM Plex Mono  (headings, code, UI chrome)
-//   the VT323 terminal face is applied to the wordmark only, in custom.scss.
+//   body  — IBM Plex Sans  (prose AND headings — clean, modern-docs feel)
+//   mono  — IBM Plex Mono  (code, kbd, the section eyebrow, UI chrome)
+//   the VT323 terminal face is applied to the home wordmark only, in custom.scss.
 $body-font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI",
   Roboto, Helvetica, Arial, sans-serif;
 $mono-font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
