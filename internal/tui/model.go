@@ -14,6 +14,7 @@ import (
 	"github.com/umutarmut38/council/internal/orchestrate"
 	runstore "github.com/umutarmut38/council/internal/session"
 	"github.com/umutarmut38/council/internal/setup"
+	"github.com/umutarmut38/council/internal/theme"
 	"github.com/umutarmut38/council/internal/tui/anim"
 )
 
@@ -217,6 +218,10 @@ type Model struct {
 	// render tree doesn't rebuild it for every pane. View sets it; chrome()
 	// returns it when present (nil falls back to computing on demand).
 	activeChrome *chromeStyles
+	// baseChrome is the configured theme's chrome (ui.theme), built once at
+	// construction. chrome() uses it as the non-retro base; nil (e.g. a Model
+	// built without NewModelWithConfig in a test) falls back to defaultChrome.
+	baseChrome *chromeStyles
 
 	// artifact browser (/artifacts)
 	Artifacts          []artifactEntry
@@ -342,6 +347,8 @@ func NewModelWithConfig(sessions []*agent.Session, store *runstore.Store, cfg co
 		FileChoices:        discoverFileChoices(),
 		mouseOn:            cfg.UI.MouseEnabled(),
 	}
+	base := themeToChrome(theme.Resolve(cfg.UI.Theme, cfg.UI.Themes))
+	model.baseChrome = &base
 	model.sortAgents()
 	return model
 }

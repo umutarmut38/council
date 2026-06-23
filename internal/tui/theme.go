@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/umutarmut38/council/internal/theme"
 	"github.com/umutarmut38/council/internal/tui/anim"
 )
 
@@ -38,9 +39,10 @@ func (m Model) retroThemed() bool {
 }
 
 // chrome selects the active chrome styles: the per-frame cache when View has set
-// it, else the retro palette while retro mode is themed, else the normal package
-// styles. The cache means the retro palette's styles are built once per frame
-// rather than once per pane.
+// it, else the retro palette while retro mode is themed (retro mode always wins
+// at runtime), else the configured base theme, else the normal package styles.
+// The cache means the palette's styles are built once per frame rather than once
+// per pane.
 func (m Model) chrome() chromeStyles {
 	if m.activeChrome != nil {
 		return *m.activeChrome
@@ -48,7 +50,29 @@ func (m Model) chrome() chromeStyles {
 	if m.retroThemed() {
 		return retroChrome()
 	}
+	if m.baseChrome != nil {
+		return *m.baseChrome
+	}
 	return defaultChrome()
+}
+
+// themeToChrome maps a resolved theme palette to the render chrome. Bold matches
+// the historical styles (title and heading bold, focus not), so themeToChrome of
+// the default theme reproduces defaultChrome exactly.
+func themeToChrome(t theme.Theme) chromeStyles {
+	fg := func(i int) lipgloss.Style { return lipgloss.NewStyle().Foreground(idxColor(i)) }
+	return chromeStyles{
+		title:   fg(t.Title).Bold(true),
+		status:  fg(t.Status),
+		rail:    fg(t.Rail),
+		border:  fg(t.Border),
+		focus:   fg(t.Focus),
+		suggest: fg(t.Suggest),
+		input:   fg(t.Input),
+		warn:    fg(t.Warn),
+		heading: fg(t.Heading).Bold(true),
+		faint:   fg(t.Faint),
+	}
 }
 
 // defaultChrome mirrors the package-level styles (the normal palette).

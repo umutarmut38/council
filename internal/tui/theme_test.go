@@ -3,7 +3,67 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/umutarmut38/council/internal/theme"
+	"github.com/umutarmut38/council/internal/tui/anim"
 )
+
+// themeToChrome must reproduce the historical defaultChrome for the default
+// theme — same foreground per role, and bold only on title/heading.
+func TestThemeToChromeMatchesDefault(t *testing.T) {
+	got := themeToChrome(theme.Default())
+	want := defaultChrome()
+	roles := []struct {
+		name             string
+		got, want        lipgloss.Style
+		wantBold         bool
+		checkBoldExactly bool
+	}{
+		{"title", got.title, want.title, true, true},
+		{"heading", got.heading, want.heading, true, true},
+		{"focus", got.focus, want.focus, false, true},
+		{"status", got.status, want.status, false, false},
+		{"rail", got.rail, want.rail, false, false},
+		{"border", got.border, want.border, false, false},
+		{"suggest", got.suggest, want.suggest, false, false},
+		{"input", got.input, want.input, false, false},
+		{"warn", got.warn, want.warn, false, false},
+		{"faint", got.faint, want.faint, false, false},
+	}
+	for _, r := range roles {
+		if r.got.GetForeground() != r.want.GetForeground() {
+			t.Errorf("%s foreground = %v, want %v", r.name, r.got.GetForeground(), r.want.GetForeground())
+		}
+		if r.checkBoldExactly && r.got.GetBold() != r.wantBold {
+			t.Errorf("%s bold = %v, want %v", r.name, r.got.GetBold(), r.wantBold)
+		}
+	}
+}
+
+// chrome() resolves to the configured base theme normally, the retro palette
+// while themed (the /eva easter egg wins at runtime), and the historical
+// default when no base theme is set (a Model built without NewModelWithConfig).
+func TestChromeResolution(t *testing.T) {
+	nord, _ := theme.Get("nord")
+	base := themeToChrome(nord)
+
+	withBase := Model{baseChrome: &base}
+	if got := withBase.chrome().title.GetForeground(); got != idxColor(nord.Title) {
+		t.Errorf("base theme: title fg = %v, want %v", got, idxColor(nord.Title))
+	}
+
+	retro := Model{baseChrome: &base, retroActive: true, retroIntroDone: true}
+	if got := retro.chrome().title.GetForeground(); got != idxColor(anim.Amber) {
+		t.Errorf("retro should win over base: title fg = %v, want %v", got, idxColor(anim.Amber))
+	}
+
+	var zero Model
+	if got := zero.chrome().title.GetForeground(); got != idxColor(theme.Default().Title) {
+		t.Errorf("nil base: title fg = %v, want default %v", got, idxColor(theme.Default().Title))
+	}
+}
 
 // applyCRT paints every row — panes included — so the scanline texture crosses
 // the whole console. crtRowBG (tested below) is what keeps an agent's own

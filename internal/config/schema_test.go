@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/umutarmut38/council/internal/theme"
 )
 
 // TestSchemaCoversConfigStructs walks the config structs with reflection and
@@ -48,6 +50,7 @@ func TestSchemaCoversConfigStructs(t *testing.T) {
 	check("policy", reflect.TypeOf(PolicyConfig{}))
 	check("personality_categories.<name>", reflect.TypeOf(PersonalityCategoryConfig{}))
 	check("personalities.<name>", reflect.TypeOf(PersonalityConfig{}))
+	check("ui.themes.<name>", reflect.TypeOf(theme.Palette{}))
 
 	for _, key := range []string{"env", "setup"} {
 		if !documented(sectionKeys["env, setup, experimental"], key) {

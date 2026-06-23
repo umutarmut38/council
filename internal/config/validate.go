@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/umutarmut38/council/internal/theme"
 )
 
 // Validate checks a config for structural problems that would make a run
@@ -41,6 +43,34 @@ func (c Config) Validate() error {
 
 	if mode := strings.TrimSpace(c.Policy.Mode); mode != "" && !knownPolicyMode(mode) {
 		return fmt.Errorf("policy.mode %q is unknown (use safe|normal|aggressive)", c.Policy.Mode)
+	}
+	if err := validateUITheme(c); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateUITheme checks ui.theme names a known built-in or a defined
+// ui.themes.<name>, and that every custom palette's colors parse. An unknown
+// name (including "retro", which is a runtime-only in-app mode and never a
+// configurable theme) is rejected here.
+func validateUITheme(c Config) error {
+	custom := make([]string, 0, len(c.UI.Themes))
+	for name, palette := range c.UI.Themes {
+		custom = append(custom, name)
+		if err := palette.Validate(); err != nil {
+			return fmt.Errorf("ui.themes.%s: %w", name, err)
+		}
+	}
+	if name := strings.TrimSpace(c.UI.Theme); name != "" && !theme.IsBuiltin(name) {
+		if _, ok := c.UI.Themes[name]; !ok {
+			avail := "built-ins: " + strings.Join(theme.BuiltinNames(), ", ")
+			if len(custom) > 0 {
+				sort.Strings(custom)
+				avail += "; custom: " + strings.Join(custom, ", ")
+			}
+			return fmt.Errorf("ui.theme %q is unknown (%s)", name, avail)
+		}
 	}
 	return nil
 }

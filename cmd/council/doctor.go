@@ -12,6 +12,7 @@ import (
 
 	"github.com/umutarmut38/council/internal/config"
 	"github.com/umutarmut38/council/internal/orchestrate"
+	"github.com/umutarmut38/council/internal/theme"
 )
 
 // doctor checks the whole setup: config validity (global and local), enabled
@@ -237,7 +238,7 @@ func doctor(args []string) error {
 		}
 	}
 
-	printColorDiagnostics()
+	printColorDiagnostics(theme.Resolve(cfg.UI.Theme, cfg.UI.Themes))
 
 	// Safe, local, reversible repairs (only with --fix). The default run above
 	// is read-only.
@@ -390,7 +391,7 @@ func agentExtraEnvKeys(global, agent map[string]string) []string {
 // separate on purpose: VS Code draws box/block glyphs itself ("custom
 // glyphs" on the GPU), and that path can drop colors that plain text
 // renders fine.
-func printColorDiagnostics() {
+func printColorDiagnostics(th theme.Theme) {
 	fmt.Printf("term TERM=%q COLORTERM=%q TERM_PROGRAM=%q\n",
 		os.Getenv("TERM"), os.Getenv("COLORTERM"), os.Getenv("TERM_PROGRAM"))
 	text, glyphs, borders := "", "", ""
@@ -398,7 +399,7 @@ func printColorDiagnostics() {
 		idx  int
 		name string
 	}{
-		{81, "blue"}, {114, "green"}, {203, "red"}, {212, "pink"},
+		{th.Title, "title"}, {th.Status, "status"}, {th.Warn, "warn"}, {th.Focus, "focus"},
 	} {
 		text += fmt.Sprintf("\x1b[38;5;%dm%s\x1b[0m ", c.idx, c.name)
 		glyphs += fmt.Sprintf("\x1b[38;5;%dm███\x1b[0m ", c.idx)
@@ -407,8 +408,8 @@ func printColorDiagnostics() {
 	fmt.Printf("term colored text:    %s\n", text)
 	fmt.Printf("term colored blocks:  %s\n", glyphs)
 	fmt.Printf("term colored borders: %s\n", borders)
-	fmt.Println("term all three rows should be blue/green/red/pink. If TEXT is colored but")
-	fmt.Println("term BLOCKS/BORDERS are not, the terminal's custom-glyph renderer drops the")
+	fmt.Println("term all three rows should show the active theme's colors. If TEXT is")
+	fmt.Println("term colored but BLOCKS/BORDERS are not, the terminal's custom-glyph renderer drops the")
 	fmt.Println(`term color — in VS Code set "terminal.integrated.customGlyphs": false and`)
 	fmt.Println(`term reload the window ("terminal.integrated.gpuAcceleration": "off" is the`)
 	fmt.Println("term fallback if that alone doesn't fix it).")

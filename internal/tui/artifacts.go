@@ -298,22 +298,25 @@ func transcriptPrivacyNote(redact bool) string {
 	return "transcripts here are NOT redacted (set sessions.redact); raw PTY logs are stored separately and are never redacted"
 }
 
-// colorDiffLine renders one unified-diff line with git-style colors.
-func colorDiffLine(line string, width int) string {
+// colorDiffLine renders one unified-diff line with git-style colors, drawn from
+// the active chrome (c) so the diff honors the configured theme. It is a
+// package function (not a Model method), so the caller threads c in rather than
+// reading the package styles directly.
+func colorDiffLine(line string, width int, c chromeStyles) string {
 	text := fitText(line, width)
 	switch {
 	case strings.HasPrefix(line, "+++"), strings.HasPrefix(line, "---"):
-		return faintStyle.Render(text)
+		return c.faint.Render(text)
 	case strings.HasPrefix(line, "+"):
-		return statusStyle.Render(text)
+		return c.status.Render(text)
 	case strings.HasPrefix(line, "-"):
-		return warnStyle.Render(text)
+		return c.warn.Render(text)
 	case strings.HasPrefix(line, "@@"):
-		return railStyle.Render(text)
+		return c.rail.Render(text)
 	case strings.HasPrefix(line, "diff --git"), strings.HasPrefix(line, "index "),
 		strings.HasPrefix(line, "new file"), strings.HasPrefix(line, "deleted file"),
 		strings.HasPrefix(line, "rename "):
-		return headingStyle.Render(text)
+		return c.heading.Render(text)
 	default:
 		return text
 	}
@@ -352,7 +355,7 @@ func (m Model) renderArtifacts(bodyHeight int) []string {
 		for i := top; i < len(wrapped) && len(lines) < bodyHeight; i++ {
 			line := fitText(wrapped[i], m.Width)
 			if m.artifactIsDiff {
-				line = colorDiffLine(wrapped[i], m.Width)
+				line = colorDiffLine(wrapped[i], m.Width, c)
 			}
 			lines = append(lines, line)
 		}

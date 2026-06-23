@@ -195,3 +195,32 @@ func TestValidateAcceptsDefault(t *testing.T) {
 		t.Fatalf("default config should validate, got: %v", err)
 	}
 }
+
+func TestValidateTheme(t *testing.T) {
+	valid := map[string]string{
+		"built-in name":                       "ui:\n  theme: nord\n",
+		"custom theme defined and referenced": "ui:\n  theme: mine\n  themes:\n    mine:\n      title: \"33\"\n      warn: \"#ff0000\"\n",
+		"empty theme is default":              "ui:\n  layout: grid\n",
+	}
+	for name, src := range valid {
+		if err := loadExample(t, src); err != nil {
+			t.Errorf("%s: expected valid, got: %v", name, err)
+		}
+	}
+
+	invalid := map[string]struct{ src, wantSubstr string }{
+		"unknown theme name":      {"ui:\n  theme: bogus\n", "unknown"},
+		"retro is not selectable": {"ui:\n  theme: retro\n", "unknown"},
+		"bad color in palette":    {"ui:\n  themes:\n    mine:\n      focus: nope\n", "ui.themes.mine"},
+	}
+	for name, tc := range invalid {
+		err := loadExample(t, tc.src)
+		if err == nil {
+			t.Errorf("%s: expected an error", name)
+			continue
+		}
+		if !strings.Contains(err.Error(), tc.wantSubstr) {
+			t.Errorf("%s: error %q should contain %q", name, err, tc.wantSubstr)
+		}
+	}
+}

@@ -140,6 +140,45 @@ prompt is typed into the TUI or appended as an argv argument.
 | `initial_prompt_delay_ms` | `3000` | Wait this long after launch before broadcasting (lets agents finish booting). Raise it if agents miss the prompt — codex's MCP load is the slowest factor; `8000` is a good value when running many agents. |
 | `page_rows`, `page_cols` | grid-derived | Panes per page (for many agents). |
 | `group_by` | `none` | `none`, `personality`, or `category` — orders panes and the overview. |
+| `theme` | `default` | Overall color palette — a built-in or a custom name from `themes`. See [Themes](#themes). |
+
+### Themes
+
+`ui.theme` recolors the whole UI chrome — header, footer, pane borders,
+dividers, command suggestions, and the diff viewer. Four built-ins ship:
+
+- `default` — the original palette.
+- `nord` — cool: steel-blue brand, frost-cyan focus, slate borders.
+- `solarized` — warm: yellow/orange brand, amber focus, teal rail.
+- `mono` — high-contrast grayscale; red is reserved for warnings.
+
+```yaml
+ui:
+  theme: nord
+```
+
+Per-agent and per-personality `color` settings still win for **pane borders**;
+the theme drives everything else. `council doctor` prints its color test strip
+in the active theme so you can preview it in your terminal.
+
+Define your own palette under `ui.themes.<name>` and select it with `theme`.
+Each role is an optional 256-color index (`"212"`) or hex (`"#ff5f87"`); any role
+you omit inherits the `default` palette. Colors are indexed-256 only (no
+truecolor), so they render identically across terminals.
+
+```yaml
+ui:
+  theme: midnight
+  themes:
+    midnight:
+      title: "117"
+      focus: "213"
+      warn: "203"
+```
+
+The full list of roles (`title`, `heading`, `status`, `rail`, `border`,
+`focus`, `suggest`, `input`, `warn`, `faint`) is in the
+[generated reference](#uithemesname) below.
 
 ---
 
@@ -391,6 +430,25 @@ How the agent participates in the plan/vote/build phases.
 | `editor` | string | — | Command (argv) to open files in `/artifacts`, `/compare`, and the integrated `/edit` pane; takes precedence over $VISUAL/$EDITOR/vim. e.g. `nvim` or `code -w`. |
 | `editor_open_cmd` | string | `<Esc>:e {path}<CR>` | Keystrokes sent to the live `/edit` editor to open a tree-selected file (`{path}` = the file's absolute path, vim-escaped). Default suits vim/nvim; set empty to relaunch the editor per file instead. |
 | `mouse` | bool | `true` | Capture the mouse: wheel scrolls a pane's history / the active list, click focuses a pane. Disables native terminal text selection; toggle at runtime with Ctrl+W. |
+| `theme` | string | `default` | Overall color palette: a built-in (`default`, `mono`, `nord`, `solarized`) or a name defined under `themes`. The per-agent/personality pane color still layers on top. |
+| `themes` | map | — | Custom palettes keyed by name; reference one via `theme`. See `ui.themes.<name>`. |
+
+### `ui.themes.<name>`
+
+A custom palette. Each role is an optional 256-color index (`"212"`) or hex (`"#ff5f87"`); unset roles inherit the `default` palette. Indexed-256 only (no truecolor).
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `title` | string | default | Brand/header wordmark. |
+| `heading` | string | default | Section headings (artifacts, settings). |
+| `status` | string | default | Nominal/success readouts and diff additions. |
+| `rail` | string | default | Progress rail, diff hunk headers, idle next-action. |
+| `border` | string | default | Unfocused pane borders and dividers (the muted tone). |
+| `focus` | string | default | Focused pane border / active selection. |
+| `suggest` | string | default | Command suggestions. |
+| `input` | string | default | Composer input text. |
+| `warn` | string | default | Warnings/alerts and diff deletions. |
+| `faint` | string | default | De-emphasized secondary text. |
 
 ### `env, setup, experimental`
 
