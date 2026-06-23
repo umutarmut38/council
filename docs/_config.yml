@@ -46,6 +46,13 @@ footer_content: >-
   council — multi-agent terminal orchestration.
   <a href="https://github.com/umutarmut38/council/blob/main/LICENSE">Apache-2.0</a>.
 
+# Wrap every page in the just-the-docs layout (head, sidebar nav, search).
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+
 markdown: kramdown
 kramdown:
   syntax_highlighter_opts:

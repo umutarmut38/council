@@ -1,7 +1,14 @@
 // Variable overrides applied before just-the-docs lays out the page.
-//
-// Widen the content column for a "full page" view so the wide reference tables
-// in configuration.md / commands.md use the available horizontal space instead
-// of a narrow centered column. (custom/custom.scss removes the remaining cap on
-// large screens.)
-$content-width: 1600px;
+
+// Full-page view: widen the content column so the wide reference tables in
+// configuration.md / commands.md use the available horizontal space instead of
+// a narrow centered column. (Layout math is rem-based, so this must be rem.)
+$content-width: 100rem;
+
+// Typeface roles (faces loaded in _includes/head_custom.html):
+//   body  — IBM Plex Sans  (readable, computing heritage)
+//   mono  — IBM Plex Mono  (headings, code, UI chrome)
+//   the VT323 terminal face is applied to the wordmark only, in custom.scss.
+$body-font-family: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI",
+  Roboto, Helvetica, Arial, sans-serif;
+$mono-font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;

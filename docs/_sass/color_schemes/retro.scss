@@ -1,33 +1,42 @@
-// "retro" — a dark phosphor-terminal color scheme for the council docs.
+// "retro" — an amber-monochrome CRT color scheme for the council docs.
+//
+// Grounded in a real artifact from the subject's world: the amber phosphor
+// terminal (DEC VT / IBM 3279). It is deliberately *monochromatic* — one hue,
+// with hierarchy carried by brightness, the way single-phosphor terminals
+// actually worked. No second accent color.
 //
 // Inherits the built-in just-the-docs `dark` scheme (so code-block syntax
-// highlighting is already dark-tuned), then overrides the palette with a warm
-// near-black background, amber headings, and phosphor-green links — evoking a
-// CRT terminal, which suits a TUI tool.
+// highlighting starts dark-tuned), then overrides the palette.
 
 @import "./color_schemes/dark";
 
 // Tell the browser this is a dark UI (scrollbars, form controls).
 $color-scheme: dark;
 
-// Surfaces — warm near-black, slightly green-tinted.
-$body-background-color: #0d0f0c;
-$sidebar-color: #0a0c09;
-$search-background-color: #0a0c09;
-$table-background-color: #11140d;
-$code-background-color: #11140d;
-$feedback-color: #11140d;
-$border-color: #233018;
+// Amber ladder — hierarchy by luminance within a single hue.
+$amber-300: #ffce6b; // brightest — links, active state
+$amber-200: #ffb000; // primary phosphor — headings, accents
+$amber-100: #d9bf94; // parchment-amber — body text
+$amber-000: #8f7a52; // dim — captions, muted, hairlines
+
+// Surfaces — warm near-black (an amber CRT at rest is not pure black).
+$body-background-color: #0b0a07;
+$sidebar-color: #0e0c08;
+$search-background-color: #0e0c08;
+$table-background-color: #100d09;
+$code-background-color: #100d09;
+$feedback-color: #100d09;
+$border-color: #2a2114;
 
 // Text.
-$body-text-color: #c7d3bf;
-$body-heading-color: #ffb454; // amber phosphor
-$search-result-preview-color: #87a07c;
+$body-text-color: $amber-100;
+$body-heading-color: $amber-200;
+$search-result-preview-color: $amber-000;
 
-// Links & nav — green phosphor.
-$link-color: #5ad48a;
-$nav-child-link-color: #9fb89a;
+// Links & nav — brightest rung of the amber ladder, never a second hue.
+$link-color: $amber-300;
+$nav-child-link-color: $amber-100;
 
 // Buttons.
-$btn-primary-color: #2f7d4f;
-$base-button-color: #14180f;
+$btn-primary-color: #6b4e12;
+$base-button-color: #14110a;

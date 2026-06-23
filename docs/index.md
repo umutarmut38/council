@@ -4,19 +4,27 @@ nav_order: 1
 permalink: /
 ---
 
-# council
-{: .fs-9 }
-
-A terminal workbench for running multiple AI coding agents at once. Each agent
-gets a live PTY pane; broadcast or direct prompts to them, and orchestrate a
-**plan → vote → build → review → adopt** workflow.
-{: .fs-6 .fw-300 }
-
-[Get started](requirements.md){: .btn .btn-primary .mr-2 }
-[Configuration](configuration.md){: .btn .mr-2 }
-[View on GitHub](https://github.com/umutarmut38/council){: .btn }
-
----
+<div class="hero">
+  <div class="hero-wordmark">council<span class="cursor">█</span></div>
+  <p class="hero-tagline">A terminal workbench for running a council of AI coding
+  agents — each in its own live PTY pane, driven through one structured workflow.</p>
+  <div class="pipeline" role="list" aria-label="Council workflow">
+    <span class="pipeline-step" role="listitem"><b>1</b>plan</span>
+    <span class="pipeline-sep" aria-hidden="true">▸</span>
+    <span class="pipeline-step" role="listitem"><b>2</b>vote</span>
+    <span class="pipeline-sep" aria-hidden="true">▸</span>
+    <span class="pipeline-step" role="listitem"><b>3</b>build</span>
+    <span class="pipeline-sep" aria-hidden="true">▸</span>
+    <span class="pipeline-step" role="listitem"><b>4</b>review</span>
+    <span class="pipeline-sep" aria-hidden="true">▸</span>
+    <span class="pipeline-step" role="listitem"><b>5</b>adopt</span>
+  </div>
+  <div class="hero-actions">
+    <a href="requirements.html" class="btn btn-primary mr-2">Get started</a>
+    <a href="configuration.html" class="btn mr-2">Configuration</a>
+    <a href="https://github.com/umutarmut38/council" class="btn">View on GitHub</a>
+  </div>
+</div>
 
 ## Start here
 
