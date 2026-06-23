@@ -25,8 +25,12 @@
       li.className = "toc-" + h.tagName.toLowerCase();
       var a = document.createElement("a");
       a.href = "#" + h.id;
-      // Strip the trailing anchor-link glyph just-the-docs injects.
-      a.textContent = h.textContent.replace(/\s*$/, "");
+      // Read the heading text without the anchor-heading link just-the-docs
+      // injects (its body — an icon or "#" — would otherwise leak into the TOC).
+      var clone = h.cloneNode(true);
+      var anchor = clone.querySelector(".anchor-heading");
+      if (anchor) anchor.remove();
+      a.textContent = clone.textContent.trim();
       li.appendChild(a);
       ul.appendChild(li);
     });
