@@ -14,25 +14,16 @@ $c-bg: #14110c; // page background
 
 // ---------------------------------------------------------------------------
 // Layout: a three-column reference shell (sidebar · content · "On this page")
-// like context7 / Mintlify. The content area spans the full width left of the
-// sidebar so the columns can breathe, but prose itself is held to a readable
-// measure ($prose-measure); wide reference tables overflow into a horizontal
-// scroll inside their .table-wrapper rather than sprawling or being cramped.
+// like context7 / Mintlify. just-the-docs centers `.main` within $content-width
+// (see setup.scss), so the whole block sits centered on wide screens rather than
+// hugging the sidebar. Prose itself is held to a readable measure
+// ($prose-measure); wide reference tables overflow into a horizontal scroll
+// inside their .table-wrapper rather than sprawling or being cramped.
 // ---------------------------------------------------------------------------
 $prose-measure: 56rem;
 
-@media (min-width: 50rem) {
-  .main {
-    max-width: none;
-  }
-
-  .main-content-wrap {
-    max-width: none;
-  }
-}
-
 // Readable line length on every page — including those with no TOC rail, which
-// would otherwise stretch the prose the full width of the viewport.
+// would otherwise stretch the prose the full width of the column.
 .main-content {
   max-width: $prose-measure;
 }
