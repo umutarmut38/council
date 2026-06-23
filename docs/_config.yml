@@ -1,20 +1,95 @@
 title: council
 description: Multi-agent terminal orchestration for AI coding CLIs.
-theme: minima
+lang: en
+
+# just-the-docs: sidebar navigation, client-side search, custom color schemes.
+theme: just-the-docs
+
+# Custom retro phosphor-terminal dark scheme (docs/_sass/color_schemes/retro.scss).
+color_scheme: retro
+
+# Repo / external links and "edit this page".
+gh_edit_link: true
+gh_edit_link_text: Edit this page on GitHub
+gh_edit_repository: https://github.com/umutarmut38/council
+gh_edit_branch: main
+gh_edit_source: docs
+gh_edit_view_mode: tree
+
+aux_links:
+  GitHub: https://github.com/umutarmut38/council
+aux_links_new_tab: true
+
+# Client-side search across all pages.
+search_enabled: true
+search:
+  heading_level: 3
+  previews: 3
+  preview_words_before: 5
+  preview_words_after: 10
+  tokenizer_separator: /[\s/]+/
+  rel_url: true
+  button: false
+  focus_shortcut_key: k
+
+# Sidebar / nav. Top-level pages are grouped into these sections (rendered as
+# plain-text headers, in this order) by _includes/components/site_nav.html,
+# keyed off each page's `nav_section` front matter. Pages with no `nav_section`
+# (e.g. Home) render first, above the groups.
+nav_enabled: true
+heading_anchors: true
+nav_sections:
+  - Getting Started
+  - Usage
+  - Reference
+  - Operations
+
+# Footer.
+back_to_top: true
+back_to_top_text: "Back to top"
+last_edit_timestamp: true
+last_edit_time_format: "%b %e %Y at %I:%M %p"
+
+footer_content: >-
+  council — multi-agent terminal orchestration.
+  <a href="https://github.com/umutarmut38/council/blob/main/LICENSE">MIT</a>.
+
+# Wrap every page in the `page` layout: the just-the-docs `default` (head,
+# sidebar nav, search) plus a build-time prev/next pager (_layouts/page.html).
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: page
+
 markdown: kramdown
+kramdown:
+  syntax_highlighter_opts:
+    block:
+      line_numbers: false
+
+# Silence Dart Sass deprecation noise from the just-the-docs gem (it still uses
+# @import and global built-ins, which we don't control).
+sass:
+  quiet_deps: true
+  silence_deprecations:
+    - import
+    - global-builtin
+    - color-functions
+    - slash-div
+
 plugins:
+  - jekyll-seo-tag
+  - jekyll-sitemap
   - jekyll-relative-links
+
 relative_links:
   enabled: true
   collections: true
-include:
-  - architecture.md
-  - commands.md
-  - configuration.md
-  - demo.md
-  - release.md
-  - requirements.md
-  - shortcuts.md
-  - troubleshooting.md
-  - windows.md
-  - workflows.md
+
+# Files that are not part of the rendered site.
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - vendor
+  - .bundle

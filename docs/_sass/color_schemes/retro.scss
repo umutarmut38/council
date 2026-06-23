@@ -1,0 +1,44 @@
+// "retro" — the docs color scheme: an amber-phosphor monochrome, like an amber
+// CRT at rest. A single warm accent (amber) carries links, the section eyebrow,
+// active nav and the wordmark; everything else is warm neutrals, and headings are
+// a near-white warm tone so titles stay legible.
+//
+// This intentionally diverges from council's TUI default theme (magenta-pink +
+// cyan): saturated cyan/magenta body-size text read poorly on the dark site, so
+// the website trades exact brand-match for legibility and a calmer, more
+// monochrome identity. The terminal feel lives in the typography + the amber hue,
+// not in competing neons.
+//
+//   Accent   amber       #FFB454  -> links / eyebrow / active nav / wordmark
+//   Heading  warm white  #F0E2C0  -> section headings, page titles
+//   Body     warm grey   #CFC7B3  -> prose
+//   Faint    warm grey   #8A8067  -> de-emphasized text, hairline labels
+//   Surface  warm dark   #1D1810  -> cards, code, tables
+//   Border   warm        #332B1E  -> borders
+
+@import "./color_schemes/dark";
+
+// Tell the browser this is a dark UI (scrollbars, form controls).
+$color-scheme: dark;
+
+// Surfaces — warm near-black, like an amber terminal.
+$body-background-color: #14110c;
+$sidebar-color: #100e08;
+$search-background-color: #100e08;
+$table-background-color: #1d1810;
+$code-background-color: #1d1810;
+$feedback-color: #1d1810;
+$border-color: #332b1e;
+
+// Text.
+$body-text-color: #cfc7b3; // warm grey
+$body-heading-color: #f0e2c0; // warm white — headings stay neutral, not accent
+$search-result-preview-color: #8a8067;
+
+// Links & nav — amber, the single accent.
+$link-color: #ffb454;
+$nav-child-link-color: #cfc7b3;
+
+// Buttons.
+$btn-primary-color: #6a4a18;
+$base-button-color: #1d1810;

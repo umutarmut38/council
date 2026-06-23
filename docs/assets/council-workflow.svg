@@ -1,59 +1,59 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1430" height="360" viewBox="0 0 1430 360" role="img" aria-labelledby="title desc">
   <title id="title">Council orchestration workflow</title>
   <desc id="desc">Five phase cards: plan, vote, build, review, adopt.</desc>
-  <rect width="1430" height="360" fill="#0b0e14"/>
-  <text x="48" y="54" font-family="Inter,Arial,sans-serif" font-size="30" font-weight="700" fill="#f8f8f2">Plan → Vote → Build → Review → Adopt</text>
-  <text x="48" y="88" font-family="Inter,Arial,sans-serif" font-size="17" fill="#b7bcc7">Run multiple coding agents as workers and reviewers, then adopt the winning diff.</text>
+  <rect width="1430" height="360" fill="#14110c"/>
+  <text x="48" y="54" font-family="'IBM Plex Sans',Inter,Arial,sans-serif" font-size="30" font-weight="700" fill="#f0e2c0">Plan → Vote → Build → Review → Adopt</text>
+  <text x="48" y="88" font-family="'IBM Plex Sans',Inter,Arial,sans-serif" font-size="17" fill="#cfc7b3">Run multiple coding agents as workers and reviewers, then adopt the winning diff.</text>
 
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6272a4"/>
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8a8067"/>
     </marker>
   </defs>
 
-  <g font-family="Inter,Arial,sans-serif">
+  <g font-family="'IBM Plex Sans',Inter,Arial,sans-serif">
     <g transform="translate(48,136)">
-      <rect width="190" height="138" rx="10" fill="#111827" stroke="#8be9fd" stroke-width="2"/>
-      <text x="22" y="42" font-size="24" font-weight="700" fill="#8be9fd">1. Plan</text>
-      <text x="22" y="76" font-size="15" fill="#f8f8f2">Workers write</text>
-      <text x="22" y="98" font-size="15" fill="#f8f8f2">implementation plans</text>
-      <text x="22" y="120" font-size="14" fill="#9ca3af">plans/*.md</text>
+      <rect width="190" height="138" rx="10" fill="#1d1810" stroke="#ffd9a0" stroke-width="2"/>
+      <text x="22" y="42" font-size="24" font-weight="700" fill="#ffd9a0" font-family="'IBM Plex Mono',ui-monospace,monospace">1. Plan</text>
+      <text x="22" y="76" font-size="15" fill="#e8dcc2">Workers write</text>
+      <text x="22" y="98" font-size="15" fill="#e8dcc2">implementation plans</text>
+      <text x="22" y="120" font-size="14" fill="#8a8067" font-family="'IBM Plex Mono',ui-monospace,monospace">plans/*.md</text>
     </g>
-    <line x1="252" y1="205" x2="320" y2="205" stroke="#6272a4" stroke-width="3" marker-end="url(#arrow)"/>
+    <line x1="252" y1="205" x2="320" y2="205" stroke="#8a8067" stroke-width="3" marker-end="url(#arrow)"/>
 
     <g transform="translate(334,136)">
-      <rect width="190" height="138" rx="10" fill="#111827" stroke="#bd93f9" stroke-width="2"/>
-      <text x="22" y="42" font-size="24" font-weight="700" fill="#bd93f9">2. Vote</text>
-      <text x="22" y="76" font-size="15" fill="#f8f8f2">Reviewers rank</text>
-      <text x="22" y="98" font-size="15" fill="#f8f8f2">anonymous plans</text>
-      <text x="22" y="120" font-size="14" fill="#9ca3af">Borda tally</text>
+      <rect width="190" height="138" rx="10" fill="#1d1810" stroke="#ffc46e" stroke-width="2"/>
+      <text x="22" y="42" font-size="24" font-weight="700" fill="#ffc46e" font-family="'IBM Plex Mono',ui-monospace,monospace">2. Vote</text>
+      <text x="22" y="76" font-size="15" fill="#e8dcc2">Reviewers rank</text>
+      <text x="22" y="98" font-size="15" fill="#e8dcc2">anonymous plans</text>
+      <text x="22" y="120" font-size="14" fill="#8a8067" font-family="'IBM Plex Mono',ui-monospace,monospace">Borda tally</text>
     </g>
-    <line x1="538" y1="205" x2="606" y2="205" stroke="#6272a4" stroke-width="3" marker-end="url(#arrow)"/>
+    <line x1="538" y1="205" x2="606" y2="205" stroke="#8a8067" stroke-width="3" marker-end="url(#arrow)"/>
 
     <g transform="translate(620,136)">
-      <rect width="190" height="138" rx="10" fill="#111827" stroke="#50fa7b" stroke-width="2"/>
-      <text x="22" y="42" font-size="24" font-weight="700" fill="#50fa7b">3. Build</text>
-      <text x="22" y="76" font-size="15" fill="#f8f8f2">Workers implement</text>
-      <text x="22" y="98" font-size="15" fill="#f8f8f2">in git worktrees</text>
-      <text x="22" y="120" font-size="14" fill="#9ca3af">isolated branches</text>
+      <rect width="190" height="138" rx="10" fill="#1d1810" stroke="#ffb454" stroke-width="2"/>
+      <text x="22" y="42" font-size="24" font-weight="700" fill="#ffb454" font-family="'IBM Plex Mono',ui-monospace,monospace">3. Build</text>
+      <text x="22" y="76" font-size="15" fill="#e8dcc2">Workers implement</text>
+      <text x="22" y="98" font-size="15" fill="#e8dcc2">in git worktrees</text>
+      <text x="22" y="120" font-size="14" fill="#8a8067" font-family="'IBM Plex Mono',ui-monospace,monospace">isolated branches</text>
     </g>
-    <line x1="824" y1="205" x2="892" y2="205" stroke="#6272a4" stroke-width="3" marker-end="url(#arrow)"/>
+    <line x1="824" y1="205" x2="892" y2="205" stroke="#8a8067" stroke-width="3" marker-end="url(#arrow)"/>
 
     <g transform="translate(906,136)">
-      <rect width="190" height="138" rx="10" fill="#111827" stroke="#ffb86c" stroke-width="2"/>
-      <text x="22" y="42" font-size="24" font-weight="700" fill="#ffb86c">4. Review</text>
-      <text x="22" y="76" font-size="15" fill="#f8f8f2">Run checks, then</text>
-      <text x="22" y="98" font-size="15" fill="#f8f8f2">rank build diffs</text>
-      <text x="22" y="120" font-size="14" fill="#9ca3af">builds/*.diff</text>
+      <rect width="190" height="138" rx="10" fill="#1d1810" stroke="#e89a3c" stroke-width="2"/>
+      <text x="22" y="42" font-size="24" font-weight="700" fill="#e89a3c" font-family="'IBM Plex Mono',ui-monospace,monospace">4. Review</text>
+      <text x="22" y="76" font-size="15" fill="#e8dcc2">Run checks, then</text>
+      <text x="22" y="98" font-size="15" fill="#e8dcc2">rank build diffs</text>
+      <text x="22" y="120" font-size="14" fill="#8a8067" font-family="'IBM Plex Mono',ui-monospace,monospace">builds/*.diff</text>
     </g>
-    <line x1="1110" y1="205" x2="1178" y2="205" stroke="#6272a4" stroke-width="3" marker-end="url(#arrow)"/>
+    <line x1="1110" y1="205" x2="1178" y2="205" stroke="#8a8067" stroke-width="3" marker-end="url(#arrow)"/>
 
     <g transform="translate(1192,136)">
-      <rect width="190" height="138" rx="10" fill="#111827" stroke="#ff79c6" stroke-width="2"/>
-      <text x="22" y="42" font-size="24" font-weight="700" fill="#ff79c6">5. Adopt</text>
-      <text x="22" y="76" font-size="15" fill="#f8f8f2">Apply the winning</text>
-      <text x="22" y="98" font-size="15" fill="#f8f8f2">diff to your tree</text>
-      <text x="22" y="120" font-size="14" fill="#9ca3af">uncommitted</text>
+      <rect width="190" height="138" rx="10" fill="#1d1810" stroke="#cf7f28" stroke-width="2"/>
+      <text x="22" y="42" font-size="24" font-weight="700" fill="#cf7f28" font-family="'IBM Plex Mono',ui-monospace,monospace">5. Adopt</text>
+      <text x="22" y="76" font-size="15" fill="#e8dcc2">Apply the winning</text>
+      <text x="22" y="98" font-size="15" fill="#e8dcc2">diff to your tree</text>
+      <text x="22" y="120" font-size="14" fill="#8a8067" font-family="'IBM Plex Mono',ui-monospace,monospace">uncommitted</text>
     </g>
   </g>
 </svg>

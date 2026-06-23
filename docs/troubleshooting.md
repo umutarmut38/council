@@ -1,3 +1,9 @@
+---
+title: Troubleshooting
+nav_section: Operations
+nav_order: 1
+---
+
 # Troubleshooting
 
 ## An Agent Did Not Receive a Prompt

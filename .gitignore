@@ -16,6 +16,13 @@ bin/
 dist/
 coverage.out
 
+# Jekyll docs site build artifacts
+docs/_site/
+docs/.jekyll-cache/
+docs/.jekyll-metadata
+docs/.bundle/
+docs/vendor/
+
 # JavaScript examples
 node_modules/
 *.tsbuildinfo

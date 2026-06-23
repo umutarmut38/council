@@ -1,0 +1,62 @@
+<!-- Typefaces: IBM Plex (body + mono) for the document, VT323 for terminal chrome. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link
+  href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=VT323&display=swap"
+  rel="stylesheet">
+
+<!-- "On this page" right-rail TOC, built from the page's own headings (a la
+     context7 / Mintlify). No plugin: just-the-docs already gives headings ids. -->
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    var content = document.querySelector(".main-content");
+    var wrap = document.querySelector(".main-content-wrap");
+    if (!content || !wrap) return;
+    var heads = content.querySelectorAll("h2[id], h3[id]");
+    if (heads.length < 2) return;
+
+    var aside = document.createElement("aside");
+    aside.className = "toc-rail";
+    aside.setAttribute("aria-label", "On this page");
+
+    var ul = document.createElement("ul");
+    heads.forEach(function (h) {
+      var li = document.createElement("li");
+      li.className = "toc-" + h.tagName.toLowerCase();
+      var a = document.createElement("a");
+      a.href = "#" + h.id;
+      // Read the heading text without the anchor-heading link just-the-docs
+      // injects (its body — an icon or "#" — would otherwise leak into the TOC).
+      var clone = h.cloneNode(true);
+      var anchor = clone.querySelector(".anchor-heading");
+      if (anchor) anchor.remove();
+      a.textContent = clone.textContent.trim();
+      li.appendChild(a);
+      ul.appendChild(li);
+    });
+
+    var title = document.createElement("div");
+    title.className = "toc-rail-title";
+    title.textContent = "On this page";
+    aside.appendChild(title);
+    aside.appendChild(ul);
+
+    wrap.appendChild(aside);
+    wrap.classList.add("has-toc");
+
+    // Highlight the section currently in view.
+    var links = aside.querySelectorAll("a");
+    var byId = {};
+    links.forEach(function (a) { byId[a.getAttribute("href").slice(1)] = a; });
+    var observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) {
+          links.forEach(function (a) { a.classList.remove("active"); });
+          var link = byId[e.target.id];
+          if (link) link.classList.add("active");
+        }
+      });
+    }, { rootMargin: "0px 0px -75% 0px" });
+    heads.forEach(function (h) { observer.observe(h); });
+  });
+</script>

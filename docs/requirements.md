@@ -1,3 +1,9 @@
+---
+title: Requirements
+nav_section: Getting Started
+nav_order: 1
+---
+
 # Requirements and Platform Support
 
 ## Supported Platforms
