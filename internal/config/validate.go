@@ -64,9 +64,12 @@ func validateUITheme(c Config) error {
 	}
 	if name := strings.TrimSpace(c.UI.Theme); name != "" && !theme.IsBuiltin(name) {
 		if _, ok := c.UI.Themes[name]; !ok {
-			sort.Strings(custom)
-			known := append(theme.BuiltinNames(), custom...)
-			return fmt.Errorf("ui.theme %q is unknown (built-ins: %s)", name, strings.Join(known, ", "))
+			avail := "built-ins: " + strings.Join(theme.BuiltinNames(), ", ")
+			if len(custom) > 0 {
+				sort.Strings(custom)
+				avail += "; custom: " + strings.Join(custom, ", ")
+			}
+			return fmt.Errorf("ui.theme %q is unknown (%s)", name, avail)
 		}
 	}
 	return nil

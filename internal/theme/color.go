@@ -4,9 +4,10 @@ package theme
 // INDEXED 256-color SGR (38;5;N): the 6x6x6 cube and grayscale ramp (indices
 // 16-255) render identically in every emulator (only 0-15 are themeable),
 // whereas truecolor sequences proved unreliable in some terminals (VS Code) and
-// SGR faint is implemented inconsistently everywhere. The "muted" variant a
-// theme uses for unfocused chrome is a computed darker index, not a terminal
-// attribute.
+// SGR faint is implemented inconsistently everywhere. Unfocused chrome therefore
+// takes a theme's explicit Border color rather than a terminal "faint"
+// attribute; the darker "muted" shade of a per-agent border color is computed
+// from the configured color instead (see paneBorderColors in internal/tui).
 //
 // These helpers live in this package (free of lipgloss) so both internal/config
 // (validation) and internal/tui (rendering) can reuse them without a cycle.
@@ -16,8 +17,10 @@ import (
 	"strings"
 )
 
-// base16 is the reference palette for indices 0-15 (used only to interpret a
-// configured base color; output indices are always >= 16).
+// base16 is the reference palette for indices 0-15, used by Xterm256RGB to turn
+// a configured low index into RGB. (Quantization via NearestANSI256 only ever
+// returns indices >= 16; a numeric index passed to ColorIndex is kept as-is, so
+// a configured 0-15 index survives unchanged.)
 var base16 = [16]uint32{
 	0x000000, 0x800000, 0x008000, 0x808000, 0x000080, 0x800080, 0x008080, 0xc0c0c0,
 	0x808080, 0xff0000, 0x00ff00, 0xffff00, 0x0000ff, 0xff00ff, 0x00ffff, 0xffffff,
@@ -115,8 +118,10 @@ func ParseColorRGB(raw string) (r, g, b int, ok bool) {
 	return 0, 0, 0, false
 }
 
-// ColorIndex resolves a configured color string (index or hex) to a 256-color
-// index >= 16. ok is false when the value isn't a valid index or hex color.
+// ColorIndex resolves a configured color string to a 256-color index: a numeric
+// index ("212") is returned as-is (0-255), while a hex value ("#ff5f87") is
+// quantized to the nearest cube/grayscale index (>= 16). ok is false when the
+// value is neither.
 func ColorIndex(raw string) (idx int, ok bool) {
 	raw = strings.TrimSpace(raw)
 	if n, err := strconv.Atoi(raw); err == nil && n >= 0 && n <= 255 {
