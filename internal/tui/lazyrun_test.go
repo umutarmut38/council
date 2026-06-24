@@ -17,6 +17,9 @@ func TestRunDirDeferredUntilFirstPrompt(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "runs")
 	store := runstore.NewDeferred(root, nil, nil)
 	session := agent.NewSession("a", config.AgentConfig{Command: []string{"true"}}, "")
+	// ensureRun opens the raw log; close it before TempDir cleanup so Windows
+	// (which can't delete open files) can remove the run directory.
+	defer session.Terminate()
 	model := NewModel([]*agent.Session{session}, store, 1000, "", 0, nil, nil)
 
 	if store.Started() {

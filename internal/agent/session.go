@@ -213,6 +213,15 @@ func (s *Session) Terminate() error {
 	done := s.Done
 	s.mu.Unlock()
 
+	// Release the raw log even when the session never started (conn == nil) or
+	// already exited: EnableRawLog may have opened it before the first prompt,
+	// and an open file blocks Windows from deleting the run directory. The
+	// Swap is atomic, so it races safely with the reader goroutine and with
+	// run()'s own close.
+	if rl := s.rawLog.Swap(nil); rl != nil {
+		_ = rl.Close()
+	}
+
 	if done || conn == nil {
 		return nil
 	}
