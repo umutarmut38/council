@@ -734,6 +734,141 @@ func TestCmdStatusRefreshesProgressFromDisk(t *testing.T) {
 	}
 }
 
+// TestResumedRefineFinishClearsStaleVote guards the resume path of the
+// refine→revote round. A refine round runs as a plan phase and is reopened
+// under the "plan" phase label (config.PhasePlan) on resume, so finishPhase must
+// still run the revote reset — clearing the prior vote's anonymized plan copies,
+// ballots, tally, and the .orig.md backups — keyed off the refine backups rather
+// than the label. Without the fix the resumed round finishes as a plain plan
+// phase and the next /vote tallies stale ballots against the pre-refine plans.
+func TestResumedRefineFinishClearsStaleVote(t *testing.T) {
+	root := initTUITestRepo(t)
+	chdirTUI(t, root)
+
+	cfg := config.Config{
+		Agents: map[string]config.AgentConfig{
+			"a": {Enabled: true, Command: []string{"true"}},
+			"b": {Enabled: true, Command: []string{"true"}},
+		},
+		Sessions: config.SessionConfig{RootDir: filepath.Join(root, ".council", "runs")},
+	}
+	cfg.Normalize()
+
+	ctrl, err := orchestrate.NewController(cfg, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.StartRun("do it"); err != nil {
+		t.Fatal(err)
+	}
+	run := ctrl.Run()
+
+	// Initial plans + a full first vote, so the run carries the stale vote
+	// artifacts a revote must replace: anonymized plan copies, per-voter
+	// ballots, the letter assignments, and the tally.
+	for _, name := range []string{"a", "b"} {
+		if err := os.WriteFile(run.PlanPath(name), []byte("plan "+name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := ctrl.VotePrompts(); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"a", "b"} {
+		if err := os.WriteFile(run.VotePath(name), []byte("RANKING: A > B\nWINNER: A"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := ctrl.CollectVotesAndTally(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Start the refine round (backs each plan up to .orig.md and removes the
+	// live files), record the active phase as the TUI does, then write only a's
+	// refined plan back — the crash happens before b finishes.
+	if _, err := ctrl.RefinePrompts(""); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.SaveActivePhase(config.PhasePlan, []string{"a", "b"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(run.PlanPath("a"), []byte("refined plan a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reopen the run in a fresh controller + model and resume exactly as a
+	// relaunched TUI would: the refine round comes back under the "plan" label.
+	resumed, err := orchestrate.NewController(cfg, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := resumed.UseRun(run.Stamp); err != nil {
+		t.Fatal(err)
+	}
+	model := NewModel([]*agent.Session{agent.NewSession("a", config.AgentConfig{}, "")}, nil, 1000, "", 0, nil, resumed)
+	model.Width = 80
+	model.Height = 24
+	model.resumeRun("")
+	if model.phase != string(config.PhasePlan) {
+		t.Fatalf("resumed refine phase label = %q, want %q (this label is why the reset was skipped pre-fix)", model.phase, config.PhasePlan)
+	}
+
+	// b finishes its refined plan; the watched phase now completes.
+	if err := os.WriteFile(run.PlanPath("b"), []byte("refined plan b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	model.finishPhase()
+
+	// The refine reset must have run despite the "plan" label: no stale vote
+	// artifacts and no leftover refine backups survive.
+	stale := map[string]string{
+		"vote result.json": run.ResultPath(),
+		"vote result.md":   run.SummaryPath(),
+		"plan-assignments": run.VoteRefsPath(),
+		"ballot a":         run.VotePath("a"),
+		"ballot b":         run.VotePath("b"),
+	}
+	for label, path := range stale {
+		if fileExists(path) {
+			t.Fatalf("resumed refine finish left stale %s at %s", label, path)
+		}
+	}
+	for _, name := range []string{"a", "b"} {
+		orig := strings.TrimSuffix(run.PlanPath(name), ".md") + ".orig.md"
+		if fileExists(orig) {
+			t.Fatalf("resumed refine finish left the refine backup %s", orig)
+		}
+	}
+	if anon, _ := filepath.Glob(filepath.Join(run.VotesDir(), "plan-*.md")); len(anon) != 0 {
+		t.Fatalf("resumed refine finish left stale anonymized plans: %v", anon)
+	}
+
+	// And the next /vote re-anonymizes from the REFINED plans, not the originals.
+	if _, err := resumed.VotePrompts(); err != nil {
+		t.Fatalf("revote after resumed refine: %v", err)
+	}
+	refs, err := run.LoadVoteRefs()
+	if err != nil {
+		t.Fatalf("revote refs missing: %v", err)
+	}
+	var letterForA string
+	for _, r := range refs {
+		if r.Agent == "a" {
+			letterForA = r.Letter
+		}
+	}
+	if letterForA == "" {
+		t.Fatal("revote assigned no letter to a")
+	}
+	anon, err := os.ReadFile(run.AnonPlanPath(letterForA))
+	if err != nil {
+		t.Fatalf("revote anonymized copy for a missing: %v", err)
+	}
+	if string(anon) != "refined plan a" {
+		t.Fatalf("revote anonymized a = %q, want the refined plan content", string(anon))
+	}
+}
+
 func TestStaleExitFromReplacedSessionIsIgnored(t *testing.T) {
 	oldSession := agent.NewSession("codex", config.AgentConfig{}, "")
 	newSession := agent.NewSession("codex", config.AgentConfig{}, "")

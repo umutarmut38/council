@@ -294,22 +294,21 @@ func (c *Controller) ArtifactPaths(phase config.Phase) map[string]string {
 	return paths
 }
 
-// RefinePrompts builds the consensus-round prompt: the winning planner reads
-// the reviewers' critiques and rewrites its plan before the build starts. The
-// original plan is preserved as <agent>.orig.md and the watched plan file is
-// removed so the phase completes when the refined plan lands.
+// RefinePrompts builds the consensus round: every planner that produced a plan
+// reads the council's critiques and rewrites its plan before the council
+// revotes. Each plan is preserved as <agent>.orig.md and the watched plan file
+// is removed so the phase completes when the refined plan lands. The file
+// handling is idempotent so an interrupted /refine resumes cleanly.
 func (c *Controller) RefinePrompts(note string) (map[string]string, error) {
 	issue, err := c.issue()
 	if err != nil {
 		return nil, err
 	}
-	winner, err := c.winnerName()
-	if err != nil {
-		return nil, err
-	}
 
 	// Critiques are optional: a single auto-won plan has no votes, so refine
-	// proceeds on the note alone (or a generic tighten-up instruction).
+	// proceeds on the note alone (or a generic tighten-up instruction). Ballots
+	// are free-form rankings of every plan, so the whole set is shared by each
+	// refiner rather than split per plan.
 	votePaths := []string{}
 	for _, voter := range c.allAgentsForPhase(config.PhaseVote) {
 		if path := c.run.VotePath(voter); fileExists(path) {
@@ -317,22 +316,79 @@ func (c *Controller) RefinePrompts(note string) (map[string]string, error) {
 		}
 	}
 
-	planPath := c.run.PlanPath(winner)
-	origPath := strings.TrimSuffix(planPath, ".md") + ".orig.md"
-	if !fileExists(origPath) {
-		data, err := os.ReadFile(planPath)
-		if err != nil {
-			return nil, fmt.Errorf("read winning plan: %w", err)
-		}
-		if err := os.WriteFile(origPath, data, fsperm.File()); err != nil {
-			return nil, err
+	// Map each planner to the letter its plan was shown as, so the prompt can
+	// point it at the critiques aimed at it. Absent for an auto-won single plan.
+	letterByAgent := map[string]string{}
+	if refs, err := c.run.LoadVoteRefs(); err == nil {
+		for _, r := range refs {
+			letterByAgent[r.Agent] = r.Letter
 		}
 	}
-	// Remove the watched artifact so the refine phase finishes when the agent
-	// writes the new version (the original stays in .orig.md).
-	_ = os.Remove(planPath)
 
-	return map[string]string{
-		winner: RefinePrompt(issue, origPath, votePaths, planPath, note),
-	}, nil
+	prompts := map[string]string{}
+	for _, agent := range c.allAgentsForPhase(config.PhasePlan) {
+		planPath := c.run.PlanPath(agent)
+		origPath := strings.TrimSuffix(planPath, ".md") + ".orig.md"
+		// A planner is in the refine set if it produced a plan: it has a live
+		// plan (fresh start) or an .orig.md backup (mid-refine resume).
+		if !fileExists(planPath) && !fileExists(origPath) {
+			continue
+		}
+		if !fileExists(origPath) {
+			// Fresh start: back the plan up, then remove the watched artifact so
+			// the phase finishes when the agent writes the refined version. On
+			// resume the backup already exists, so we touch nothing.
+			data, err := os.ReadFile(planPath)
+			if err != nil {
+				return nil, fmt.Errorf("read plan for %s: %w", agent, err)
+			}
+			if err := os.WriteFile(origPath, data, fsperm.File()); err != nil {
+				return nil, err
+			}
+			_ = os.Remove(planPath)
+		}
+		prompts[agent] = RefinePrompt(issue, origPath, votePaths, planPath, note, letterByAgent[agent])
+	}
+	if len(prompts) == 0 {
+		return nil, errors.New("no plans to refine")
+	}
+	return prompts, nil
+}
+
+// ResetVote clears the derived artifacts of a prior vote (anonymized plan
+// copies, ballots, letter assignments, and the tally) so the next /vote
+// re-anonymizes and re-tallies from the current plans. Used after a refine round.
+func (c *Controller) ResetVote() error {
+	c.refs = nil
+	return c.run.ResetVote(c.allAgentsForPhase(config.PhaseVote))
+}
+
+// ClearRefineBackups removes the <agent>.orig.md plan backups created by a
+// refine round, called once the round completes so a later refine round in the
+// same run re-snapshots the current plan rather than the first one.
+func (c *Controller) ClearRefineBackups() {
+	for _, agent := range c.allAgentsForPhase(config.PhasePlan) {
+		origPath := strings.TrimSuffix(c.run.PlanPath(agent), ".md") + ".orig.md"
+		_ = os.Remove(origPath)
+	}
+}
+
+// RefineRoundActive reports whether a refine round is still mid-flight: at least
+// one planner has an <agent>.orig.md backup. The backups are written when a
+// refine round starts and removed by ClearRefineBackups when it completes, so
+// their presence is the ground-truth signal that a finishing plan phase is in
+// fact a refine round. finishPhase keys the revote reset off this rather than
+// the TUI phase label, because a resumed refine round is reopened under the
+// "plan" label (config.PhasePlan), not "refine".
+func (c *Controller) RefineRoundActive() bool {
+	if c.run == nil {
+		return false
+	}
+	for _, agent := range c.allAgentsForPhase(config.PhasePlan) {
+		origPath := strings.TrimSuffix(c.run.PlanPath(agent), ".md") + ".orig.md"
+		if fileExists(origPath) {
+			return true
+		}
+	}
+	return false
 }

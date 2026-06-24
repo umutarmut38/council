@@ -408,6 +408,29 @@ func (r *Run) ClearState() error {
 	return err
 }
 
+// ResetVote removes the derived artifacts of a prior vote — the anonymized plan
+// copies, per-voter ballots, the letter assignments, and the tally — so the next
+// vote re-anonymizes and re-tallies from the current plans. The plans themselves
+// are left intact. Used by the refine→revote round. Best-effort: a missing file
+// is not an error.
+func (r *Run) ResetVote(voters []string) error {
+	paths := []string{r.VoteRefsPath(), r.ResultPath(), r.SummaryPath()}
+	for _, v := range voters {
+		paths = append(paths, r.VotePath(v))
+	}
+	// Anonymized plan copies are plan-<letter>.md in the votes dir.
+	if matches, err := filepath.Glob(filepath.Join(r.VotesDir(), "plan-*.md")); err == nil {
+		paths = append(paths, matches...)
+	}
+	var firstErr error
+	for _, p := range paths {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
 func (r *Run) LoadState() (RunState, error) {
 	data, err := os.ReadFile(r.StatePath())
 	if err != nil {

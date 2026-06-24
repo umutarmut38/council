@@ -69,10 +69,13 @@ func (c *Controller) resumePhaseTarget(phase config.Phase, participants []string
 	c.SetScope(participants)
 	switch phase {
 	case config.PhasePlan:
-		// A refine round looks like a plan phase, but the winner's plan file
-		// was moved to .orig.md so the rewrite can be watched. Resume it with
-		// the refine prompt, not a from-scratch plan prompt.
+		// A refine round looks like a plan phase, but each refining planner's
+		// plan file was moved to .orig.md so the rewrite can be watched. Resume
+		// it with the refine prompt, not a from-scratch plan prompt. Filter out
+		// planners whose refined plan already landed so a resume after a partial
+		// refine re-prompts only the unfinished ones.
 		if refinePrompts, ok := c.resumeRefinePrompts(participants); ok {
+			refinePrompts = c.filterPromptsForMissing(config.PhasePlan, refinePrompts)
 			return ResumeTarget{
 				Phase:        phase,
 				Participants: c.AgentsForPhase(phase),
@@ -144,20 +147,29 @@ func (c *Controller) resumePhaseTarget(phase config.Phase, participants []string
 	}
 }
 
-// resumeRefinePrompts detects an interrupted /refine: exactly one participant
-// whose plan was backed up to .orig.md and whose live plan file is missing.
+// resumeRefinePrompts detects an interrupted /refine: any planner whose plan was
+// backed up to .orig.md and whose live plan file is missing (the rewrite hasn't
+// landed yet). Scans the saved participants, or every planner when none were
+// recorded (an inferred resume).
 func (c *Controller) resumeRefinePrompts(participants []string) (map[string]string, bool) {
-	if len(participants) != 1 {
-		return nil, false
+	candidates := participants
+	if len(candidates) == 0 {
+		candidates = c.allAgentsForPhase(config.PhasePlan)
 	}
-	agentName := participants[0]
-	planPath := c.run.PlanPath(agentName)
-	origPath := strings.TrimSuffix(planPath, ".md") + ".orig.md"
-	if fileExists(planPath) || !fileExists(origPath) {
+	refining := false
+	for _, name := range candidates {
+		planPath := c.run.PlanPath(name)
+		origPath := strings.TrimSuffix(planPath, ".md") + ".orig.md"
+		if !fileExists(planPath) && fileExists(origPath) {
+			refining = true
+			break
+		}
+	}
+	if !refining {
 		return nil, false
 	}
 	prompts, err := c.RefinePrompts("")
-	if err != nil {
+	if err != nil || len(prompts) == 0 {
 		return nil, false
 	}
 	return prompts, true

@@ -148,7 +148,7 @@ var composerCommands = []Composer{
 	{Name: "preview", Args: "[agent]", Desc: "council: show what /adopt would change"},
 	{Name: "compare", Args: "", Desc: "council: inspect builds — files, git-style diffs vs base or between builds"},
 	{Name: "judge", Args: "plan|build <agent|letter>", Desc: "council: pick a winner yourself"},
-	{Name: "refine", Args: "[note]", Desc: "council: winner improves its plan from the vote critiques (or a note; works on a single plan)"},
+	{Name: "refine", Args: "[note]", Desc: "council: every planner revises its plan from the vote critiques (or a note), then the council revotes (works on a single plan)"},
 	{Name: "artifacts", Args: "", Desc: "browse this run's plans/votes/diffs/logs"},
 	{Name: "edit", Args: "[path]", Desc: "integrated editor + file tree"},
 	{Name: "report", Args: "", Desc: "write report.md for the run"},
