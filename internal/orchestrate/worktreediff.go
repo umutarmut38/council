@@ -40,6 +40,47 @@ func (c *Controller) WorktreePath(agent string) (string, bool) {
 	return "", false
 }
 
+// BuildProgress reports how many of the run's build worktrees show activity —
+// committed work (HEAD past the recorded base) or uncommitted/untracked changes
+// — out of the total worktrees. It is a cheap, read-only probe (no staging, no
+// writes), so the Build rail can climb during the build instead of snapping to
+// N/N only once /review captures the diffs.
+func (c *Controller) BuildProgress() (active, total int) {
+	if c.run == nil {
+		return 0, 0
+	}
+	base, err := c.run.BaseSHA()
+	if err != nil {
+		return 0, 0
+	}
+	mgr := c.manager
+	if mgr == nil {
+		mgr = NewManager(c.repoRoot, c.run.Stamp)
+	}
+	worktrees, err := mgr.ListRun()
+	if err != nil {
+		return 0, 0
+	}
+	total = len(worktrees)
+	for _, wt := range worktrees {
+		if worktreeChanged(wt.Path, base) {
+			active++
+		}
+	}
+	return active, total
+}
+
+// worktreeChanged reports whether a build worktree has diverged from the base —
+// either a moved HEAD (committed work) or a dirty/untracked tree. Read-only: it
+// never stages or writes, so it is safe to poll during the build.
+func worktreeChanged(wtPath, base string) bool {
+	if head, err := revParse(wtPath, "HEAD"); err == nil && head != base {
+		return true
+	}
+	out, err := cmdrun.Output(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", wtPath, "status", "--porcelain"}})
+	return err == nil && len(strings.TrimSpace(string(out))) > 0
+}
+
 // DiffVsBase returns an agent's captured implementation diff (worktree
 // against the recorded build base). It reads the run artifact, so it works
 // even after the worktrees were cleaned.

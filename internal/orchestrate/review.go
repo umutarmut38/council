@@ -66,27 +66,67 @@ func (c *Controller) RunBuildChecks() ([]BuildCheck, error) {
 	for _, wt := range worktrees {
 		c.worktrees[wt.Agent] = wt.Path
 		res := BuildCheck{Agent: wt.Agent}
-
-		// Stage everything first (respecting .gitignore) so newly-created files
-		// are included — a plain `git diff` omits untracked files, which would
-		// hide an implementation that builds a project from scratch. Staging is
-		// best-effort, but a failure here can hide work, so record it.
-		if _, addErr := cmdrun.CombinedOutput(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", wt.Path, "add", "-A"}}); addErr != nil {
-			res.Warnings = append(res.Warnings, fmt.Sprintf("git add -A: %v", addErr))
-		}
-		diff, derr := cmdrun.Output(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", wt.Path, "diff", "--cached", base}})
-		if derr != nil {
-			res.Warnings = append(res.Warnings, fmt.Sprintf("git diff --cached %s: %v", base, derr))
-		} else if len(strings.TrimSpace(string(diff))) > 0 {
-			res.Changed = true
-			_ = os.WriteFile(c.run.BuildDiffPath(wt.Agent), diff, fsperm.File())
-		}
-
+		res.Changed, res.Warnings = c.captureBuildDiff(wt.Agent, wt.Path, base)
 		res.Passed = c.runCheck(wt.Path, wt.Agent)
 		results = append(results, res)
 	}
 	c.logCheckWarnings(results)
 	return results, nil
+}
+
+// captureBuildDiff stages an agent's build worktree and writes its diff against
+// the recorded base to BuildDiffPath when non-empty. It mutates only the
+// worktree index (git add -A) — exactly what /review already does — and never
+// runs the check command, so it is safe to call on demand (e.g. /compare during
+// the build). It always re-captures, so a later /review records a fresh diff.
+func (c *Controller) captureBuildDiff(agent, wtPath, base string) (changed bool, warnings []string) {
+	// Stage everything first (respecting .gitignore) so newly-created files are
+	// included — a plain `git diff` omits untracked files, which would hide an
+	// implementation that builds a project from scratch. Staging is best-effort,
+	// but a failure here can hide work, so record it.
+	if _, addErr := cmdrun.CombinedOutput(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", wtPath, "add", "-A"}}); addErr != nil {
+		warnings = append(warnings, fmt.Sprintf("git add -A: %v", addErr))
+	}
+	diff, derr := cmdrun.Output(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", wtPath, "diff", "--cached", base}})
+	if derr != nil {
+		warnings = append(warnings, fmt.Sprintf("git diff --cached %s: %v", base, derr))
+	} else if len(strings.TrimSpace(string(diff))) > 0 {
+		changed = true
+		_ = os.WriteFile(c.run.BuildDiffPath(agent), diff, fsperm.File())
+	}
+	return changed, warnings
+}
+
+// ensureBuildDiffs captures any build worktree's diff that has not been written
+// yet, so /compare works during or right after the build — before /review runs
+// the checks that normally write them. Best-effort: it needs a recorded base
+// (saved at /build) and live worktrees, and it leaves agents that already have a
+// diff untouched so a later /review (which re-captures all) stays authoritative.
+func (c *Controller) ensureBuildDiffs() {
+	if c.run == nil {
+		return
+	}
+	base, err := c.run.BaseSHA()
+	if err != nil {
+		return
+	}
+	if c.manager == nil {
+		c.manager = NewManager(c.repoRoot, c.run.Stamp)
+	}
+	worktrees, err := c.manager.ListRun()
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(c.run.BuildsDir(), fsperm.Dir()); err != nil {
+		return
+	}
+	for _, wt := range worktrees {
+		c.worktrees[wt.Agent] = wt.Path
+		if fi, statErr := os.Stat(c.run.BuildDiffPath(wt.Agent)); statErr == nil && fi.Size() > 0 {
+			continue
+		}
+		_, _ = c.captureBuildDiff(wt.Agent, wt.Path, base)
+	}
 }
 
 // logCheckWarnings appends ignored best-effort errors to a per-run warnings
@@ -330,9 +370,12 @@ func (c *Controller) CompareBuilds() ([]BuildComparison, error) {
 	if c.run == nil {
 		return nil, errors.New("no active run")
 	}
+	// Capture any not-yet-written diffs so /compare works during the build,
+	// before /review runs the checks that normally write them.
+	c.ensureBuildDiffs()
 	agents := c.AdoptableBuilds()
 	if len(agents) == 0 {
-		return nil, errors.New("no build diffs captured; run /review first")
+		return nil, errors.New("no build changes yet")
 	}
 	letters := map[string]string{}
 	if refs, err := c.run.LoadReviewRefs(); err == nil {

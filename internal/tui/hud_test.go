@@ -107,6 +107,41 @@ func TestPhaseRailRendering(t *testing.T) {
 	}
 }
 
+func TestBuildRailDoneTracksActivityUntilDiffs(t *testing.T) {
+	// During the build, before any diff is captured, the rail reflects live
+	// worktree activity instead of sitting at 0.
+	if got := buildRailDone("build", 0, 2); got != 2 {
+		t.Fatalf("build with activity: got %d, want 2", got)
+	}
+	if got := buildRailDone("build", 0, 0); got != 0 {
+		t.Fatalf("idle build: got %d, want 0", got)
+	}
+	// Once diffs are captured (at /review), trust the diff count over activity.
+	if got := buildRailDone("build", 3, 1); got != 3 {
+		t.Fatalf("build with diffs: got %d, want 3", got)
+	}
+	// Outside the build phase the count is always the captured diffs.
+	if got := buildRailDone("review", 2, 5); got != 2 {
+		t.Fatalf("review: got %d, want 2", got)
+	}
+}
+
+func TestBuildProgressTickSelfTerminates(t *testing.T) {
+	m := hudModel(t, "a")
+	// The build tick reschedules only while the build is live, so it can never
+	// leak into (and double-poll) the watched phases.
+	m.phase = "build"
+	if cmd := m.buildProgress(); cmd == nil {
+		t.Fatal("buildProgress should reschedule while building")
+	}
+	for _, phase := range []string{"", "review", "vote"} {
+		m.phase = phase
+		if cmd := m.buildProgress(); cmd != nil {
+			t.Fatalf("buildProgress should stop in phase %q", phase)
+		}
+	}
+}
+
 func TestShortAgent(t *testing.T) {
 	cases := map[string]string{
 		"codex":           "codex",
