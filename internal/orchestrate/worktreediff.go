@@ -75,11 +75,27 @@ func (c *Controller) BuildProgress() (active, total int) {
 // either a moved HEAD (committed work) or a dirty/untracked tree. Read-only: it
 // never stages or writes, so it is safe to poll during the build.
 func worktreeChanged(wtPath, base string) bool {
-	if head, ok := gitProbe(wtPath, "rev-parse", "HEAD"); ok && head != base {
-		return true
+	changed, _ := worktreeProbe(wtPath, base)
+	return changed
+}
+
+// worktreeProbe reports, read-only, whether a build worktree differs from base
+// (changed) and whether the probe was conclusive (ok). A moved HEAD or a
+// non-empty status means changed; ok is false when any git probe failed, so a
+// caller can fall back to a full capture instead of trusting a "clean" answer.
+func worktreeProbe(wtPath, base string) (changed, ok bool) {
+	head, headOK := gitProbe(wtPath, "rev-parse", "HEAD")
+	if !headOK {
+		return false, false
 	}
-	status, ok := gitProbe(wtPath, "status", "--porcelain")
-	return ok && status != ""
+	if head != base {
+		return true, true // committed work
+	}
+	status, statusOK := gitProbe(wtPath, "status", "--porcelain")
+	if !statusOK {
+		return false, false
+	}
+	return status != "", true
 }
 
 // gitProbe runs a short read-only git command in wtPath with its own timeout, so

@@ -101,8 +101,10 @@ func (c *Controller) captureBuildDiff(agent, wtPath, base string) (changed bool,
 	case len(strings.TrimSpace(string(diff))) > 0:
 		// A failed write would silently hide the work, so surface it and treat
 		// the build as unchanged (a diff we can't persist can't be reviewed).
+		// Drop any prior diff too, so a stale capture isn't left to surface.
 		if werr := os.WriteFile(c.run.BuildDiffPath(agent), diff, fsperm.File()); werr != nil {
 			warnings = append(warnings, fmt.Sprintf("write %s diff: %v", agent, werr))
+			_ = os.Remove(c.run.BuildDiffPath(agent))
 		} else {
 			changed = true
 		}
@@ -143,6 +145,13 @@ func (c *Controller) ensureBuildDiffs() {
 	for _, wt := range worktrees {
 		c.worktrees[wt.Agent] = wt.Path
 		if fi, statErr := os.Stat(c.run.BuildDiffPath(wt.Agent)); statErr == nil && fi.Size() > 0 {
+			continue
+		}
+		// Cheap read-only probe first: skip the heavier stage+diff for a worktree
+		// that is conclusively clean, so /compare (which runs synchronously on the
+		// TUI thread) doesn't stage idle worktrees or stall on runs with many of
+		// them. If the probe is inconclusive, capture anyway to stay correct.
+		if changed, ok := worktreeProbe(wt.Path, base); ok && !changed {
 			continue
 		}
 		_, _ = c.captureBuildDiff(wt.Agent, wt.Path, base)
