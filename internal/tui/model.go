@@ -71,6 +71,10 @@ type phasePromptsMsg map[string]string
 type pollArtifactsMsg struct{}
 type buildProgressMsg struct{}
 
+// buildProgressResultMsg carries the result of an off-thread build-activity
+// probe back to the Update loop, so the git shell-outs never block rendering.
+type buildProgressResultMsg struct{ active, total int }
+
 // animTickMsg drives the activity-animation frame loop (the rotating 3D head
 // and the /eva intro). The loop reschedules itself while it is live.
 type animTickMsg time.Time
@@ -186,6 +190,8 @@ type Model struct {
 	pendingAdopt *orchestrate.AdoptPlan
 	pendingClean bool
 	progress     *runProgress // cached HUD state; refreshProgress() updates it
+	buildActive  int          // cached live build activity; updated off-thread by buildProgressResultMsg
+	buildTotal   int          // cached worktree count from the same probe
 	layoutLocked bool         // user adjusted rows/cols in settings: adaptive off
 	mouseOn      bool         // mouse capture is active (Ctrl+W toggles it)
 	// attentionCheckPending debounces the delayed approval-prompt re-check.
@@ -487,6 +493,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.pollArtifacts()
 	case buildProgressMsg:
 		return m, m.buildProgress()
+	case buildProgressResultMsg:
+		return m, m.handleBuildProgressResult(msg)
 	case reviewReadyMsg:
 		return m.handleReviewReady(msg)
 	case animTickMsg:

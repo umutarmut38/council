@@ -66,7 +66,7 @@ func (c *Controller) RunBuildChecks() ([]BuildCheck, error) {
 	for _, wt := range worktrees {
 		c.worktrees[wt.Agent] = wt.Path
 		res := BuildCheck{Agent: wt.Agent}
-		res.Changed, res.Warnings = c.captureBuildDiff(wt.Agent, wt.Path, base)
+		res.Changed, res.Warnings = c.captureBuildDiff(wt.Agent, wt.Path, base, reviewCaptureTimeout)
 		res.Passed = c.runCheck(wt.Path, wt.Agent)
 		results = append(results, res)
 	}
@@ -74,25 +74,32 @@ func (c *Controller) RunBuildChecks() ([]BuildCheck, error) {
 	return results, nil
 }
 
+// Per-command git timeouts for captureBuildDiff. /review can afford a generous
+// budget; on-demand /compare during a build uses a much smaller one so a stuck
+// git (e.g. a stale index.lock) can only ever freeze the UI briefly.
+const (
+	reviewCaptureTimeout  = 30 * time.Second
+	compareCaptureTimeout = 8 * time.Second
+)
+
 // captureBuildDiff stages an agent's build worktree and writes its diff against
 // the recorded base to BuildDiffPath when non-empty. It mutates only the
 // worktree index (git add -A) — exactly what /review already does — and never
 // runs the check command, so it is safe to call on demand (e.g. /compare during
 // the build). It always re-captures, so a later /review records a fresh diff.
-func (c *Controller) captureBuildDiff(agent, wtPath, base string) (changed bool, warnings []string) {
-	// /compare can reach this on the TUI thread, so bound each git command: a
-	// hung git (e.g. a stale index.lock) must not freeze the UI. The budget is
-	// generous so it never truncates a legitimate capture.
+// timeout bounds each git command so a caller (especially /compare on the UI
+// thread) can keep the worst-case stall short.
+func (c *Controller) captureBuildDiff(agent, wtPath, base string, timeout time.Duration) (changed bool, warnings []string) {
 	// Stage everything first (respecting .gitignore) so newly-created files are
 	// included — a plain `git diff` omits untracked files, which would hide an
 	// implementation that builds a project from scratch. Staging is best-effort,
 	// but a failure here can hide work, so record it.
-	addCtx, cancelAdd := context.WithTimeout(context.Background(), 30*time.Second)
+	addCtx, cancelAdd := context.WithTimeout(context.Background(), timeout)
 	defer cancelAdd()
 	if _, addErr := cmdrun.CombinedOutput(addCtx, cmdrun.Spec{Name: "git", Args: []string{"-C", wtPath, "add", "-A"}}); addErr != nil {
 		warnings = append(warnings, fmt.Sprintf("git add -A: %v", addErr))
 	}
-	diffCtx, cancelDiff := context.WithTimeout(context.Background(), 30*time.Second)
+	diffCtx, cancelDiff := context.WithTimeout(context.Background(), timeout)
 	defer cancelDiff()
 	diff, derr := cmdrun.Output(diffCtx, cmdrun.Spec{Name: "git", Args: []string{"-C", wtPath, "diff", "--cached", base}})
 	switch {
@@ -154,7 +161,7 @@ func (c *Controller) ensureBuildDiffs() {
 		if changed, ok := worktreeProbe(wt.Path, base); ok && !changed {
 			continue
 		}
-		_, _ = c.captureBuildDiff(wt.Agent, wt.Path, base)
+		_, _ = c.captureBuildDiff(wt.Agent, wt.Path, base, compareCaptureTimeout)
 	}
 }
 

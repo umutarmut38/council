@@ -64,19 +64,15 @@ func (c *Controller) BuildProgress() (active, total int) {
 	}
 	total = len(worktrees)
 	for _, wt := range worktrees {
-		if worktreeChanged(wt.Path, base) {
+		changed, ok := worktreeProbe(wt.Path, base)
+		// Be conservative about progress: an inconclusive probe (a transient git
+		// error or an index.lock) counts as active, so the Build rail doesn't
+		// stall at 0 while work is actually happening.
+		if changed || !ok {
 			active++
 		}
 	}
 	return active, total
-}
-
-// worktreeChanged reports whether a build worktree has diverged from the base —
-// either a moved HEAD (committed work) or a dirty/untracked tree. Read-only: it
-// never stages or writes, so it is safe to poll during the build.
-func worktreeChanged(wtPath, base string) bool {
-	changed, _ := worktreeProbe(wtPath, base)
-	return changed
 }
 
 // worktreeProbe reports, read-only, whether a build worktree differs from base
@@ -99,8 +95,8 @@ func worktreeProbe(wtPath, base string) (changed, ok bool) {
 }
 
 // gitProbe runs a short read-only git command in wtPath with its own timeout, so
-// one slow probe can't starve the next (BuildProgress polls these on a 1.5s tick
-// from the UI thread). On error/timeout it reports failure rather than blocking.
+// one slow probe can't starve the next (BuildProgress polls these on a 1.5s tick,
+// off the UI thread). On error/timeout it reports failure rather than blocking.
 func gitProbe(wtPath string, args ...string) (string, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

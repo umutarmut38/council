@@ -133,17 +133,36 @@ func TestBuildRailDoneUsesMaxActivityDuringBuild(t *testing.T) {
 
 func TestBuildProgressTickSelfTerminates(t *testing.T) {
 	m := hudModel(t, "a")
-	// The build tick reschedules only while the build is live, so it can never
-	// leak into (and double-poll) the watched phases.
+	// The build tick dispatches an off-thread probe only while the build is
+	// live, and the reschedule (in the result handler) stops once the phase
+	// leaves "build", so it can never leak into (and double-poll) the watched
+	// phases.
 	m.phase = "build"
 	if cmd := m.buildProgress(); cmd == nil {
-		t.Fatal("buildProgress should reschedule while building")
+		t.Fatal("buildProgress should dispatch a probe while building")
+	}
+	if cmd := m.handleBuildProgressResult(buildProgressResultMsg{active: 1, total: 2}); cmd == nil {
+		t.Fatal("the result handler should reschedule while building")
 	}
 	for _, phase := range []string{"", "review", "vote"} {
 		m.phase = phase
 		if cmd := m.buildProgress(); cmd != nil {
 			t.Fatalf("buildProgress should stop in phase %q", phase)
 		}
+		if cmd := m.handleBuildProgressResult(buildProgressResultMsg{}); cmd != nil {
+			t.Fatalf("the result handler should stop rescheduling in phase %q", phase)
+		}
+	}
+}
+
+// TestBuildProgressResultCaches: the off-thread probe result updates the cached
+// build activity that the HUD reads (View must never shell out to git itself).
+func TestBuildProgressResultCaches(t *testing.T) {
+	m := hudModel(t, "a")
+	m.phase = "build"
+	m.handleBuildProgressResult(buildProgressResultMsg{active: 2, total: 3})
+	if m.buildActive != 2 || m.buildTotal != 3 {
+		t.Fatalf("cached build activity = %d/%d, want 2/3", m.buildActive, m.buildTotal)
 	}
 }
 

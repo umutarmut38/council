@@ -686,8 +686,9 @@ func (m *Model) beginPhase(label string, phase config.Phase, prompts map[string]
 	m.PromptInput = ""
 	m.Target = TargetAll
 	m.Store = store
-	m.pendingBuild = nil // any new phase invalidates a staged build
-	m.phasePrompts = nil // and the prompts /resend would repeat
+	m.pendingBuild = nil               // any new phase invalidates a staged build
+	m.phasePrompts = nil               // and the prompts /resend would repeat
+	m.buildActive, m.buildTotal = 0, 0 // stale build activity must not leak across phases
 	m.phase = label
 	m.watching = m.orch.ArtifactPaths(phase)
 	_ = m.orch.SaveActivePhase(phase, m.orch.AgentsForPhase(phase), false)
@@ -769,16 +770,34 @@ func buildProgressTick() tea.Cmd {
 	return tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg { return buildProgressMsg{} })
 }
 
-// buildProgress refreshes the cached run progress while the build is live and
-// reschedules itself. The build has no artifact watcher, so this is what makes
-// the Build rail climb as agents change their worktrees. It self-terminates as
-// soon as the phase leaves "build" (e.g. at /review), so it never races the
-// artifact poll that drives the watched phases.
+// buildProgress probes live build activity while the build is live. The probe
+// (BuildProgress) shells out to git per worktree, so it runs OFF the Update loop
+// as a tea.Cmd and reports back via buildProgressResultMsg — the UI never blocks
+// on git. It self-terminates as soon as the phase leaves "build" (e.g. at
+// /review) so it never races the artifact poll that drives the watched phases.
 func (m *Model) buildProgress() tea.Cmd {
 	if m.phase != "build" {
 		return nil
 	}
+	orch := m.orch
+	return func() tea.Msg {
+		if orch == nil {
+			return buildProgressResultMsg{}
+		}
+		active, total := orch.BuildProgress()
+		return buildProgressResultMsg{active: active, total: total}
+	}
+}
+
+// handleBuildProgressResult caches an off-thread probe result, refreshes the HUD
+// (now a cheap, git-free read of the cached counts), and reschedules the tick
+// while the build is still live.
+func (m *Model) handleBuildProgressResult(msg buildProgressResultMsg) tea.Cmd {
+	m.buildActive, m.buildTotal = msg.active, msg.total
 	m.refreshProgress()
+	if m.phase != "build" {
+		return nil // the build ended while we were probing; stop the loop
+	}
 	return buildProgressTick()
 }
 

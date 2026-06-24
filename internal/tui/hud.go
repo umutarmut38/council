@@ -83,12 +83,14 @@ func (m *Model) progressFromSummary(summary orchestrate.RunSummary) *runProgress
 		p.Adopted = adopted
 	}
 
-	// Probe live worktree activity throughout the build, not just until the
+	// Reflect live worktree activity throughout the build, not just until the
 	// first diff: /compare can capture diffs mid-build, and the rail must keep
 	// climbing as more agents start working rather than freezing at that count.
+	// The count comes from the cache filled off-thread by the build progress
+	// tick — View/refreshProgress must never shell out to git themselves.
 	buildActive := 0
-	if m.phase == "build" && m.orch != nil {
-		buildActive, _ = m.orch.BuildProgress()
+	if m.phase == "build" {
+		buildActive = m.buildActive
 	}
 	buildDone := buildRailDone(m.phase, len(summary.Diffs), buildActive)
 
