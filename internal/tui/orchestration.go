@@ -804,13 +804,17 @@ func (m *Model) finishPhase() {
 			noPlan = " · no plan: " + strings.Join(missing, ",")
 		}
 		if m.orch.RefineRoundActive() {
-			m.orch.ClearRefineBackups()
 			// Clear the prior vote's artifacts so the revote re-anonymizes and
-			// re-tallies from the refined plans instead of the originals.
+			// re-tallies from the refined plans instead of the originals. Do this
+			// before clearing the .orig.md backups: if ResetVote fails, the
+			// backups stay on disk so RefineRoundActive() remains true and the
+			// reset is retried on the next finish, rather than leaving stale vote
+			// artifacts that can never be cleaned up.
 			if err := m.orch.ResetVote(); err != nil {
 				m.Status = "refine reset: " + err.Error()
 				return
 			}
+			m.orch.ClearRefineBackups()
 			m.orch.SetScope(nil)
 			m.Status = fmt.Sprintf("refined %d plan(s) collected — type /vote%s", len(found), noPlan)
 		} else {
