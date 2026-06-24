@@ -75,16 +75,24 @@ func (c *Controller) BuildProgress() (active, total int) {
 // either a moved HEAD (committed work) or a dirty/untracked tree. Read-only: it
 // never stages or writes, so it is safe to poll during the build.
 func worktreeChanged(wtPath, base string) bool {
-	// BuildProgress is polled on a 1.5s tick from the UI thread, so bound the
-	// probes: a slow or hung git must not stall the progress refresh. On timeout
-	// the probe simply reports "no change" rather than blocking.
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if head, err := cmdrun.Output(ctx, cmdrun.Spec{Name: "git", Args: []string{"-C", wtPath, "rev-parse", "HEAD"}}); err == nil && strings.TrimSpace(string(head)) != base {
+	if head, ok := gitProbe(wtPath, "rev-parse", "HEAD"); ok && head != base {
 		return true
 	}
-	out, err := cmdrun.Output(ctx, cmdrun.Spec{Name: "git", Args: []string{"-C", wtPath, "status", "--porcelain"}})
-	return err == nil && len(strings.TrimSpace(string(out))) > 0
+	status, ok := gitProbe(wtPath, "status", "--porcelain")
+	return ok && status != ""
+}
+
+// gitProbe runs a short read-only git command in wtPath with its own timeout, so
+// one slow probe can't starve the next (BuildProgress polls these on a 1.5s tick
+// from the UI thread). On error/timeout it reports failure rather than blocking.
+func gitProbe(wtPath string, args ...string) (string, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := cmdrun.Output(ctx, cmdrun.Spec{Name: "git", Args: append([]string{"-C", wtPath}, args...)})
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(string(out)), true
 }
 
 // DiffVsBase returns an agent's captured implementation diff (worktree

@@ -147,6 +147,25 @@ func TestBuildProgressTickSelfTerminates(t *testing.T) {
 	}
 }
 
+func TestPhaseCmdsStartsBuildTickOnlyWhenRunning(t *testing.T) {
+	m := hudModel(t, "a")
+	m.phase = "build"
+	m.watching = nil
+
+	// A resumed, already-running build (no staged prompts) starts the tick so
+	// its rail keeps climbing.
+	m.pendingBuild = nil
+	if cmd := m.phaseCmds(nil); cmd == nil {
+		t.Fatal("running build resume should start the progress tick")
+	}
+	// A merely staged build must not — /start-build starts it, and a second
+	// loop would just double the refresh rate.
+	m.pendingBuild = map[string]string{"a": "do it"}
+	if cmd := m.phaseCmds(nil); cmd != nil {
+		t.Fatal("staged build should not start a tick before /start-build")
+	}
+}
+
 func TestShortAgent(t *testing.T) {
 	cases := map[string]string{
 		"codex":           "codex",

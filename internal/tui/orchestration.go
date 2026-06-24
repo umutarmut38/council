@@ -747,6 +747,14 @@ func (m *Model) phaseCmds(prompts map[string]string) tea.Cmd {
 	if len(m.watching) > 0 {
 		cmds = append(cmds, pollAfter())
 	}
+	// A resumed, already-running build has no artifact watcher, so its rail is
+	// driven by the dedicated progress tick. Start it here (a freshly staged
+	// build starts it from /start-build instead). The pendingBuild guard avoids
+	// a second loop when resuming a build that is only staged, and buildProgress
+	// self-terminates once the phase ends.
+	if m.phase == "build" && len(m.pendingBuild) == 0 {
+		cmds = append(cmds, buildProgressTick())
+	}
 	if len(cmds) == 0 {
 		return nil
 	}
