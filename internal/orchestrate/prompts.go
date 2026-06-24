@@ -74,19 +74,31 @@ WINNING PLAN (read this file):
 
 // RefinePrompt asks the winning planner to absorb the reviewers' critiques and
 // rewrite its plan before the build starts.
-func RefinePrompt(issue, origPlanPath string, votePaths []string, artifactPath string) string {
+func RefinePrompt(issue, origPlanPath string, votePaths []string, artifactPath, note string) string {
 	var b strings.Builder
-	b.WriteString("Your plan won the council vote. Before the build starts, refine it using the reviewers' critiques.\n\nISSUE:\n")
+	if len(votePaths) > 0 {
+		b.WriteString("Your plan won the council vote. Before the build starts, refine it using the reviewers' critiques.\n\nISSUE:\n")
+	} else {
+		b.WriteString("Refine your plan before the build starts.\n\nISSUE:\n")
+	}
 	b.WriteString(strings.TrimSpace(issue))
-	fmt.Fprintf(&b, "\n\nYOUR ORIGINAL PLAN (read this file):\n%s\n\nREVIEWER CRITIQUES (read each file):\n", origPlanPath)
-	for _, path := range votePaths {
-		fmt.Fprintf(&b, "- %s\n", path)
+	fmt.Fprintf(&b, "\n\nYOUR ORIGINAL PLAN (read this file):\n%s\n", origPlanPath)
+	if len(votePaths) > 0 {
+		b.WriteString("\nREVIEWER CRITIQUES (read each file):\n")
+		for _, path := range votePaths {
+			fmt.Fprintf(&b, "- %s\n", path)
+		}
+	}
+	if n := strings.TrimSpace(note); n != "" {
+		fmt.Fprintf(&b, "\nREQUESTED CHANGES:\n%s\n", n)
+	} else if len(votePaths) == 0 {
+		b.WriteString("\nThere are no reviewer critiques (single plan). Tighten and clarify the plan: sharpen the approach, surface the risks, and make the steps concrete.\n")
 	}
 	fmt.Fprintf(&b, `
 Write the REFINED implementation plan to this file (overwrite if it exists):
 %s
 
-The refined plan must keep your approach but address the valid objections. End it with two sections: "## Risks" (the failure modes reviewers raised and how you mitigate them) and "## Test checklist" (concrete tests the build must pass). Do NOT implement anything yet.`, artifactPath)
+The refined plan must keep your approach but address the valid objections. End it with two sections: "## Risks" (the failure modes and how you mitigate them) and "## Test checklist" (concrete tests the build must pass). Do NOT implement anything yet.`, artifactPath)
 	return b.String()
 }
 

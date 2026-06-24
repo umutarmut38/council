@@ -37,7 +37,7 @@ func Schema() []SchemaSection {
 				{"cwd", "string", "`\".\"`", "Working directory for the process."},
 				{"color", "string", "—", "256-color index (`\"212\"`) or hex (`\"#ff5f87\"`) tinting the pane border; falls back to the personality color."},
 				{"personality", "string", "—", "Personality name (must exist under `personalities`)."},
-				{"role", "list", "`[worker, reviewer]`", "Orchestration phases the agent joins: `worker`, `reviewer`, or both."},
+				{"role", "list", "all phases", "Orchestration phases the agent joins, one token per phase: `planner`, `builder`, `voter`, `review`. Omit for all phases. Legacy aliases still work: `worker` = `planner`+`builder`, and a bare `reviewer` = `voter`+`reviewer` (use `review` for a review-only agent)."},
 				{"env", "map", "—", "Extra environment for this agent, merged over the top-level `env` (this wins). Experimental: requires `experimental.setup_env`."},
 				{"terminal", "object", "—", "Rendering and prompt-delivery settings (see `agents.<name>.terminal`)."},
 				{"orchestration", "object", "—", "Per-phase behavior (see `agents.<name>.orchestration`)."},

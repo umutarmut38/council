@@ -117,19 +117,14 @@ func run(args []string) error {
 		return err
 	}
 
-	store, err := runstore.New(cfg.Sessions.RootDir, effectiveYAML(cfg), sources.JSON())
-	if err != nil {
-		return err
-	}
-	if initialPrompt != "" {
-		if err := store.SavePrompt(initialPrompt); err != nil {
-			return err
-		}
-	}
+	// Deferred: the run directory is created on the first prompt (see
+	// Model.ensureRun), so merely launching the TUI no longer litters
+	// .council/runs. Raw-log paths and the initial prompt are wired up then too.
+	store := runstore.NewDeferred(cfg.Sessions.RootDir, effectiveYAML(cfg), sources.JSON())
 
 	sessions := make([]*agent.Session, 0, len(selected))
 	for _, spec := range selected {
-		session := agent.NewSession(spec.Name, spec.Config, store.RawLogPath(spec.Name))
+		session := agent.NewSession(spec.Name, spec.Config, "")
 		sessions = append(sessions, session)
 	}
 

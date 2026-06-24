@@ -298,7 +298,7 @@ func (c *Controller) ArtifactPaths(phase config.Phase) map[string]string {
 // the reviewers' critiques and rewrites its plan before the build starts. The
 // original plan is preserved as <agent>.orig.md and the watched plan file is
 // removed so the phase completes when the refined plan lands.
-func (c *Controller) RefinePrompts() (map[string]string, error) {
+func (c *Controller) RefinePrompts(note string) (map[string]string, error) {
 	issue, err := c.issue()
 	if err != nil {
 		return nil, err
@@ -308,14 +308,13 @@ func (c *Controller) RefinePrompts() (map[string]string, error) {
 		return nil, err
 	}
 
+	// Critiques are optional: a single auto-won plan has no votes, so refine
+	// proceeds on the note alone (or a generic tighten-up instruction).
 	votePaths := []string{}
 	for _, voter := range c.allAgentsForPhase(config.PhaseVote) {
 		if path := c.run.VotePath(voter); fileExists(path) {
 			votePaths = append(votePaths, path)
 		}
-	}
-	if len(votePaths) == 0 {
-		return nil, errors.New("no votes on disk to refine from")
 	}
 
 	planPath := c.run.PlanPath(winner)
@@ -334,6 +333,6 @@ func (c *Controller) RefinePrompts() (map[string]string, error) {
 	_ = os.Remove(planPath)
 
 	return map[string]string{
-		winner: RefinePrompt(issue, origPath, votePaths, planPath),
+		winner: RefinePrompt(issue, origPath, votePaths, planPath, note),
 	}, nil
 }

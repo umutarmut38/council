@@ -59,8 +59,8 @@ disagreeing in a terminal multiplexer while you drink coffee.
 More seriously:
 
 - Ask several agents the same question and compare answers live.
-- Give agents roles: `worker` does the building, `reviewer` judges the code
-  (and silently judges you for wasting all those tokens).
+- Give agents per-phase roles: `planner`, `builder`, `voter`, `review` (and
+  the reviewer silently judges you for wasting all those tokens).
 - Give agents behavioral personalities: `pragmatist`, `critic`, `pessimist`,
   or whatever chaos you desire.
 - Scope messages to one agent, a personality, a category, or broadcast to the
@@ -265,11 +265,11 @@ agents:
   codex-worker:
     enabled: true
     command: ["codex"]
-    role: [worker]
+    role: [planner, builder]
   copilot-reviewer:
     enabled: true
     command: ["gh", "copilot"]
-    role: [reviewer]
+    role: [voter, review]
 ```
 
 Personalities decide **how an agent behaves**:

@@ -133,12 +133,11 @@ func configWizard() error {
 			continue
 		}
 		preset.Enabled = true
-		role := ask(fmt.Sprintf("    role for %s (worker = plans+builds, reviewer = votes+reviews, both)", name), "both")
-		switch strings.ToLower(role) {
-		case "worker":
-			preset.Role = []string{config.RoleWorker}
-		case "reviewer":
-			preset.Role = []string{config.RoleReviewer}
+		role := ask(fmt.Sprintf("    role for %s (planner,builder,voter,review — comma-separated; review = review-only; or legacy worker/reviewer/both)", name), "both")
+		if roles, err := parseRoleAnswer(role); err != nil {
+			fmt.Printf("    %v; leaving %s in all phases\n", err, name)
+		} else {
+			preset.Role = roles
 		}
 		if auto := config.PresetAutoApproveCommand(name); len(auto) > 0 {
 			fmt.Printf("    %s can run orchestration phases unattended with: %s\n", name, strings.Join(auto, " "))
@@ -188,13 +187,41 @@ func configWizard() error {
 	return nil
 }
 
+// parseRoleAnswer turns a setup answer into a role list. It accepts the legacy
+// "worker"/"reviewer"/"both" answers and any comma-separated mix of the granular
+// roles (planner, builder, voter, review, reviewer). An empty, "both", or "all"
+// answer leaves the role unset (all phases). A lone "reviewer" keeps its legacy
+// judge-both meaning (voter+reviewer); use "review" for a review-only agent.
+func parseRoleAnswer(answer string) ([]string, error) {
+	switch strings.ToLower(strings.TrimSpace(answer)) {
+	case "", "both", "all":
+		return nil, nil
+	case "worker":
+		return []string{config.RoleWorker}, nil
+	case "reviewer":
+		return []string{config.RoleReviewer}, nil
+	}
+	var roles []string
+	for _, tok := range strings.Split(answer, ",") {
+		switch t := strings.ToLower(strings.TrimSpace(tok)); t {
+		case "":
+			// skip empty tokens from trailing/double commas
+		case config.RolePlanner, config.RoleBuilder, config.RoleVoter, config.RoleReview, config.RoleReviewer:
+			roles = append(roles, t)
+		default:
+			return nil, fmt.Errorf("unknown role %q (planner | builder | voter | review | reviewer; or legacy worker | both)", strings.TrimSpace(tok))
+		}
+	}
+	return roles, nil
+}
+
 // configAddAgent adds a known preset to the global config:
-// council config add-agent codex [--name codex-worker] [--role worker|reviewer]
+// council config add-agent codex [--name codex-worker] [--role ...]
 func configAddAgent(args []string) error {
 	fs := flag.NewFlagSet("config add-agent", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	name := fs.String("name", "", "agent name in the config (defaults to the preset name)")
-	role := fs.String("role", "", "worker | reviewer (empty = both)")
+	role := fs.String("role", "", "comma-separated planner,builder,voter,review (review = review-only; legacy worker|reviewer also accepted; empty = all phases)")
 	// Accept the preset before the flags (`add-agent codex --role worker`);
 	// the flag package stops at the first positional argument otherwise.
 	presetName := ""
@@ -211,22 +238,18 @@ func configAddAgent(args []string) error {
 		presetName = ""
 	}
 	if presetName == "" {
-		return fmt.Errorf("usage: council config add-agent <%s> [--name x] [--role worker|reviewer]", strings.Join(config.PresetNames(), "|"))
+		return fmt.Errorf("usage: council config add-agent <%s> [--name x] [--role planner,builder,voter,review]", strings.Join(config.PresetNames(), "|"))
 	}
 	preset, okPreset := config.AgentPreset(presetName)
 	if !okPreset {
 		return fmt.Errorf("unknown preset %q; known: %s", presetName, strings.Join(config.PresetNames(), ", "))
 	}
 	preset.Enabled = true
-	switch strings.ToLower(strings.TrimSpace(*role)) {
-	case "":
-	case "worker":
-		preset.Role = []string{config.RoleWorker}
-	case "reviewer":
-		preset.Role = []string{config.RoleReviewer}
-	default:
-		return fmt.Errorf("unknown role %q (worker | reviewer)", *role)
+	roles, err := parseRoleAnswer(*role)
+	if err != nil {
+		return err
 	}
+	preset.Role = roles
 
 	agentName := strings.TrimSpace(*name)
 	if agentName == "" {

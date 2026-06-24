@@ -460,6 +460,60 @@ func TestResumeBuildDoesNotResetInterruptedWorktree(t *testing.T) {
 	}
 }
 
+// TestSetSinglePlanWinner: a lone plan is recorded as the vote winner without a
+// vote, so Winner()/build proceed (the plan-phase twin of the single-build case).
+func TestSetSinglePlanWinner(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := resumeTestController(t, root)
+
+	if err := os.WriteFile(ctrl.Run().PlanPath("a"), []byte("the only plan"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.SetSinglePlanWinner("a"); err != nil {
+		t.Fatal(err)
+	}
+	name, plan, err := ctrl.Winner()
+	if err != nil {
+		t.Fatalf("Winner after single-plan select: %v", err)
+	}
+	if name != "a" {
+		t.Fatalf("winner = %q, want a", name)
+	}
+	if plan != "the only plan" {
+		t.Fatalf("winner plan = %q", plan)
+	}
+}
+
+// TestRefineSinglePlanNoVotes: /refine works on the single auto-won plan even
+// with no critiques, and folds in the user's note.
+func TestRefineSinglePlanNoVotes(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := resumeTestController(t, root)
+
+	if err := os.WriteFile(ctrl.Run().PlanPath("a"), []byte("the only plan"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.SetSinglePlanWinner("a"); err != nil {
+		t.Fatal(err)
+	}
+	prompts, err := ctrl.RefinePrompts("make it simpler")
+	if err != nil {
+		t.Fatalf("refine on a single plan should not error: %v", err)
+	}
+	p, ok := prompts["a"]
+	if !ok {
+		t.Fatal("the lone planner should be prompted to refine")
+	}
+	if !strings.Contains(p, "make it simpler") {
+		t.Fatalf("refine prompt is missing the note:\n%s", p)
+	}
+	if strings.Contains(p, "REVIEWER CRITIQUES") {
+		t.Fatalf("single-plan refine should have no critiques section:\n%s", p)
+	}
+}
+
 func resumeTestController(t *testing.T, root string) *Controller {
 	t.Helper()
 	cfg := config.Config{
@@ -569,7 +623,7 @@ func TestResumeRefineRoundKeepsRefinePrompt(t *testing.T) {
 
 	// Start the refine round (backs up the plan, removes the live file), save
 	// the phase as the TUI would, then simulate a crash + resume.
-	if _, err := ctrl.RefinePrompts(); err != nil {
+	if _, err := ctrl.RefinePrompts(""); err != nil {
 		t.Fatal(err)
 	}
 	if err := ctrl.SaveActivePhase(config.PhasePlan, []string{"a"}, true); err != nil {

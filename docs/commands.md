@@ -59,11 +59,11 @@ See [Workflows → Personalities](workflows.md#personalities-categories-and-targ
 | Command | What it does |
 |---|---|
 | `/plan <issue or @file>` | Start a run; each in-scope agent drafts a plan to `plans/<agent>.md`. |
-| `/vote` | In-scope agents rank the (anonymized) plans; a winner is tallied. |
+| `/vote` | In-scope agents rank the (anonymized) plans; a winner is tallied. Auto-skipped when only one plan was produced — that plan wins and you go straight to `/build` (or `/refine`), mirroring how `/review` collapses to a single surviving build. |
 | `/build` | **Stage** the build: create a git worktree per agent and relaunch the panes there — but do not send the prompt yet. |
 | `/start-build` | Send the build prompt staged by `/build`. |
 | `/review` | Run the check command in each build worktree, drop failures, then in-scope agents vote the best diff. |
-| `/refine` | Consensus round: the winning planner reads the reviewers' critiques and rewrites its plan before `/build`. |
+| `/refine [note]` | Consensus round: the winning planner reads the reviewers' critiques and rewrites its plan before `/build`. Pass a `note` (`/refine make it simpler`) to add your own guidance. Works on a single auto-won plan too — with no critiques it just revises the plan from your note. |
 | `/compare` | **Interactive build inspector.** ↑/↓ selects a build (files touched, check result, review points, live/cleaned worktree, ★ winner). `Enter` drills into its changed files vs the run base; `Enter` on a file shows its git-style colored diff; `e` opens the worktree file (or the whole worktree from the build list) in the configured editor (`ui.editor`, else `$VISUAL`/`$EDITOR`/`vim`) (`i` opens it in the integrated editor instead). Press `x` to mark a build, then `Enter` on another to diff the **two implementations against each other** (computed natively via git trees). `d` shows the full diff vs base. Esc unwinds: diff → files → builds → panes. |
 | `/preview [agent]` | Show exactly what `/adopt` would change: files, dirty-tree overlap, the `git apply --check` result, **and the full diff**. A clean preview is staged — press `y` in the viewer to apply, `n` to cancel, `e` to open the diff in `$EDITOR`. |
 | `/adopt [agent]` | Opens the same full-screen preview and waits for `y` to apply the diff as uncommitted changes (`n` cancels). Name an agent to override the reviewed winner. `policy.mode: aggressive` applies immediately without the preview. |

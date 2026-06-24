@@ -61,25 +61,43 @@ agents:
 
 #### Roles
 
-`role` is **structural** — it routes an agent to orchestration phases. It is a
-list of `worker`, `reviewer`, or both:
+`role` is **structural** — it routes an agent to orchestration phases. There is
+one granular role per phase:
 
-| Role | Phases the agent joins |
+| Role | Phase the agent joins |
 |---|---|
-| `worker` | `plan`, `build` (produces the solution) |
-| `reviewer` | `vote`, `review` (judges the solution) |
-| `[worker, reviewer]` *(or omitted)* | all phases — the default, backward compatible |
+| `planner` | `plan` (writes a plan) |
+| `builder` | `build` (implements the winning plan) |
+| `voter` | `vote` (ranks the anonymized plans) |
+| `review` | `review` (ranks the built diffs) — review-only |
+| *(omitted)* | all phases — the default, backward compatible |
+
+> **`reviewer` vs `review`.** For back-compat, a role list of just `[reviewer]`
+> is the legacy alias for `voter` + `reviewer` (**vote + review**), *not*
+> review-only. Use **`review`** for an agent that only ranks built diffs (and
+> doesn't vote on plans). `reviewer` still selects the review phase when it
+> appears next to a granular token, so `[voter, reviewer]` and `[voter, review]`
+> are equivalent.
 
 ```yaml
 agents:
-  claude:  { role: [worker, reviewer] }   # plans, builds, votes, reviews
-  codex:   { role: [worker] }             # only plans and builds
-  copilot: { role: [reviewer] }           # only votes and reviews
+  claude:  { role: [planner, builder, voter, review] }    # every phase
+  codex:   { role: [planner, builder] }                   # only plans and builds
+  copilot: { role: [voter, review] }                      # votes and reviews
+  oracle:  { role: [planner] }                            # plan-only
+  judge:   { role: [review] }                             # review-only
 ```
+
+**Legacy aliases.** The old coarse roles still work, expanded automatically:
+`worker` = `planner` + `builder`, and `reviewer` (when the list contains *only*
+legacy tokens) = `voter` + `reviewer`. As soon as any granular token appears in
+the list, every token is taken literally — so `[voter, reviewer]` is vote +
+review. Don't mix a legacy `worker` with granular tokens; a lone `worker` beside
+them is ignored.
 
 Roles are independent of `personality` (which only injects prompt text) and
 compose with it. Self-judging is always prevented: a reviewer never ranks its
-own plan/diff, even when it also has the `worker` role. The legacy
+own plan/diff, even when it also plans or builds. The legacy
 `orchestration.exclude_*` flags still apply as overrides, and the `/target`
 command can narrow within the role-eligible set at runtime.
 
@@ -382,7 +400,7 @@ A map of agent name to config; the name labels the pane and artifacts.
 | `cwd` | string | `"."` | Working directory for the process. |
 | `color` | string | — | 256-color index (`"212"`) or hex (`"#ff5f87"`) tinting the pane border; falls back to the personality color. |
 | `personality` | string | — | Personality name (must exist under `personalities`). |
-| `role` | list | `[worker, reviewer]` | Orchestration phases the agent joins: `worker`, `reviewer`, or both. |
+| `role` | list | all phases | Orchestration phases the agent joins, one token per phase: `planner`, `builder`, `voter`, `review`. Omit for all phases. Legacy aliases still work: `worker` = `planner`+`builder`, and a bare `reviewer` = `voter`+`reviewer` (use `review` for a review-only agent). |
 | `env` | map | — | Extra environment for this agent, merged over the top-level `env` (this wins). Experimental: requires `experimental.setup_env`. |
 | `terminal` | object | — | Rendering and prompt-delivery settings (see `agents.<name>.terminal`). |
 | `orchestration` | object | — | Per-phase behavior (see `agents.<name>.orchestration`). |

@@ -39,26 +39,96 @@ type AgentConfig struct {
 	Orchestration OrchestrationConfig `yaml:"orchestration,omitempty"`
 }
 
-// Orchestration roles. Roles are structural (who builds vs. who judges) and are
-// orthogonal to personalities (which only inject prompt text). An agent's role
-// list selects which phases it participates in:
+// Orchestration roles. Roles are structural (which phase an agent joins) and are
+// orthogonal to personalities (which only inject prompt text). One token per
+// phase:
 //
-//	worker   -> plan, build      (produces the work)
-//	reviewer -> vote, review     (judges the work)
+//	planner  -> plan      (writes a plan)
+//	builder  -> build     (implements the winning plan)
+//	voter    -> vote      (ranks the anonymized plans)
+//	review   -> review    (ranks the built diffs) — review-only, unambiguous
 //
-// An empty role list means the agent has both roles (backward compatible).
+// An empty role list means the agent joins every phase (backward compatible).
+//
+// `reviewer` is overloaded for back-compat: on its own (a legacy-only list) it
+// expands to voter+reviewer (vote + review), so existing configs keep their
+// meaning. Alongside a granular token it still selects the review phase. Use
+// `review` for an agent that should only review. The other legacy alias:
+//
+//	worker   -> planner, builder
+//
+// See expandRoles for the precise legacy/literal rule.
 const (
-	RoleWorker   = "worker"
+	RolePlanner = "planner"
+	RoleBuilder = "builder"
+	RoleVoter   = "voter"
+	// RoleReview is the unambiguous review-only token. RoleReviewer ("reviewer")
+	// also selects the review phase, but on its own it is the legacy alias for
+	// voter+reviewer, so use RoleReview for a review-only agent.
+	RoleReview   = "review"
 	RoleReviewer = "reviewer"
+
+	// RoleWorker is a legacy alias for planner+builder.
+	RoleWorker = "worker"
 )
 
-// HasRole reports whether the agent has a role. An empty role list defaults to
-// all roles, so existing configs (no role field) behave exactly as before.
+// expandRoles resolves an agent's role list to canonical per-phase roles. It is
+// pure and idempotent. The rule, applied case-insensitively after trimming:
+//
+//   - Empty list -> empty (means "all phases"; HasRole returns true for any).
+//   - Any of planner/builder/voter/review present -> the whole list is literal
+//     and returned as-is. `review` (and `reviewer`) then select the review
+//     phase. `reviewer` is deliberately NOT a trigger on its own, because it
+//     doubles as the legacy alias below; `review` is the unambiguous
+//     review-only token.
+//   - Only legacy tokens (worker and/or reviewer, with no planner/builder/voter/
+//     review) -> expand `worker -> planner, builder` and
+//     `reviewer -> voter, reviewer` (the legacy judge-both meaning). So a bare
+//     `[reviewer]` is vote+review; use `[review]` for review-only.
+//
+// Idempotency holds because the legacy branch always introduces a trigger token
+// (planner or voter), so a second pass takes the literal branch. Mixing a lone
+// legacy `worker` with granular tokens leaves it literal (and inert, since it
+// matches no phase) — don't mix legacy and granular tokens.
+func expandRoles(roles []string) []string {
+	if len(roles) == 0 {
+		return nil
+	}
+	hasGranular := false
+	for _, r := range roles {
+		switch strings.ToLower(strings.TrimSpace(r)) {
+		case RolePlanner, RoleBuilder, RoleVoter, RoleReview:
+			hasGranular = true
+		}
+	}
+	if hasGranular {
+		return roles
+	}
+	// Legacy-only list: expand the coarse aliases.
+	out := make([]string, 0, len(roles)*2)
+	for _, r := range roles {
+		switch strings.ToLower(strings.TrimSpace(r)) {
+		case RoleWorker:
+			out = append(out, RolePlanner, RoleBuilder)
+		case RoleReviewer:
+			out = append(out, RoleVoter, RoleReviewer)
+		default:
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// HasRole reports whether the agent participates in the given canonical role.
+// An empty role list defaults to all roles, so existing configs (no role field)
+// behave exactly as before. Legacy aliases are expanded via expandRoles, so
+// HasRole(RolePlanner) is true for both `role: [planner]` and `role: [worker]`.
 func (a AgentConfig) HasRole(role string) bool {
-	if len(a.Role) == 0 {
+	expanded := expandRoles(a.Role)
+	if len(expanded) == 0 {
 		return true
 	}
-	for _, r := range a.Role {
+	for _, r := range expanded {
 		if strings.EqualFold(strings.TrimSpace(r), role) {
 			return true
 		}
@@ -137,13 +207,18 @@ func (a AgentConfig) ParticipatesIn(phase Phase) bool {
 		return false
 	}
 	// Role selects the phases; the legacy exclude_* flags remain as overrides.
+	// PhaseReview shares the exclude_vote override with PhaseVote — there is no
+	// exclude_review flag, and a legacy reviewer's exclude_vote disabled both.
 	switch phase {
 	case PhasePlan:
-		return !a.Orchestration.ExcludePlan && a.HasRole(RoleWorker)
+		return !a.Orchestration.ExcludePlan && a.HasRole(RolePlanner)
 	case PhaseBuild:
-		return !a.Orchestration.ExcludeBuild && a.HasRole(RoleWorker)
-	case PhaseVote, PhaseReview:
-		return !a.Orchestration.ExcludeVote && a.HasRole(RoleReviewer)
+		return !a.Orchestration.ExcludeBuild && a.HasRole(RoleBuilder)
+	case PhaseVote:
+		return !a.Orchestration.ExcludeVote && a.HasRole(RoleVoter)
+	case PhaseReview:
+		// `review` (review-only) and `reviewer` (legacy judge) both join review.
+		return !a.Orchestration.ExcludeVote && (a.HasRole(RoleReviewer) || a.HasRole(RoleReview))
 	default:
 		return true
 	}

@@ -1,5 +1,9 @@
 # Example local config for a repository that wants separate builders and judges.
 #
+# Roles are granular, one per phase: planner, builder, voter, review. Here the
+# "worker" agents plan + build and the "reviewer" agents vote + review. (The
+# legacy coarse roles still work too — `worker` = planner+builder, and a bare
+# `reviewer` = voter+review — but the explicit per-phase tokens are clearer.)
 # Copy to .council.yaml in a project, then adjust commands for the agent CLIs
 # installed on your machine.
 
@@ -70,7 +74,7 @@ agents:
   codex-worker:
     enabled: true
     command: ["codex"]
-    role: [worker]
+    role: [planner, builder]
     personality: pragmatist
     terminal:
       renderer: screen
@@ -82,7 +86,7 @@ agents:
   claude-worker:
     enabled: true
     command: ["claude"]
-    role: [worker]
+    role: [planner, builder]
     personality: optimist
     terminal:
       renderer: screen
@@ -93,7 +97,7 @@ agents:
   copilot-reviewer:
     enabled: true
     command: ["gh", "copilot"]
-    role: [reviewer]
+    role: [voter, review]
     personality: critic
     terminal:
       renderer: screen
@@ -104,7 +108,7 @@ agents:
   opencode-reviewer:
     enabled: false
     command: ["opencode", "--model", "github-copilot/claude-sonnet-4.6"]
-    role: [reviewer]
+    role: [voter, review]
     personality: pessimist
     terminal:
       renderer: screen

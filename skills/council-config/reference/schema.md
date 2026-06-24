@@ -37,14 +37,16 @@ names unique after case-folding.
 | `cwd`          | str         | `"."`                | Working dir. |
 | `color`        | str         | —                    | 256-color index (`"212"`) or hex (`"#ff5f87"`) tinting the pane border; falls back to the personality color. |
 | `personality`  | str         | —                    | Name of a personality (injects `prompt_prefix`). |
-| `role`         | list[str]   | `[worker, reviewer]` | `[worker]`, `[reviewer]`, or both. **Empty = both roles.** |
+| `role`         | list[str]   | all phases | One token per phase: `planner`, `builder`, `voter`, `review`. **Empty = all phases.** Legacy: `worker`=`planner`+`builder`, bare `reviewer`=`voter`+`review` (use `review` for review-only). |
 | `env`          | map         | —                    | Extra env merged over top-level `env` (this wins). Experimental: needs `experimental.setup_env`. |
 | `terminal`     | map         | —                    | See terminal table. |
 | `orchestration`| map         | —                    | See orchestration table. |
 
-**Roles** select phases: `worker` → plan + build (produces work); `reviewer` →
-vote + review (judges work). Self-judging is always prevented. Personalities are
-orthogonal — they only inject prompt text.
+**Roles** select phases, one token each: `planner` → plan, `builder` → build,
+`voter` → vote, `review` → review. Omit for all phases. Legacy aliases: `worker`
+= plan + build (produces work); a bare `reviewer` = vote + review (judges work) —
+use `review` for a review-only agent. Self-judging is always prevented.
+Personalities are orthogonal — they only inject prompt text.
 
 ### `agents.<name>.terminal`
 
@@ -181,7 +183,7 @@ auto-approval flags.
 > `--allow-all-tools`, `--full-auto`, `--force`, `--yolo`, `--auto-approve`,
 > `--dangerously-bypass-approvals-and-sandbox`.
 
-## Minimal overlay example (worker + reviewer)
+## Minimal overlay example (planner/builder + voter/review)
 
 ```yaml
 # .council.yaml — git-excluded locally via .git/info/exclude; do not commit.
@@ -214,7 +216,7 @@ agents:
   codex-worker:
     enabled: true
     command: ["codex"]
-    role: [worker]
+    role: [planner, builder]
     personality: pragmatist
     terminal:
       send_mode: paste
@@ -223,7 +225,7 @@ agents:
   copilot-reviewer:
     enabled: true
     command: ["copilot"]
-    role: [reviewer]
+    role: [voter, review]
     personality: critic
     terminal:
       submit_sequence: cr

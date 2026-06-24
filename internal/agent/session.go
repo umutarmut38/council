@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/umutarmut38/council/internal/config"
@@ -46,11 +47,26 @@ type Session struct {
 	ExitCode   *int
 
 	conn        ptyConn
-	rawLog      *os.File
+	rawLog      atomic.Pointer[os.File]
 	desiredCols int
 	desiredRows int
 	mu          sync.Mutex
+
+	// Until EnableRawLog attaches a file (the interactive run dir is created
+	// lazily on the first prompt), pre-prompt PTY output — banners, auth
+	// prompts, startup errors, early exits — is buffered here and flushed into
+	// the log once it exists, so it isn't lost. Guarded by rawMu, capped at
+	// maxRawBuffer.
+	rawMu         sync.Mutex
+	rawBuf        []byte
+	rawBufFlushed bool
 }
+
+// maxRawBuffer bounds the pre-run raw-output buffer per session so an agent that
+// streams a lot before the first prompt can't grow it without limit. The
+// earliest bytes (startup banner/auth prompt) are the useful ones, so buffering
+// stops once full rather than evicting them.
+const maxRawBuffer = 1 << 20 // 1 MiB
 
 func NewSession(name string, cfg config.AgentConfig, rawLogPath string) *Session {
 	return &Session{
@@ -65,18 +81,30 @@ func (s *Session) Start(onOutput OutputFunc, onExit ExitFunc) error {
 		return errors.New("no command configured")
 	}
 
-	if err := os.MkdirAll(filepath.Dir(s.RawLogPath), 0o755); err != nil {
-		return err
-	}
+	// The raw PTY log lives under the run directory, which the interactive TUI
+	// creates lazily on the first prompt. When no path is set yet, start without
+	// a log; EnableRawLog wires it up once the run exists. Read RawLogPath under
+	// the lock because EnableRawLog may set it concurrently, so a /restart after
+	// the first prompt relaunches with logging from process start.
+	s.mu.Lock()
+	rawPath := s.RawLogPath
+	s.mu.Unlock()
 
-	rawLog, err := os.OpenFile(s.RawLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return err
+	var rawLog *os.File
+	if rawPath != "" {
+		if err := os.MkdirAll(filepath.Dir(rawPath), 0o755); err != nil {
+			return err
+		}
+		f, err := os.OpenFile(rawPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			return err
+		}
+		rawLog = f
 	}
 
 	cwd, err := expandPath(s.Config.CWD)
 	if err != nil {
-		_ = rawLog.Close()
+		closeFile(rawLog)
 		return err
 	}
 
@@ -84,17 +112,96 @@ func (s *Session) Start(onOutput OutputFunc, onExit ExitFunc) error {
 
 	conn, err := startPTY(s.Config, cwd, terminalEnv(s.Config), cols, rows)
 	if err != nil {
-		_ = rawLog.Close()
+		closeFile(rawLog)
 		return err
 	}
 
 	s.mu.Lock()
 	s.conn = conn
-	s.rawLog = rawLog
 	s.mu.Unlock()
+	if rawLog != nil {
+		s.rawLog.Store(rawLog)
+	}
 
 	go s.run(onOutput, onExit)
 	return nil
+}
+
+// EnableRawLog opens the raw PTY log once the run directory exists, turning on
+// persistence for a session that started before the first prompt. Any output
+// buffered before now (startup banner, auth prompt, early errors) is flushed
+// into the log first, so nothing emitted before the first prompt is lost. It is
+// a no-op if logging is already on or the path is empty, and is safe to call
+// from the TUI update loop while the session's reader goroutine is streaming.
+func (s *Session) EnableRawLog(path string) error {
+	if path == "" || s.rawLog.Load() != nil {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+
+	// Flush the pre-run buffer and publish the file under rawMu, so the reader
+	// goroutine (which buffers under the same lock while rawLog is nil) can't
+	// append output that lands neither in the buffer nor the file.
+	s.rawMu.Lock()
+	if s.rawLog.Load() != nil { // lost a race with another EnableRawLog
+		s.rawMu.Unlock()
+		closeFile(f)
+		return nil
+	}
+	if len(s.rawBuf) > 0 {
+		_, _ = f.Write(s.rawBuf)
+	}
+	s.rawBuf = nil
+	s.rawBufFlushed = true
+	s.rawLog.Store(f)
+	s.rawMu.Unlock()
+
+	// Record the path (for a later /restart to relaunch with the same log) and
+	// check whether the session finished before we attached — if so the reader
+	// goroutine already swapped nil out and won't close ours, so reclaim it.
+	s.mu.Lock()
+	s.RawLogPath = path
+	done := s.Done
+	s.mu.Unlock()
+	if done {
+		if rl := s.rawLog.Swap(nil); rl != nil {
+			closeFile(rl)
+		}
+	}
+	return nil
+}
+
+// bufferRawOutput retains PTY output emitted before a raw log is attached. It is
+// called from the reader goroutine when rawLog is nil; the rawMu re-check covers
+// the window where EnableRawLog attaches the file between the Load and the lock.
+func (s *Session) bufferRawOutput(chunk []byte) {
+	s.rawMu.Lock()
+	defer s.rawMu.Unlock()
+	if rl := s.rawLog.Load(); rl != nil {
+		_, _ = rl.Write(chunk)
+		return
+	}
+	if s.rawBufFlushed {
+		return
+	}
+	if room := maxRawBuffer - len(s.rawBuf); room > 0 {
+		if len(chunk) > room {
+			chunk = chunk[:room]
+		}
+		s.rawBuf = append(s.rawBuf, chunk...)
+	}
+}
+
+func closeFile(f *os.File) {
+	if f != nil {
+		_ = f.Close()
+	}
 }
 
 // startupSize resolves the initial pseudo-terminal dimensions, honoring a fixed
@@ -165,6 +272,21 @@ func (s *Session) Terminate() error {
 	done := s.Done
 	s.mu.Unlock()
 
+	// Release the raw log even when the session never started (conn == nil) or
+	// already exited: EnableRawLog may have opened it before the first prompt,
+	// and an open file blocks Windows from deleting the run directory. The
+	// Swap is atomic, so it races safely with the reader goroutine and with
+	// run()'s own close.
+	if rl := s.rawLog.Swap(nil); rl != nil {
+		_ = rl.Close()
+	}
+	// Drop any pre-run buffer (no run dir was ever attached to flush it to) and
+	// stop the reader from buffering more.
+	s.rawMu.Lock()
+	s.rawBuf = nil
+	s.rawBufFlushed = true
+	s.rawMu.Unlock()
+
 	if done || conn == nil {
 		return nil
 	}
@@ -197,8 +319,10 @@ func (s *Session) run(onOutput OutputFunc, onExit ExitFunc) {
 			n, err := s.conn.Read(buf)
 			if n > 0 {
 				chunk := append([]byte(nil), buf[:n]...)
-				if s.rawLog != nil {
-					_, _ = s.rawLog.Write(chunk)
+				if rl := s.rawLog.Load(); rl != nil {
+					_, _ = rl.Write(chunk)
+				} else {
+					s.bufferRawOutput(chunk)
 				}
 				if onOutput != nil {
 					onOutput(s.Name, chunk)
@@ -223,8 +347,8 @@ func (s *Session) run(onOutput OutputFunc, onExit ExitFunc) {
 	finalErr := normalizeReadExitError(lastReadErr, waitErr)
 	_ = s.conn.Close()
 	s.finish(exitCode)
-	if s.rawLog != nil {
-		_ = s.rawLog.Close()
+	if rl := s.rawLog.Swap(nil); rl != nil {
+		_ = rl.Close()
 	}
 	if onExit != nil {
 		onExit(s.Name, exitCode, finalErr)

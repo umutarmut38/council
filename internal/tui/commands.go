@@ -160,8 +160,38 @@ func (m *Model) completeCommand() bool {
 	return false
 }
 
+// ensureRun realizes the deferred run directory the first time the user sends a
+// prompt and turns on raw PTY logging for every session. It is idempotent — the
+// store's Ensure and each session's EnableRawLog are no-ops once done — and a
+// no-op when an orchestration phase already created a run. Keeping it on the
+// interactive send paths (not the shared low-level helpers) means simply
+// launching the TUI never creates a run directory.
+func (m *Model) ensureRun() error {
+	if m.Store == nil {
+		return nil
+	}
+	newlyStarted := !m.Store.Started()
+	if err := m.Store.Ensure(); err != nil {
+		return err
+	}
+	for _, view := range m.Agents {
+		// Best-effort: a raw-log failure shouldn't block the prompt, but surface
+		// it in the affected pane rather than swallowing it.
+		if err := view.Session.EnableRawLog(m.Store.RawLogPath(view.Session.Name)); err != nil {
+			view.addDisplayLine("council: raw logging unavailable: " + err.Error())
+		}
+	}
+	if newlyStarted && m.initialPrompt != "" {
+		if err := m.Store.SavePrompt(m.initialPrompt); err != nil {
+			m.Status = "warning: could not save prompt.txt: " + err.Error()
+		}
+	}
+	return nil
+}
+
 func (m *Model) submitInput() tea.Cmd {
-	text := strings.TrimSpace(m.PromptInput)
+	raw := m.PromptInput
+	text := strings.TrimSpace(raw)
 	m.PromptInput = ""
 	if text == "" {
 		return nil
@@ -174,12 +204,22 @@ func (m *Model) submitInput() tea.Cmd {
 	if strings.HasPrefix(text, "@") {
 		first := strings.TrimPrefix(strings.Fields(text)[0], "@")
 		if strings.EqualFold(first, "all") || m.agentExists(first) {
+			if err := m.ensureRun(); err != nil {
+				m.PromptInput = raw // don't swallow the user's prompt
+				m.Status = "cannot start run: " + err.Error()
+				return nil
+			}
 			m.handleAddressedInput(text)
 			return nil
 		}
 	}
 
 	text = m.expandRefs(text)
+	if err := m.ensureRun(); err != nil {
+		m.PromptInput = raw // don't swallow the user's prompt
+		m.Status = "cannot start run: " + err.Error()
+		return nil
+	}
 	switch m.Target {
 	case TargetAll:
 		m.sendAll(text)
@@ -254,6 +294,10 @@ func (m *Model) handleCommand(text string) (bool, tea.Cmd) {
 			m.Status = "usage: /all message"
 			return true, nil
 		}
+		if err := m.ensureRun(); err != nil {
+			m.Status = "cannot start run: " + err.Error()
+			return true, nil
+		}
 		m.sendAll(m.expandRefs(rest))
 		m.Status = "sent to all agents"
 	case "send":
@@ -263,6 +307,10 @@ func (m *Model) handleCommand(text string) (bool, tea.Cmd) {
 		}
 		name := fields[1]
 		message := strings.TrimSpace(strings.TrimPrefix(rest, name))
+		if err := m.ensureRun(); err != nil {
+			m.Status = "cannot start run: " + err.Error()
+			return true, nil
+		}
 		m.sendNamed(name, message)
 	case "focus":
 		if len(fields) < 2 {
@@ -327,7 +375,7 @@ func (m *Model) handleCommand(text string) (bool, tea.Cmd) {
 	case "judge":
 		m.cmdJudge(rest)
 	case "refine":
-		return true, m.cmdRefine()
+		return true, m.cmdRefine(rest)
 	case "artifacts":
 		m.cmdArtifacts()
 	case "edit":
@@ -515,6 +563,7 @@ func (m *Model) handleAddressedInput(text string) {
 
 	target := strings.TrimPrefix(fields[0], "@")
 	message := m.expandRefs(strings.TrimSpace(strings.TrimPrefix(text, fields[0])))
+	// The caller (submitInput) has already realized the run before dispatching.
 	if strings.EqualFold(target, "all") {
 		m.sendAll(message)
 		m.Status = "sent to all agents"
