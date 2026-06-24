@@ -59,7 +59,7 @@ disagreeing in a terminal multiplexer while you drink coffee.
 More seriously:
 
 - Ask several agents the same question and compare answers live.
-- Give agents per-phase roles: `planner`, `builder`, `voter`, `reviewer` (and
+- Give agents per-phase roles: `planner`, `builder`, `voter`, `review` (and
   the reviewer silently judges you for wasting all those tokens).
 - Give agents behavioral personalities: `pragmatist`, `critic`, `pessimist`,
   or whatever chaos you desire.
@@ -269,7 +269,7 @@ agents:
   copilot-reviewer:
     enabled: true
     command: ["gh", "copilot"]
-    role: [voter, reviewer]
+    role: [voter, review]
 ```
 
 Personalities decide **how an agent behaves**:

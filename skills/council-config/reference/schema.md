@@ -183,7 +183,7 @@ auto-approval flags.
 > `--allow-all-tools`, `--full-auto`, `--force`, `--yolo`, `--auto-approve`,
 > `--dangerously-bypass-approvals-and-sandbox`.
 
-## Minimal overlay example (builder + reviewer)
+## Minimal overlay example (planner/builder + voter/review)
 
 ```yaml
 # .council.yaml — git-excluded locally via .git/info/exclude; do not commit.
