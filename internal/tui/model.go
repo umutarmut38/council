@@ -440,7 +440,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case initialPromptMsg:
 		if !m.initialPromptSent {
-			m.ensureRun()
+			if err := m.ensureRun(); err != nil {
+				m.Status = "cannot start run: " + err.Error()
+				return m, nil
+			}
 			m.sendAll(string(msg))
 			m.initialPromptSent = true
 			m.Status = "broadcast initial prompt"
@@ -448,7 +451,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case initialAgentPromptsMsg:
 		if !m.initialPromptSent {
-			m.ensureRun()
+			if err := m.ensureRun(); err != nil {
+				m.Status = "cannot start run: " + err.Error()
+				return m, nil
+			}
 			m.sendPrompts(map[string]string(msg))
 			m.initialPromptSent = true
 			m.Status = "sent initial prompts"

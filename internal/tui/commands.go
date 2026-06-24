@@ -166,14 +166,13 @@ func (m *Model) completeCommand() bool {
 // no-op when an orchestration phase already created a run. Keeping it on the
 // interactive send paths (not the shared low-level helpers) means simply
 // launching the TUI never creates a run directory.
-func (m *Model) ensureRun() {
+func (m *Model) ensureRun() error {
 	if m.Store == nil {
-		return
+		return nil
 	}
 	newlyStarted := !m.Store.Started()
 	if err := m.Store.Ensure(); err != nil {
-		m.Status = "run dir error: " + err.Error()
-		return
+		return err
 	}
 	for _, view := range m.Agents {
 		_ = view.Session.EnableRawLog(m.Store.RawLogPath(view.Session.Name))
@@ -181,6 +180,7 @@ func (m *Model) ensureRun() {
 	if newlyStarted && m.initialPrompt != "" {
 		_ = m.Store.SavePrompt(m.initialPrompt)
 	}
+	return nil
 }
 
 func (m *Model) submitInput() tea.Cmd {
@@ -203,7 +203,10 @@ func (m *Model) submitInput() tea.Cmd {
 	}
 
 	text = m.expandRefs(text)
-	m.ensureRun()
+	if err := m.ensureRun(); err != nil {
+		m.Status = "cannot start run: " + err.Error()
+		return nil
+	}
 	switch m.Target {
 	case TargetAll:
 		m.sendAll(text)
@@ -539,7 +542,10 @@ func (m *Model) handleAddressedInput(text string) {
 
 	target := strings.TrimPrefix(fields[0], "@")
 	message := m.expandRefs(strings.TrimSpace(strings.TrimPrefix(text, fields[0])))
-	m.ensureRun()
+	if err := m.ensureRun(); err != nil {
+		m.Status = "cannot start run: " + err.Error()
+		return
+	}
 	if strings.EqualFold(target, "all") {
 		m.sendAll(message)
 		m.Status = "sent to all agents"

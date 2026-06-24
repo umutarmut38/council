@@ -69,8 +69,15 @@ one granular role per phase:
 | `planner` | `plan` (writes a plan) |
 | `builder` | `build` (implements the winning plan) |
 | `voter` | `vote` (ranks the anonymized plans) |
-| `reviewer` | `review` (ranks the built diffs) |
+| `reviewer` | `review` (ranks the built diffs) — but read the note below |
 | *(omitted)* | all phases — the default, backward compatible |
+
+> **`reviewer` is special.** Because it doubles as the legacy alias, a role list
+> of just `[reviewer]` expands to `voter` + `reviewer` (**vote + review**), *not*
+> review-only. The literal "review" meaning only applies once a
+> `planner`/`builder`/`voter` token is also present — and that token then adds
+> its own phase, so `[planner, reviewer]` is plan + review. There is no way to
+> select `review` entirely on its own.
 
 ```yaml
 agents:

@@ -256,12 +256,13 @@ func (m *Model) launchEditor(path string) {
 	m.Status = "editing " + filepath.Base(path)
 }
 
-// editorRawLogPath returns a raw-log path for the editor session. Session.Start
-// requires a writable path, so fall back to a temp file when there is no run
-// store.
+// editorRawLogPath returns a raw-log path for the editor session. Opening the
+// editor must not create a run on its own, so before the run store is realized
+// (i.e. before the first prompt) it falls back to a temp file — the editor
+// session still gets somewhere to log without forcing the run dir into being.
+// (Session.Start also tolerates an empty path, but the editor benefits from a
+// persistent log.)
 func editorRawLogPath(m *Model) string {
-	// Only log into the run dir once it exists; opening the editor must not
-	// create a run on its own.
 	if m.Store != nil && m.Store.Started() {
 		return m.Store.RawLogPath(editorSessionName)
 	}

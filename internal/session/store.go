@@ -69,12 +69,9 @@ func (s *Store) Ensure() error {
 	if err != nil {
 		return err
 	}
-	s.RunDir = runDir
-	s.TranscriptDir = filepath.Join(runDir, "transcripts")
-	s.RawDir = filepath.Join(runDir, "raw")
-	s.Timestamp = timestamp
-
-	for _, dir := range []string{s.TranscriptDir, s.RawDir} {
+	transcriptDir := filepath.Join(runDir, "transcripts")
+	rawDir := filepath.Join(runDir, "raw")
+	for _, dir := range []string{transcriptDir, rawDir} {
 		if err := os.MkdirAll(dir, fsperm.Dir()); err != nil {
 			return err
 		}
@@ -89,6 +86,13 @@ func (s *Store) Ensure() error {
 			return err
 		}
 	}
+	// Mark the store realized only after every write succeeds, so a failure
+	// leaves Started() == false and Ensure stays retryable (a partially created
+	// run dir may be left behind, which is harmless).
+	s.RunDir = runDir
+	s.TranscriptDir = transcriptDir
+	s.RawDir = rawDir
+	s.Timestamp = timestamp
 	s.effectiveConfig, s.sources = nil, nil
 	return nil
 }

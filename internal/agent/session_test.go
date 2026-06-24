@@ -43,7 +43,12 @@ func TestEnableRawLogIsDeferredAndIdempotent(t *testing.T) {
 	if s.rawLog.Load() != first {
 		t.Fatal("EnableRawLog should be idempotent once logging is on")
 	}
-	_ = first.Close()
+	// Terminate swaps the pointer back to nil and closes the file, leaving the
+	// session in a clean state (and not holding an open handle on Windows).
+	_ = s.Terminate()
+	if s.rawLog.Load() != nil {
+		t.Fatal("Terminate should clear the raw log pointer")
+	}
 }
 
 func TestTerminalEnvAppendsConfigEnv(t *testing.T) {

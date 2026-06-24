@@ -71,13 +71,16 @@ const (
 // pure and idempotent. The rule, applied case-insensitively after trimming:
 //
 //   - Empty list -> empty (means "all phases"; HasRole returns true for any).
-//   - Any granular token present (planner/builder/voter/reviewer) -> the list is
-//     literal and returned as-is; here `reviewer` means review-only.
-//   - Only legacy tokens (worker and/or reviewer, nothing granular) -> expand
-//     `worker -> planner, builder` and `reviewer -> voter, reviewer` (the legacy
-//     judge-both meaning).
+//   - Any of planner/builder/voter present -> the whole list is literal and
+//     returned as-is. A `reviewer` token then means review-only. Note `reviewer`
+//     is deliberately NOT a trigger on its own, because it doubles as the legacy
+//     alias below.
+//   - Only legacy tokens (worker and/or reviewer, with no planner/builder/voter)
+//     -> expand `worker -> planner, builder` and `reviewer -> voter, reviewer`
+//     (the legacy judge-both meaning). So a bare `[reviewer]` is vote+review, not
+//     review-only.
 //
-// Idempotency holds because the legacy branch always introduces a granular token
+// Idempotency holds because the legacy branch always introduces a trigger token
 // (planner or voter), so a second pass takes the literal branch. Mixing a lone
 // legacy `worker` with granular tokens leaves it literal (and inert, since it
 // matches no phase) — don't mix legacy and granular tokens.
