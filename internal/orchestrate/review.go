@@ -151,6 +151,7 @@ func (c *Controller) ensureBuildDiffs() {
 	// the total git work regardless of how many worktrees need capturing.
 	ctx, cancel := context.WithTimeout(context.Background(), compareScanBudget)
 	defer cancel()
+	var warned []BuildCheck
 	for _, wt := range worktrees {
 		c.worktrees[wt.Agent] = wt.Path
 		if ctx.Err() != nil {
@@ -163,7 +164,7 @@ func (c *Controller) ensureBuildDiffs() {
 		}
 		// Cheap read-only probe first: it decides whether to skip, refresh, or
 		// drop the heavier stage+diff so /compare doesn't stage idle worktrees.
-		changed, ok := worktreeProbe(wt.Path, base)
+		changed, ok := worktreeProbe(ctx, wt.Path, base)
 		if ok && !changed {
 			// Conclusively back at base: drop any stale diff (best-effort) so
 			// /compare doesn't keep showing changes that no longer exist, then
@@ -176,8 +177,14 @@ func (c *Controller) ensureBuildDiffs() {
 		if hasDiff {
 			continue // already captured and still dirty/inconclusive; /review re-captures
 		}
-		_, _ = c.captureBuildDiff(ctx, wt.Agent, wt.Path, base)
+		// Surface best-effort capture failures: without this, a failed git
+		// add/diff would leave /compare reporting "no build changes yet" with no
+		// way to diagnose. Logged to the same warnings.log /review uses.
+		if _, warnings := c.captureBuildDiff(ctx, wt.Agent, wt.Path, base); len(warnings) > 0 {
+			warned = append(warned, BuildCheck{Agent: wt.Agent, Warnings: warnings})
+		}
 	}
+	c.logCheckWarnings(warned)
 }
 
 // logCheckWarnings appends ignored best-effort errors to a per-run warnings
