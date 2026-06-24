@@ -69,6 +69,7 @@ type initialPromptMsg string
 type initialAgentPromptsMsg map[string]string
 type phasePromptsMsg map[string]string
 type pollArtifactsMsg struct{}
+type buildProgressMsg struct{}
 
 // animTickMsg drives the activity-animation frame loop (the rotating 3D head
 // and the /eva intro). The loop reschedules itself while it is live.
@@ -484,6 +485,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case pollArtifactsMsg:
 		return m, m.pollArtifacts()
+	case buildProgressMsg:
+		return m, m.buildProgress()
 	case reviewReadyMsg:
 		return m.handleReviewReady(msg)
 	case animTickMsg:

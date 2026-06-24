@@ -83,14 +83,23 @@ func (m *Model) progressFromSummary(summary orchestrate.RunSummary) *runProgress
 		p.Adopted = adopted
 	}
 
+	// During the build, diffs aren't captured until /review, so derive the Build
+	// count from live worktree activity instead of letting the rail sit at 0/N
+	// and then snap to N/N at review. Once any diff exists, trust the diffs.
+	buildActive := 0
+	if m.phase == "build" && len(summary.Diffs) == 0 && m.orch != nil {
+		buildActive, _ = m.orch.BuildProgress()
+	}
+	buildDone := buildRailDone(m.phase, len(summary.Diffs), buildActive)
+
 	planExpected := m.phaseExpected("plan", config.PhasePlan, len(summary.Plans))
 	voteExpected := m.phaseExpected("vote", config.PhaseVote, len(summary.Votes))
-	buildExpected := m.phaseExpected("build", config.PhaseBuild, len(summary.Diffs))
+	buildExpected := m.phaseExpected("build", config.PhaseBuild, buildDone)
 	reviewExpected := m.phaseExpected("review", config.PhaseReview, len(summary.Reviews))
 
 	plan := phaseInfo{Label: "Plan", Done: len(summary.Plans), Expected: planExpected, Counted: true}
 	vote := phaseInfo{Label: "Vote", Done: len(summary.Votes), Expected: voteExpected, Counted: true}
-	build := phaseInfo{Label: "Build", Done: len(summary.Diffs), Expected: buildExpected, Counted: len(summary.Diffs) > 0 || m.phase == "build"}
+	build := phaseInfo{Label: "Build", Done: buildDone, Expected: buildExpected, Counted: buildDone > 0 || m.phase == "build"}
 	review := phaseInfo{Label: "Review", Done: len(summary.Reviews), Expected: reviewExpected, Counted: len(summary.Reviews) > 0 || m.phase == "review"}
 	adopt := phaseInfo{Label: "Adopt"}
 
@@ -123,6 +132,17 @@ func (m *Model) progressFromSummary(summary orchestrate.RunSummary) *runProgress
 	p.Next = m.nextCommand(p, summary.Plans, summary.Diffs)
 	p.Phases = []phaseInfo{plan, vote, build, review, adopt}
 	return p
+}
+
+// buildRailDone picks the Build rail's Done count: the captured-diff count once
+// any diff exists (the authoritative post-review number), otherwise — while the
+// build is live — the count of worktrees showing activity, so the rail climbs
+// during the build instead of sitting at 0 until /review.
+func buildRailDone(phase string, diffs, active int) int {
+	if phase == "build" && diffs == 0 {
+		return active
+	}
+	return diffs
 }
 
 // phaseExpected returns how many artifacts a phase should produce: the watch
@@ -158,7 +178,7 @@ func (m *Model) nextCommand(p *runProgress, plans, diffs []string) string {
 		if len(m.pendingBuild) > 0 {
 			return "/start-build"
 		}
-		return "/review when builds finish"
+		return "/review when builds finish · /compare to peek"
 	}
 	switch {
 	case p.Adopted != "":
@@ -258,7 +278,7 @@ func (m Model) contextHint() (string, bool) {
 		if len(m.pendingBuild) > 0 {
 			return "Build staged in worktrees · Next: /start-build (adjust the tools first if needed)", true
 		}
-		return "Build in progress · F2 direct if an agent needs approval · Next: /review when done", true
+		return "Build in progress · F2 direct if an agent needs approval · /compare to peek · Next: /review when done", true
 	}
 	switch {
 	case p.Adopted != "":

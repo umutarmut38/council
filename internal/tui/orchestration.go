@@ -141,7 +141,12 @@ func (m *Model) cmdStartBuild() tea.Cmd {
 	prompts := m.pendingBuild
 	m.pendingBuild = nil
 	m.Status = "build started"
-	return func() tea.Msg { return phasePromptsMsg(prompts) }
+	// Start the progress tick alongside the prompt: the build has no artifact
+	// watcher, so this tick is what makes the Build rail climb as agents work.
+	return tea.Batch(
+		func() tea.Msg { return phasePromptsMsg(prompts) },
+		buildProgressTick(),
+	)
 }
 
 // cmdReview gates the built implementations (run check command per worktree,
@@ -750,6 +755,23 @@ func (m *Model) phaseCmds(prompts map[string]string) tea.Cmd {
 
 func pollAfter() tea.Cmd {
 	return tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg { return pollArtifactsMsg{} })
+}
+
+func buildProgressTick() tea.Cmd {
+	return tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg { return buildProgressMsg{} })
+}
+
+// buildProgress refreshes the cached run progress while the build is live and
+// reschedules itself. The build has no artifact watcher, so this is what makes
+// the Build rail climb as agents change their worktrees. It self-terminates as
+// soon as the phase leaves "build" (e.g. at /review), so it never races the
+// artifact poll that drives the watched phases.
+func (m *Model) buildProgress() tea.Cmd {
+	if m.phase != "build" {
+		return nil
+	}
+	m.refreshProgress()
+	return buildProgressTick()
 }
 
 // pollArtifacts marks panes done as their artifact files appear and finishes the
