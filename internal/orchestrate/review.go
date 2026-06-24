@@ -88,11 +88,17 @@ func (c *Controller) captureBuildDiff(agent, wtPath, base string) (changed bool,
 		warnings = append(warnings, fmt.Sprintf("git add -A: %v", addErr))
 	}
 	diff, derr := cmdrun.Output(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", wtPath, "diff", "--cached", base}})
-	if derr != nil {
+	switch {
+	case derr != nil:
 		warnings = append(warnings, fmt.Sprintf("git diff --cached %s: %v", base, derr))
-	} else if len(strings.TrimSpace(string(diff))) > 0 {
+	case len(strings.TrimSpace(string(diff))) > 0:
 		changed = true
 		_ = os.WriteFile(c.run.BuildDiffPath(agent), diff, fsperm.File())
+	default:
+		// The worktree now matches the base (e.g. an agent reverted work that an
+		// earlier /compare captured). Drop any stale diff so /compare and
+		// AdoptableBuilds don't keep showing changes that no longer exist.
+		_ = os.Remove(c.run.BuildDiffPath(agent))
 	}
 	return changed, warnings
 }

@@ -83,11 +83,11 @@ func (m *Model) progressFromSummary(summary orchestrate.RunSummary) *runProgress
 		p.Adopted = adopted
 	}
 
-	// During the build, diffs aren't captured until /review, so derive the Build
-	// count from live worktree activity instead of letting the rail sit at 0/N
-	// and then snap to N/N at review. Once any diff exists, trust the diffs.
+	// Probe live worktree activity throughout the build, not just until the
+	// first diff: /compare can capture diffs mid-build, and the rail must keep
+	// climbing as more agents start working rather than freezing at that count.
 	buildActive := 0
-	if m.phase == "build" && len(summary.Diffs) == 0 && m.orch != nil {
+	if m.phase == "build" && m.orch != nil {
 		buildActive, _ = m.orch.BuildProgress()
 	}
 	buildDone := buildRailDone(m.phase, len(summary.Diffs), buildActive)
@@ -134,12 +134,13 @@ func (m *Model) progressFromSummary(summary orchestrate.RunSummary) *runProgress
 	return p
 }
 
-// buildRailDone picks the Build rail's Done count: the captured-diff count once
-// any diff exists (the authoritative post-review number), otherwise — while the
-// build is live — the count of worktrees showing activity, so the rail climbs
-// during the build instead of sitting at 0 until /review.
+// buildRailDone picks the Build rail's Done count. While the build is live it
+// tracks live worktree activity, but diffs may already be captured (via
+// /compare), so it uses max(diffs, active): a newly-active worktree still
+// advances the rail, and the count never drops below what was captured. Outside
+// the build it is simply the captured-diff count (the authoritative number).
 func buildRailDone(phase string, diffs, active int) int {
-	if phase == "build" && diffs == 0 {
+	if phase == "build" && active > diffs {
 		return active
 	}
 	return diffs
