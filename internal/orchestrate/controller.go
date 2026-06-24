@@ -368,7 +368,7 @@ func (c *Controller) RefinePrompts(note string) (map[string]string, error) {
 // re-anonymizes and re-tallies from the current plans. Used after a refine round.
 func (c *Controller) ResetVote() error {
 	c.refs = nil
-	return c.run.ResetVote(c.allAgentsForPhase(config.PhaseVote))
+	return c.run.ResetVote()
 }
 
 // ClearRefineBackups removes the <agent>.orig.md plan backups created by a

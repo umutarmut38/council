@@ -585,6 +585,14 @@ func TestResetVote(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A ballot left by a voter that is no longer in scope (e.g. an agent that was
+	// excluded after voting). ResetVote must clear every derived artifact, not
+	// just the current voter set, or this stale ballot could later be mistaken
+	// for an already-cast vote when the agent re-enters scope.
+	staleBallot := run.VotePath("stale-voter")
+	if err := os.WriteFile(staleBallot, []byte("RANKING: A\nWINNER: A"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	for _, letter := range []string{"A", "B"} {
 		if err := os.WriteFile(run.AnonPlanPath(letter), []byte("anon "+letter), 0o644); err != nil {
 			t.Fatal(err)
@@ -604,7 +612,7 @@ func TestResetVote(t *testing.T) {
 
 	gone := []string{
 		run.VoteRefsPath(), run.ResultPath(), run.SummaryPath(),
-		run.VotePath("a"), run.VotePath("b"),
+		run.VotePath("a"), run.VotePath("b"), staleBallot,
 		run.AnonPlanPath("A"), run.AnonPlanPath("B"),
 	}
 	for _, p := range gone {
