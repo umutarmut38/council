@@ -514,6 +514,169 @@ func TestRefineSinglePlanNoVotes(t *testing.T) {
 	}
 }
 
+// TestRefinePromptsAllPlanners: /refine fans out to every planner that produced
+// a plan, backs each up to .orig.md, removes the live files, and tells each
+// refiner the anonymized letter its plan was shown as.
+func TestRefinePromptsAllPlanners(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := resumeTestController(t, root)
+
+	for _, name := range []string{"a", "b"} {
+		if err := os.WriteFile(ctrl.Run().PlanPath(name), []byte("plan "+name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(ctrl.Run().VotePath(name), []byte("RANKING: A > B\nWINNER: A"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	refs := []PlanRef{{Letter: "A", Agent: "a"}, {Letter: "B", Agent: "b"}}
+	if err := ctrl.Run().SaveVoteRefs(refs); err != nil {
+		t.Fatal(err)
+	}
+	res := Tally([]Ballot{{Voter: "a", Ranking: []string{"B"}}, {Voter: "b", Ranking: []string{"A"}}}, refs)
+	if err := ctrl.Run().WriteResult(res, refs); err != nil {
+		t.Fatal(err)
+	}
+
+	prompts, err := ctrl.RefinePrompts("")
+	if err != nil {
+		t.Fatalf("RefinePrompts: %v", err)
+	}
+	if len(prompts) != 2 {
+		t.Fatalf("want 2 refine prompts, got %d: %v", len(prompts), prompts)
+	}
+	wantLetter := map[string]string{"a": "Plan A", "b": "Plan B"}
+	for _, name := range []string{"a", "b"} {
+		p, ok := prompts[name]
+		if !ok {
+			t.Fatalf("planner %q was not prompted to refine", name)
+		}
+		if !strings.Contains(p, "REVIEWER CRITIQUES") {
+			t.Fatalf("refine prompt for %q is missing critiques:\n%s", name, p)
+		}
+		if !strings.Contains(p, wantLetter[name]) {
+			t.Fatalf("refine prompt for %q should name its own %s:\n%s", name, wantLetter[name], p)
+		}
+		// The live plan is moved aside so the rewrite can be watched.
+		if fileExists(ctrl.Run().PlanPath(name)) {
+			t.Fatalf("live plan for %q should be removed during refine", name)
+		}
+		origPath := strings.TrimSuffix(ctrl.Run().PlanPath(name), ".md") + ".orig.md"
+		if !fileExists(origPath) {
+			t.Fatalf("plan for %q should be backed up to %s", name, origPath)
+		}
+	}
+}
+
+// TestResetVote clears the prior vote's derived artifacts so a revote starts
+// fresh, while leaving the plans themselves intact.
+func TestResetVote(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := resumeTestController(t, root)
+	run := ctrl.Run()
+
+	for _, name := range []string{"a", "b"} {
+		if err := os.WriteFile(run.PlanPath(name), []byte("plan "+name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(run.VotePath(name), []byte("RANKING: A\nWINNER: A"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A ballot left by a voter that is no longer in scope (e.g. an agent that was
+	// excluded after voting). ResetVote must clear every derived artifact, not
+	// just the current voter set, or this stale ballot could later be mistaken
+	// for an already-cast vote when the agent re-enters scope.
+	staleBallot := run.VotePath("stale-voter")
+	if err := os.WriteFile(staleBallot, []byte("RANKING: A\nWINNER: A"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, letter := range []string{"A", "B"} {
+		if err := os.WriteFile(run.AnonPlanPath(letter), []byte("anon "+letter), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	refs := []PlanRef{{Letter: "A", Agent: "a"}, {Letter: "B", Agent: "b"}}
+	if err := run.SaveVoteRefs(refs); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.WriteResult(Tally([]Ballot{{Voter: "b", Ranking: []string{"A"}}}, refs), refs); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ctrl.ResetVote(); err != nil {
+		t.Fatalf("ResetVote: %v", err)
+	}
+
+	gone := []string{
+		run.VoteRefsPath(), run.ResultPath(), run.SummaryPath(),
+		run.VotePath("a"), run.VotePath("b"), staleBallot,
+		run.AnonPlanPath("A"), run.AnonPlanPath("B"),
+	}
+	for _, p := range gone {
+		if fileExists(p) {
+			t.Fatalf("ResetVote should have removed %s", p)
+		}
+	}
+	for _, name := range []string{"a", "b"} {
+		if !fileExists(run.PlanPath(name)) {
+			t.Fatalf("ResetVote must not remove the plan for %q", name)
+		}
+	}
+}
+
+// TestRevoteAfterResetReanonymizes: after a reset, VotePrompts re-anonymizes from
+// the current (refined) plans rather than reusing the stale anonymized copies.
+func TestRevoteAfterResetReanonymizes(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := resumeTestController(t, root)
+	run := ctrl.Run()
+
+	for _, name := range []string{"a", "b"} {
+		if err := os.WriteFile(run.PlanPath(name), []byte("plan "+name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := ctrl.VotePrompts(); err != nil {
+		t.Fatalf("first VotePrompts: %v", err)
+	}
+
+	if err := ctrl.ResetVote(); err != nil {
+		t.Fatalf("ResetVote: %v", err)
+	}
+	// Refined plan for "a".
+	if err := os.WriteFile(run.PlanPath("a"), []byte("refined plan a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := ctrl.VotePrompts(); err != nil {
+		t.Fatalf("second VotePrompts: %v", err)
+	}
+	refs, err := run.LoadVoteRefs()
+	if err != nil {
+		t.Fatalf("refs should be regenerated: %v", err)
+	}
+	var letterForA string
+	for _, r := range refs {
+		if r.Agent == "a" {
+			letterForA = r.Letter
+		}
+	}
+	if letterForA == "" {
+		t.Fatal("no letter assigned to a after revote")
+	}
+	anon, err := os.ReadFile(run.AnonPlanPath(letterForA))
+	if err != nil {
+		t.Fatalf("anonymized copy missing for a's revote letter: %v", err)
+	}
+	if string(anon) != "refined plan a" {
+		t.Fatalf("anonymized plan for a = %q, want the refined content", string(anon))
+	}
+}
+
 func resumeTestController(t *testing.T, root string) *Controller {
 	t.Helper()
 	cfg := config.Config{
@@ -601,7 +764,8 @@ func TestResumeTargetCoversEveryStage(t *testing.T) {
 }
 
 // TestResumeRefineRoundKeepsRefinePrompt: an interrupted /refine must resume
-// with the refine prompt (critiques + rewrite), not a from-scratch plan prompt.
+// with the refine prompt (critiques + rewrite) for every refining planner, not a
+// from-scratch plan prompt.
 func TestResumeRefineRoundKeepsRefinePrompt(t *testing.T) {
 	root := initRepo(t)
 	chdir(t, root)
@@ -621,12 +785,12 @@ func TestResumeRefineRoundKeepsRefinePrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Start the refine round (backs up the plan, removes the live file), save
+	// Start the refine round (backs up every plan, removes the live files), save
 	// the phase as the TUI would, then simulate a crash + resume.
 	if _, err := ctrl.RefinePrompts(""); err != nil {
 		t.Fatal(err)
 	}
-	if err := ctrl.SaveActivePhase(config.PhasePlan, []string{"a"}, true); err != nil {
+	if err := ctrl.SaveActivePhase(config.PhasePlan, []string{"a", "b"}, true); err != nil {
 		t.Fatal(err)
 	}
 
@@ -637,14 +801,57 @@ func TestResumeRefineRoundKeepsRefinePrompt(t *testing.T) {
 	if target.Phase != config.PhasePlan {
 		t.Fatalf("phase = %q, want plan", target.Phase)
 	}
-	prompt := target.Prompts["a"]
-	if prompt == "" {
-		t.Fatal("winner should be prompted on refine resume")
-	}
-	if !strings.Contains(prompt, "REVIEWER CRITIQUES") || !strings.Contains(prompt, "refine") {
-		t.Fatalf("resume used a plain plan prompt, not the refine prompt:\n%s", prompt)
+	for _, name := range []string{"a", "b"} {
+		prompt := target.Prompts[name]
+		if prompt == "" {
+			t.Fatalf("planner %q should be prompted on refine resume", name)
+		}
+		if !strings.Contains(prompt, "REVIEWER CRITIQUES") || !strings.Contains(prompt, "refine") {
+			t.Fatalf("resume used a plain plan prompt for %q, not the refine prompt:\n%s", name, prompt)
+		}
 	}
 	if !strings.Contains(target.Status, "refining") {
 		t.Fatalf("status = %q, want refining", target.Status)
+	}
+}
+
+// TestResumeRefineSkipsFinishedPlanner: if a refine round was interrupted after
+// one planner already wrote its refined plan, resume re-prompts only the planner
+// whose plan is still missing — the finished one is left untouched.
+func TestResumeRefineSkipsFinishedPlanner(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := resumeTestController(t, root)
+
+	for _, name := range []string{"a", "b"} {
+		if err := os.WriteFile(ctrl.Run().PlanPath(name), []byte("plan "+name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	refs := []PlanRef{{Letter: "A", Agent: "a"}, {Letter: "B", Agent: "b"}}
+	res := Tally([]Ballot{{Voter: "b", Ranking: []string{"A"}}}, refs)
+	if err := ctrl.Run().WriteResult(res, refs); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ctrl.RefinePrompts(""); err != nil {
+		t.Fatal(err)
+	}
+	// Planner "a" finished refining: its live plan reappears.
+	if err := os.WriteFile(ctrl.Run().PlanPath("a"), []byte("refined a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.SaveActivePhase(config.PhasePlan, []string{"a", "b"}, true); err != nil {
+		t.Fatal(err)
+	}
+
+	target, err := reopen(t, ctrl).ResumeTarget()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := target.Prompts["a"]; ok {
+		t.Fatal("finished planner a should not be re-prompted")
+	}
+	if target.Prompts["b"] == "" {
+		t.Fatal("unfinished planner b should be re-prompted")
 	}
 }

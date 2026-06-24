@@ -72,18 +72,22 @@ WINNING PLAN (read this file):
 %s`, strings.TrimSpace(issue), strings.TrimSpace(planPath))
 }
 
-// RefinePrompt asks the winning planner to absorb the reviewers' critiques and
-// rewrite its plan before the build starts.
-func RefinePrompt(issue, origPlanPath string, votePaths []string, artifactPath, note string) string {
+// RefinePrompt asks a planner to absorb the council's critiques and rewrite its
+// plan before the council revotes. ownLetter, when set, is the anonymized letter
+// this planner's plan was shown as, so it can find the critiques aimed at it.
+func RefinePrompt(issue, origPlanPath string, votePaths []string, artifactPath, note, ownLetter string) string {
 	var b strings.Builder
 	if len(votePaths) > 0 {
-		b.WriteString("Your plan won the council vote. Before the build starts, refine it using the reviewers' critiques.\n\nISSUE:\n")
+		b.WriteString("Your plan went to a council vote. Before the council revotes, refine it using the reviewers' critiques.\n\nISSUE:\n")
 	} else {
-		b.WriteString("Refine your plan before the build starts.\n\nISSUE:\n")
+		b.WriteString("Refine your plan before the council revotes.\n\nISSUE:\n")
 	}
 	b.WriteString(strings.TrimSpace(issue))
 	fmt.Fprintf(&b, "\n\nYOUR ORIGINAL PLAN (read this file):\n%s\n", origPlanPath)
 	if len(votePaths) > 0 {
+		if ownLetter != "" {
+			fmt.Fprintf(&b, "\nYour plan was shown to the council as Plan %s — focus on the critiques of that plan.\n", ownLetter)
+		}
 		b.WriteString("\nREVIEWER CRITIQUES (read each file):\n")
 		for _, path := range votePaths {
 			fmt.Fprintf(&b, "- %s\n", path)

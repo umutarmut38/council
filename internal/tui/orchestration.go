@@ -6,6 +6,7 @@ package tui
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -530,8 +531,8 @@ func (m *Model) cmdJudge(rest string) {
 	}
 }
 
-// cmdRefine runs the consensus round: the winning planner absorbs the
-// reviewers' critiques and rewrites its plan before /build.
+// cmdRefine runs the consensus round: every planner that produced a plan absorbs
+// the council's critiques and rewrites its plan, after which the council revotes.
 func (m *Model) cmdRefine(note string) tea.Cmd {
 	if m.orch == nil {
 		m.Status = "orchestration unavailable"
@@ -552,9 +553,10 @@ func (m *Model) cmdRefine(note string) tea.Cmd {
 	for name := range prompts {
 		participants = append(participants, name)
 	}
+	sort.Strings(participants)
 	m.orch.SetScope(participants)
 	m.beginPhase("refine", config.PhasePlan, prompts)
-	m.Status = "refining the winning plan with " + strings.Join(participants, ", ")
+	m.Status = fmt.Sprintf("refining %d plan(s) with %s", len(participants), strings.Join(participants, ", "))
 	return m.phaseCmds(m.orch.InteractivePrompts(config.PhasePlan, prompts))
 }
 
@@ -785,17 +787,39 @@ func (m *Model) finishPhase() {
 		return
 	}
 	switch m.phase {
-	case "plan":
+	// A refine round runs as a plan phase and is reopened under the "plan" label
+	// on resume, so both labels share this collect path. Whether to run the
+	// revote reset is decided by RefineRoundActive() (the leftover
+	// <agent>.orig.md backups), not the phase label — otherwise a resumed refine
+	// would finish as a plain plan phase and leave the stale vote in place, so
+	// the next /vote would tally stale ballots against the pre-refine plans.
+	case "plan", "refine":
 		found, missing, err := m.orch.CollectPlans()
 		if err != nil {
 			m.Status = "collect plans: " + err.Error()
 			return
 		}
-		status := fmt.Sprintf("collected %d plan(s) — type /vote", len(found))
+		noPlan := ""
 		if len(missing) > 0 {
-			status += " · no plan: " + strings.Join(missing, ",")
+			noPlan = " · no plan: " + strings.Join(missing, ",")
 		}
-		m.Status = status
+		if m.orch.RefineRoundActive() {
+			// Clear the prior vote's artifacts so the revote re-anonymizes and
+			// re-tallies from the refined plans instead of the originals. Do this
+			// before clearing the .orig.md backups: if ResetVote fails, the
+			// backups stay on disk so RefineRoundActive() remains true and the
+			// reset is retried on the next finish, rather than leaving stale vote
+			// artifacts that can never be cleaned up.
+			if err := m.orch.ResetVote(); err != nil {
+				m.Status = "refine reset: " + err.Error()
+				return
+			}
+			m.orch.ClearRefineBackups()
+			m.orch.SetScope(nil)
+			m.Status = fmt.Sprintf("refined %d plan(s) collected — type /vote%s", len(found), noPlan)
+		} else {
+			m.Status = fmt.Sprintf("collected %d plan(s) — type /vote%s", len(found), noPlan)
+		}
 	case "vote":
 		res, err := m.orch.CollectVotesAndTally()
 		if err != nil {
@@ -803,9 +827,6 @@ func (m *Model) finishPhase() {
 			return
 		}
 		m.Status = "winner: " + res.WinnerAgent + " (Plan " + res.WinnerLetter + ") — type /build"
-	case "refine":
-		m.orch.SetScope(nil)
-		m.Status = "refined plan collected — type /build"
 	case "build":
 		m.Status = "build done — see worktree branches"
 	case "review":
