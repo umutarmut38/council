@@ -83,13 +83,19 @@ func (s *Session) Start(onOutput OutputFunc, onExit ExitFunc) error {
 
 	// The raw PTY log lives under the run directory, which the interactive TUI
 	// creates lazily on the first prompt. When no path is set yet, start without
-	// a log; EnableRawLog wires it up once the run exists.
+	// a log; EnableRawLog wires it up once the run exists. Read RawLogPath under
+	// the lock because EnableRawLog may set it concurrently, so a /restart after
+	// the first prompt relaunches with logging from process start.
+	s.mu.Lock()
+	rawPath := s.RawLogPath
+	s.mu.Unlock()
+
 	var rawLog *os.File
-	if s.RawLogPath != "" {
-		if err := os.MkdirAll(filepath.Dir(s.RawLogPath), 0o755); err != nil {
+	if rawPath != "" {
+		if err := os.MkdirAll(filepath.Dir(rawPath), 0o755); err != nil {
 			return err
 		}
-		f, err := os.OpenFile(s.RawLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		f, err := os.OpenFile(rawPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 		if err != nil {
 			return err
 		}
@@ -156,9 +162,11 @@ func (s *Session) EnableRawLog(path string) error {
 	s.rawLog.Store(f)
 	s.rawMu.Unlock()
 
-	// If the session finished before we attached, the reader goroutine already
-	// swapped nil out and won't close ours — reclaim it.
+	// Record the path (for a later /restart to relaunch with the same log) and
+	// check whether the session finished before we attached — if so the reader
+	// goroutine already swapped nil out and won't close ours, so reclaim it.
 	s.mu.Lock()
+	s.RawLogPath = path
 	done := s.Done
 	s.mu.Unlock()
 	if done {

@@ -294,6 +294,10 @@ func (m *Model) handleCommand(text string) (bool, tea.Cmd) {
 			m.Status = "usage: /all message"
 			return true, nil
 		}
+		if err := m.ensureRun(); err != nil {
+			m.Status = "cannot start run: " + err.Error()
+			return true, nil
+		}
 		m.sendAll(m.expandRefs(rest))
 		m.Status = "sent to all agents"
 	case "send":
@@ -303,6 +307,10 @@ func (m *Model) handleCommand(text string) (bool, tea.Cmd) {
 		}
 		name := fields[1]
 		message := strings.TrimSpace(strings.TrimPrefix(rest, name))
+		if err := m.ensureRun(); err != nil {
+			m.Status = "cannot start run: " + err.Error()
+			return true, nil
+		}
 		m.sendNamed(name, message)
 	case "focus":
 		if len(fields) < 2 {

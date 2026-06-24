@@ -44,6 +44,22 @@ func TestRunDirDeferredUntilFirstPrompt(t *testing.T) {
 	}
 }
 
+// TestSlashAllRealizesRun verifies the /all command (which is handled before the
+// normal send path) still creates the run on the first prompt.
+func TestSlashAllRealizesRun(t *testing.T) {
+	store := runstore.NewDeferred(filepath.Join(t.TempDir(), "runs"), nil, nil)
+	session := agent.NewSession("a", config.AgentConfig{Command: []string{"true"}}, "")
+	defer session.Terminate()
+	model := NewModel([]*agent.Session{session}, store, 1000, "", 0, nil, nil)
+
+	model.PromptInput = "/all hello"
+	model.submitInput()
+
+	if !store.Started() {
+		t.Fatal("/all should realize the run on the first prompt")
+	}
+}
+
 // TestSubmitInputRestoresComposerWhenRunCreationFails verifies the user's typed
 // prompt is not lost when the deferred run directory cannot be created.
 func TestSubmitInputRestoresComposerWhenRunCreationFails(t *testing.T) {

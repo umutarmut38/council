@@ -70,6 +70,10 @@ func TestRawLogFlushesBufferedPreRunOutput(t *testing.T) {
 	if err := s.EnableRawLog(path); err != nil {
 		t.Fatalf("EnableRawLog: %v", err)
 	}
+	// RawLogPath is recorded so a /restart relaunches with the same log.
+	if s.RawLogPath != path {
+		t.Fatalf("RawLogPath = %q, want %q", s.RawLogPath, path)
+	}
 	// Output after attachment goes straight to the file.
 	if rl := s.rawLog.Load(); rl != nil {
 		_, _ = rl.Write([]byte("after the first prompt\n"))

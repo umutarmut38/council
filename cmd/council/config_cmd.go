@@ -133,7 +133,7 @@ func configWizard() error {
 			continue
 		}
 		preset.Enabled = true
-		role := ask(fmt.Sprintf("    role for %s (planner,builder,voter,reviewer — comma-separated; or worker/reviewer/both)", name), "both")
+		role := ask(fmt.Sprintf("    role for %s (planner,builder,voter,review — comma-separated; review = review-only; or legacy worker/reviewer/both)", name), "both")
 		if roles, err := parseRoleAnswer(role); err != nil {
 			fmt.Printf("    %v; leaving %s in all phases\n", err, name)
 		} else {
@@ -221,7 +221,7 @@ func configAddAgent(args []string) error {
 	fs := flag.NewFlagSet("config add-agent", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	name := fs.String("name", "", "agent name in the config (defaults to the preset name)")
-	role := fs.String("role", "", "comma-separated planner,builder,voter,reviewer (or legacy worker|reviewer; empty = all phases)")
+	role := fs.String("role", "", "comma-separated planner,builder,voter,review (review = review-only; legacy worker|reviewer also accepted; empty = all phases)")
 	// Accept the preset before the flags (`add-agent codex --role worker`);
 	// the flag package stops at the first positional argument otherwise.
 	presetName := ""
@@ -238,7 +238,7 @@ func configAddAgent(args []string) error {
 		presetName = ""
 	}
 	if presetName == "" {
-		return fmt.Errorf("usage: council config add-agent <%s> [--name x] [--role planner,builder,voter,reviewer]", strings.Join(config.PresetNames(), "|"))
+		return fmt.Errorf("usage: council config add-agent <%s> [--name x] [--role planner,builder,voter,review]", strings.Join(config.PresetNames(), "|"))
 	}
 	preset, okPreset := config.AgentPreset(presetName)
 	if !okPreset {
