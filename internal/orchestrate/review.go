@@ -80,25 +80,39 @@ func (c *Controller) RunBuildChecks() ([]BuildCheck, error) {
 // runs the check command, so it is safe to call on demand (e.g. /compare during
 // the build). It always re-captures, so a later /review records a fresh diff.
 func (c *Controller) captureBuildDiff(agent, wtPath, base string) (changed bool, warnings []string) {
+	// /compare can reach this on the TUI thread, so bound each git command: a
+	// hung git (e.g. a stale index.lock) must not freeze the UI. The budget is
+	// generous so it never truncates a legitimate capture.
 	// Stage everything first (respecting .gitignore) so newly-created files are
 	// included — a plain `git diff` omits untracked files, which would hide an
 	// implementation that builds a project from scratch. Staging is best-effort,
 	// but a failure here can hide work, so record it.
-	if _, addErr := cmdrun.CombinedOutput(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", wtPath, "add", "-A"}}); addErr != nil {
+	addCtx, cancelAdd := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelAdd()
+	if _, addErr := cmdrun.CombinedOutput(addCtx, cmdrun.Spec{Name: "git", Args: []string{"-C", wtPath, "add", "-A"}}); addErr != nil {
 		warnings = append(warnings, fmt.Sprintf("git add -A: %v", addErr))
 	}
-	diff, derr := cmdrun.Output(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", wtPath, "diff", "--cached", base}})
+	diffCtx, cancelDiff := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelDiff()
+	diff, derr := cmdrun.Output(diffCtx, cmdrun.Spec{Name: "git", Args: []string{"-C", wtPath, "diff", "--cached", base}})
 	switch {
 	case derr != nil:
 		warnings = append(warnings, fmt.Sprintf("git diff --cached %s: %v", base, derr))
 	case len(strings.TrimSpace(string(diff))) > 0:
-		changed = true
-		_ = os.WriteFile(c.run.BuildDiffPath(agent), diff, fsperm.File())
+		// A failed write would silently hide the work, so surface it and treat
+		// the build as unchanged (a diff we can't persist can't be reviewed).
+		if werr := os.WriteFile(c.run.BuildDiffPath(agent), diff, fsperm.File()); werr != nil {
+			warnings = append(warnings, fmt.Sprintf("write %s diff: %v", agent, werr))
+		} else {
+			changed = true
+		}
 	default:
 		// The worktree now matches the base (e.g. an agent reverted work that an
 		// earlier /compare captured). Drop any stale diff so /compare and
 		// AdoptableBuilds don't keep showing changes that no longer exist.
-		_ = os.Remove(c.run.BuildDiffPath(agent))
+		if rmErr := os.Remove(c.run.BuildDiffPath(agent)); rmErr != nil && !os.IsNotExist(rmErr) {
+			warnings = append(warnings, fmt.Sprintf("remove stale %s diff: %v", agent, rmErr))
+		}
 	}
 	return changed, warnings
 }
