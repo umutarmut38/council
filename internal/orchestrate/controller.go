@@ -105,6 +105,17 @@ func (c *Controller) AgentsForPhase(phase config.Phase) []string {
 
 func (c *Controller) Run() *Run { return c.run }
 
+// EnsureManager initializes the build-worktree manager on the calling goroutine
+// and caches it on the controller. UI-thread callers invoke it before starting
+// an off-thread probe (e.g. BuildProgress) so that probe only ever reads
+// c.manager — it never allocates a fresh Manager per tick, nor writes the field
+// concurrently with the Update loop. It is a no-op once the manager exists.
+func (c *Controller) EnsureManager() {
+	if c.manager == nil && c.run != nil {
+		c.manager = NewManager(c.repoRoot, c.run.Stamp)
+	}
+}
+
 // StartRun begins a fresh run from the resolved issue text. Planning and voting
 // run from the trusted repo root; build lazily prepares worktrees.
 func (c *Controller) StartRun(issueText string) error {

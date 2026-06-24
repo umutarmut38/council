@@ -66,7 +66,9 @@ func (c *Controller) RunBuildChecks() ([]BuildCheck, error) {
 	for _, wt := range worktrees {
 		c.worktrees[wt.Agent] = wt.Path
 		res := BuildCheck{Agent: wt.Agent}
-		res.Changed, res.Warnings = c.captureBuildDiff(wt.Agent, wt.Path, base, reviewCaptureTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), reviewCaptureTimeout)
+		res.Changed, res.Warnings = c.captureBuildDiff(ctx, wt.Agent, wt.Path, base)
+		cancel()
 		res.Passed = c.runCheck(wt.Path, wt.Agent)
 		results = append(results, res)
 	}
@@ -74,12 +76,12 @@ func (c *Controller) RunBuildChecks() ([]BuildCheck, error) {
 	return results, nil
 }
 
-// Per-command git timeouts for captureBuildDiff. /review can afford a generous
-// budget; on-demand /compare during a build uses a much smaller one so a stuck
-// git (e.g. a stale index.lock) can only ever freeze the UI briefly.
+// Git budgets for captureBuildDiff. /review gives each worktree a generous
+// per-worktree budget; an on-demand /compare bounds the WHOLE scan (across every
+// worktree) so the UI can never stall for long, no matter how many there are.
 const (
-	reviewCaptureTimeout  = 30 * time.Second
-	compareCaptureTimeout = 8 * time.Second
+	reviewCaptureTimeout = 30 * time.Second
+	compareScanBudget    = 10 * time.Second
 )
 
 // captureBuildDiff stages an agent's build worktree and writes its diff against
@@ -87,21 +89,17 @@ const (
 // worktree index (git add -A) — exactly what /review already does — and never
 // runs the check command, so it is safe to call on demand (e.g. /compare during
 // the build). It always re-captures, so a later /review records a fresh diff.
-// timeout bounds each git command so a caller (especially /compare on the UI
-// thread) can keep the worst-case stall short.
-func (c *Controller) captureBuildDiff(agent, wtPath, base string, timeout time.Duration) (changed bool, warnings []string) {
+// ctx bounds the git work; callers (especially /compare on the UI thread) pass a
+// deadline so a stuck git can't freeze rendering.
+func (c *Controller) captureBuildDiff(ctx context.Context, agent, wtPath, base string) (changed bool, warnings []string) {
 	// Stage everything first (respecting .gitignore) so newly-created files are
 	// included — a plain `git diff` omits untracked files, which would hide an
 	// implementation that builds a project from scratch. Staging is best-effort,
 	// but a failure here can hide work, so record it.
-	addCtx, cancelAdd := context.WithTimeout(context.Background(), timeout)
-	defer cancelAdd()
-	if _, addErr := cmdrun.CombinedOutput(addCtx, cmdrun.Spec{Name: "git", Args: []string{"-C", wtPath, "add", "-A"}}); addErr != nil {
+	if _, addErr := cmdrun.CombinedOutput(ctx, cmdrun.Spec{Name: "git", Args: []string{"-C", wtPath, "add", "-A"}}); addErr != nil {
 		warnings = append(warnings, fmt.Sprintf("git add -A: %v", addErr))
 	}
-	diffCtx, cancelDiff := context.WithTimeout(context.Background(), timeout)
-	defer cancelDiff()
-	diff, derr := cmdrun.Output(diffCtx, cmdrun.Spec{Name: "git", Args: []string{"-C", wtPath, "diff", "--cached", base}})
+	diff, derr := cmdrun.Output(ctx, cmdrun.Spec{Name: "git", Args: []string{"-C", wtPath, "diff", "--cached", base}})
 	switch {
 	case derr != nil:
 		warnings = append(warnings, fmt.Sprintf("git diff --cached %s: %v", base, derr))
@@ -149,19 +147,36 @@ func (c *Controller) ensureBuildDiffs() {
 	if err := os.MkdirAll(c.run.BuildsDir(), fsperm.Dir()); err != nil {
 		return
 	}
+	// One deadline for the WHOLE scan: /compare runs on the TUI thread, so bound
+	// the total git work regardless of how many worktrees need capturing.
+	ctx, cancel := context.WithTimeout(context.Background(), compareScanBudget)
+	defer cancel()
 	for _, wt := range worktrees {
 		c.worktrees[wt.Agent] = wt.Path
-		if fi, statErr := os.Stat(c.run.BuildDiffPath(wt.Agent)); statErr == nil && fi.Size() > 0 {
+		if ctx.Err() != nil {
+			break // budget spent; keep /compare responsive even with many worktrees
+		}
+		diffPath := c.run.BuildDiffPath(wt.Agent)
+		hasDiff := false
+		if fi, statErr := os.Stat(diffPath); statErr == nil && fi.Size() > 0 {
+			hasDiff = true
+		}
+		// Cheap read-only probe first: it decides whether to skip, refresh, or
+		// drop the heavier stage+diff so /compare doesn't stage idle worktrees.
+		changed, ok := worktreeProbe(wt.Path, base)
+		if ok && !changed {
+			// Conclusively back at base: drop any stale diff (best-effort) so
+			// /compare doesn't keep showing changes that no longer exist, then
+			// skip the capture.
+			if hasDiff {
+				_ = os.Remove(diffPath)
+			}
 			continue
 		}
-		// Cheap read-only probe first: skip the heavier stage+diff for a worktree
-		// that is conclusively clean, so /compare (which runs synchronously on the
-		// TUI thread) doesn't stage idle worktrees or stall on runs with many of
-		// them. If the probe is inconclusive, capture anyway to stay correct.
-		if changed, ok := worktreeProbe(wt.Path, base); ok && !changed {
-			continue
+		if hasDiff {
+			continue // already captured and still dirty/inconclusive; /review re-captures
 		}
-		_, _ = c.captureBuildDiff(wt.Agent, wt.Path, base, compareCaptureTimeout)
+		_, _ = c.captureBuildDiff(ctx, wt.Agent, wt.Path, base)
 	}
 }
 

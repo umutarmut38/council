@@ -54,9 +54,12 @@ func (c *Controller) BuildProgress() (active, total int) {
 	if err != nil {
 		return 0, 0
 	}
+	// The manager is initialized on the UI thread (EnsureManager) before this
+	// runs off-thread, so this is a cached read — no per-tick allocation.
+	c.EnsureManager()
 	mgr := c.manager
 	if mgr == nil {
-		mgr = NewManager(c.repoRoot, c.run.Stamp)
+		return 0, 0
 	}
 	worktrees, err := mgr.ListRun()
 	if err != nil {

@@ -780,6 +780,12 @@ func (m *Model) buildProgress() tea.Cmd {
 		return nil
 	}
 	orch := m.orch
+	if orch != nil {
+		// Initialize the worktree manager here, on the Update loop, so the probe
+		// goroutine below only reads c.manager — it can't race the UI thread that
+		// also lazily creates it.
+		orch.EnsureManager()
+	}
 	return func() tea.Msg {
 		if orch == nil {
 			return buildProgressResultMsg{}

@@ -502,6 +502,51 @@ func TestCompareBuildsBeforeReview(t *testing.T) {
 	}
 }
 
+// TestCompareDropsStaleDiff: if an agent reverts its worktree back to the base
+// after a /compare captured its diff, a later /compare must drop the stale diff
+// instead of continuing to show changes that no longer exist.
+func TestCompareDropsStaleDiff(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := newTestController(t, root, []string{"a", "b"}, config.ReviewConfig{})
+	base, _ := revParse(root, "HEAD")
+	if err := ctrl.run.SaveBaseSHA(base); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.ensureWorktrees(config.PhaseBuild); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both agents change their worktrees; /compare captures both diffs.
+	for _, name := range []string{"a", "b"} {
+		if err := os.WriteFile(filepath.Join(ctrl.worktrees[name], name+".txt"), []byte("impl by "+name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := ctrl.CompareBuilds(); err != nil {
+		t.Fatalf("first compare: %v", err)
+	}
+	if fi, statErr := os.Stat(ctrl.run.BuildDiffPath("a")); statErr != nil || fi.Size() == 0 {
+		t.Fatal("a's diff should have been captured")
+	}
+
+	// "a" reverts back to the base (unstage + remove the file) while "b" keeps
+	// its change. A fresh /compare must drop a's now-stale diff but keep b's.
+	wtA := ctrl.worktrees["a"]
+	gitIn(t, wtA, "reset", "--hard", "HEAD")
+	_ = os.Remove(filepath.Join(wtA, "a.txt"))
+
+	if _, err := ctrl.CompareBuilds(); err != nil {
+		t.Fatalf("second compare: %v", err)
+	}
+	if _, statErr := os.Stat(ctrl.run.BuildDiffPath("a")); !os.IsNotExist(statErr) {
+		t.Fatal("a's stale diff should have been dropped once its worktree returned to base")
+	}
+	if fi, statErr := os.Stat(ctrl.run.BuildDiffPath("b")); statErr != nil || fi.Size() == 0 {
+		t.Fatal("b's diff should still be present")
+	}
+}
+
 func TestBuildProgressCountsActiveWorktrees(t *testing.T) {
 	root := initRepo(t)
 	chdir(t, root)
