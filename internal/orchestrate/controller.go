@@ -345,7 +345,15 @@ func (c *Controller) RefinePrompts(note string) (map[string]string, error) {
 			if err := os.WriteFile(origPath, data, fsperm.File()); err != nil {
 				return nil, err
 			}
-			_ = os.Remove(planPath)
+			// Remove the watched artifact so the phase finishes only when the
+			// agent writes the refined version. If removal fails, the live plan
+			// would still satisfy the phase watch and we'd collect/tally the
+			// pre-refine plan, so surface the error — and roll back the backup
+			// so a retried /refine starts from a clean fresh state.
+			if err := os.Remove(planPath); err != nil && !os.IsNotExist(err) {
+				_ = os.Remove(origPath)
+				return nil, fmt.Errorf("remove watched plan for %s: %w", agent, err)
+			}
 		}
 		prompts[agent] = RefinePrompt(issue, origPath, votePaths, planPath, note, letterByAgent[agent])
 	}
