@@ -28,13 +28,13 @@ func (m Model) renderHeader() string {
 
 	agents := "Agents: " + strings.Join(names, ", ")
 	line := "Council | " + agents
-	if m.Store != nil {
+	if m.Store != nil && m.Store.Started() {
 		line += " | " + compressPath(m.Store.RunDir)
 	}
 	// When the roster doesn't fit, a count keeps the run path visible.
 	if lipgloss.Width(line) > m.Width {
 		line = fmt.Sprintf("Council | %d agents", len(m.Agents))
-		if m.Store != nil {
+		if m.Store != nil && m.Store.Started() {
 			line += " | " + compressPath(m.Store.RunDir)
 		}
 	}
@@ -553,24 +553,30 @@ func (m Model) renderOverview(bodyHeight int) []string {
 	return fitBlock(lines, m.Width, bodyHeight)
 }
 
-// agentRoleLabel summarizes an agent's structural role(s).
+// agentRoleLabel summarizes the orchestration phases an agent joins, derived
+// from its (possibly legacy) role list.
 func (m Model) agentRoleLabel(name string) string {
 	agentCfg, ok := m.Config.Agents[name]
-	if !ok || len(agentCfg.Role) == 0 {
-		return "worker+reviewer"
+	if !ok {
+		return "plan+build+vote+review"
 	}
-	worker := agentCfg.HasRole(config.RoleWorker)
-	reviewer := agentCfg.HasRole(config.RoleReviewer)
-	switch {
-	case worker && reviewer:
-		return "worker+reviewer"
-	case worker:
-		return "worker"
-	case reviewer:
-		return "reviewer"
-	default:
+	var phases []string
+	if agentCfg.HasRole(config.RolePlanner) {
+		phases = append(phases, "plan")
+	}
+	if agentCfg.HasRole(config.RoleBuilder) {
+		phases = append(phases, "build")
+	}
+	if agentCfg.HasRole(config.RoleVoter) {
+		phases = append(phases, "vote")
+	}
+	if agentCfg.HasRole(config.RoleReviewer) {
+		phases = append(phases, "review")
+	}
+	if len(phases) == 0 {
 		return "no role"
 	}
+	return strings.Join(phases, "+")
 }
 
 func (m Model) renderSettings(bodyHeight int) []string {

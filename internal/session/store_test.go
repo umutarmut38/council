@@ -27,6 +27,56 @@ func TestCreateRunDirSurvivesCollisions(t *testing.T) {
 	}
 }
 
+func TestNewDeferredTouchesNothingUntilEnsure(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "runs")
+	store := NewDeferred(root, []byte("agents: {}\n"), []byte("{}"))
+
+	if store.Started() {
+		t.Fatal("a deferred store must not be started before Ensure")
+	}
+	// Merely constructing the store must not create the runs directory.
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("runs root created too early (err=%v)", err)
+	}
+
+	if err := store.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	if !store.Started() {
+		t.Fatal("store should be started after Ensure")
+	}
+	if _, err := os.Stat(store.RunDir); err != nil {
+		t.Fatalf("run dir not created by Ensure: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(store.RunDir, "config.effective.yaml")); err != nil {
+		t.Fatalf("config snapshot not written: %v", err)
+	}
+
+	// Ensure is idempotent: a second call keeps the same directory.
+	dir := store.RunDir
+	if err := store.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	if store.RunDir != dir {
+		t.Fatalf("Ensure not idempotent: %s -> %s", dir, store.RunDir)
+	}
+}
+
+func TestSavePromptRealizesDeferredStore(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "runs")
+	store := NewDeferred(root, nil, nil)
+
+	if err := store.SavePrompt("do the thing"); err != nil {
+		t.Fatal(err)
+	}
+	if !store.Started() {
+		t.Fatal("SavePrompt should realize the deferred store")
+	}
+	if _, err := os.Stat(filepath.Join(store.RunDir, "prompt.txt")); err != nil {
+		t.Fatalf("prompt.txt not written: %v", err)
+	}
+}
+
 func TestStorePrivatePermissions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix permission bits")

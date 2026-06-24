@@ -75,7 +75,7 @@ Options:
 
 - Trust `.council/worktrees/<run>/<agent>` once in that tool.
 - Use a phase-specific command with the tool's own safe auto-approval option.
-- Keep the agent as `role: [reviewer]` if it should never build.
+- Keep the agent as `role: [voter, reviewer]` if it should never build.
 
 ## `/resume` Reopens the Wrong Place
 

@@ -1,11 +1,50 @@
 package agent
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/umutarmut38/council/internal/config"
 )
+
+// TestEnableRawLogIsDeferredAndIdempotent covers the lazy raw-log path used when
+// the interactive run directory is created on the first prompt: a session starts
+// with no log, EnableRawLog wires one up, and repeat calls are no-ops.
+func TestEnableRawLogIsDeferredAndIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	s := NewSession("agent-a", config.AgentConfig{Command: []string{"true"}}, "")
+
+	// An empty path leaves logging off (the deferred-store default).
+	if err := s.EnableRawLog(""); err != nil {
+		t.Fatalf("EnableRawLog(\"\"): %v", err)
+	}
+	if s.rawLog.Load() != nil {
+		t.Fatal("empty path must not enable raw logging")
+	}
+
+	path := filepath.Join(dir, "raw", "agent-a.log")
+	if err := s.EnableRawLog(path); err != nil {
+		t.Fatalf("EnableRawLog(path): %v", err)
+	}
+	first := s.rawLog.Load()
+	if first == nil {
+		t.Fatal("raw logging should be on after EnableRawLog")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("raw log file not created: %v", err)
+	}
+
+	// A second call is a no-op and keeps the original file.
+	if err := s.EnableRawLog(filepath.Join(dir, "other.log")); err != nil {
+		t.Fatalf("second EnableRawLog: %v", err)
+	}
+	if s.rawLog.Load() != first {
+		t.Fatal("EnableRawLog should be idempotent once logging is on")
+	}
+	_ = first.Close()
+}
 
 func TestTerminalEnvAppendsConfigEnv(t *testing.T) {
 	cfg := config.AgentConfig{Env: map[string]string{"OPENAI_BASE_URL": "http://127.0.0.1:8787"}}

@@ -17,46 +17,80 @@ type Store struct {
 	TranscriptDir string
 	RawDir        string
 	Timestamp     string
+
+	// Config snapshots written by Ensure on first realization. Cleared once
+	// written so a deferred store keeps no payload after it materializes.
+	effectiveConfig []byte
+	sources         []byte
 }
 
-// New creates a fresh timestamped run directory. effectiveConfig is the
-// normalized, merged config the session actually runs with (not the raw global
-// file), and sources describes where it came from; both may be nil.
+// New creates a fresh timestamped run directory immediately. effectiveConfig is
+// the normalized, merged config the session actually runs with (not the raw
+// global file), and sources describes where it came from; both may be nil. Use
+// this when the run should exist right away (orchestration phases). The
+// interactive TUI prefers NewDeferred so launching it doesn't litter the runs
+// directory before a prompt is sent.
 func New(rootDir string, effectiveConfig []byte, sources []byte) (*Store, error) {
+	store := NewDeferred(rootDir, effectiveConfig, sources)
+	if err := store.Ensure(); err != nil {
+		return nil, err
+	}
+	return store, nil
+}
+
+// NewDeferred returns a Store that has not yet touched disk. The run directory
+// and config snapshots are created lazily on the first Ensure (or first
+// SavePrompt/SaveTranscript), so merely starting the program leaves
+// .council/runs untouched until the user actually sends a prompt.
+func NewDeferred(rootDir string, effectiveConfig []byte, sources []byte) *Store {
 	if rootDir == "" {
 		rootDir = ".council/runs"
 	}
+	return &Store{
+		RootDir:         rootDir,
+		effectiveConfig: effectiveConfig,
+		sources:         sources,
+	}
+}
 
-	runDir, timestamp, err := CreateRunDir(rootDir)
+// Started reports whether the run directory has been created.
+func (s *Store) Started() bool { return s.RunDir != "" }
+
+// Ensure realizes the run on first call: it creates the timestamped run
+// directory and the transcript/raw subdirectories, then writes the config
+// snapshots. Later calls are no-ops, so it is safe (and cheap) to call before
+// every write. Not safe for concurrent use; callers drive it from a single
+// goroutine (the TUI's update loop / the phase controller).
+func (s *Store) Ensure() error {
+	if s.RunDir != "" {
+		return nil
+	}
+	runDir, timestamp, err := CreateRunDir(s.RootDir)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	store := &Store{
-		RootDir:       rootDir,
-		RunDir:        runDir,
-		TranscriptDir: filepath.Join(runDir, "transcripts"),
-		RawDir:        filepath.Join(runDir, "raw"),
-		Timestamp:     timestamp,
-	}
+	s.RunDir = runDir
+	s.TranscriptDir = filepath.Join(runDir, "transcripts")
+	s.RawDir = filepath.Join(runDir, "raw")
+	s.Timestamp = timestamp
 
-	for _, dir := range []string{store.TranscriptDir, store.RawDir} {
+	for _, dir := range []string{s.TranscriptDir, s.RawDir} {
 		if err := os.MkdirAll(dir, fsperm.Dir()); err != nil {
-			return nil, err
+			return err
 		}
 	}
-
-	if len(effectiveConfig) > 0 {
-		if err := os.WriteFile(filepath.Join(runDir, "config.effective.yaml"), effectiveConfig, fsperm.File()); err != nil {
-			return nil, err
+	if len(s.effectiveConfig) > 0 {
+		if err := os.WriteFile(filepath.Join(runDir, "config.effective.yaml"), s.effectiveConfig, fsperm.File()); err != nil {
+			return err
 		}
 	}
-	if len(sources) > 0 {
-		if err := os.WriteFile(filepath.Join(runDir, "config.sources.json"), sources, fsperm.File()); err != nil {
-			return nil, err
+	if len(s.sources) > 0 {
+		if err := os.WriteFile(filepath.Join(runDir, "config.sources.json"), s.sources, fsperm.File()); err != nil {
+			return err
 		}
 	}
-
-	return store, nil
+	s.effectiveConfig, s.sources = nil, nil
+	return nil
 }
 
 // CreateRunDir makes a fresh timestamped directory under rootDir. Second
@@ -115,6 +149,9 @@ func (s *Store) TranscriptPath(agentName string) string {
 }
 
 func (s *Store) SaveTranscript(agentName string, content string) error {
+	if err := s.Ensure(); err != nil {
+		return err
+	}
 	if redactEnabled {
 		content = Redact(content)
 	}
@@ -125,6 +162,9 @@ func (s *Store) SaveTranscript(agentName string, content string) error {
 }
 
 func (s *Store) SavePrompt(prompt string) error {
+	if err := s.Ensure(); err != nil {
+		return err
+	}
 	if !strings.HasSuffix(prompt, "\n") {
 		prompt += "\n"
 	}

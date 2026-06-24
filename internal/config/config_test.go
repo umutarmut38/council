@@ -366,10 +366,11 @@ func TestRolePhaseRouting(t *testing.T) {
 	both := AgentConfig{Role: []string{RoleWorker, RoleReviewer}}
 	def := AgentConfig{} // empty role -> all
 
-	if !worker.HasRole(RoleWorker) || worker.HasRole(RoleReviewer) {
-		t.Fatal("worker should have only the worker role")
+	// Legacy worker expands to planner+builder; it is not a planner-only agent.
+	if !worker.HasRole(RolePlanner) || !worker.HasRole(RoleBuilder) || worker.HasRole(RoleVoter) {
+		t.Fatal("legacy worker should expand to planner+builder")
 	}
-	if !def.HasRole(RoleWorker) || !def.HasRole(RoleReviewer) {
+	if !def.HasRole(RolePlanner) || !def.HasRole(RoleReviewer) {
 		t.Fatal("empty role must default to all roles")
 	}
 
@@ -378,10 +379,19 @@ func TestRolePhaseRouting(t *testing.T) {
 		a                         AgentConfig
 		plan, vote, build, review bool
 	}{
+		// Legacy aliases (expanded).
 		{"worker", worker, true, false, true, false},
 		{"reviewer", reviewer, false, true, false, true},
 		{"both", both, true, true, true, true},
 		{"default", def, true, true, true, true},
+		// Granular per-phase roles.
+		{"planner", AgentConfig{Role: []string{RolePlanner}}, true, false, false, false},
+		{"builder", AgentConfig{Role: []string{RoleBuilder}}, false, false, true, false},
+		{"voter", AgentConfig{Role: []string{RoleVoter}}, false, true, false, false},
+		{"granular-vote+review", AgentConfig{Role: []string{RoleVoter, RoleReviewer}}, false, true, false, true},
+		// A granular token makes `reviewer` literal (review-only, no vote),
+		// unlike the legacy `[reviewer]` alias above.
+		{"granular-reviewer-is-literal", AgentConfig{Role: []string{RolePlanner, RoleReviewer}}, true, false, false, true},
 	}
 	for _, c := range cases {
 		got := []bool{
@@ -400,6 +410,37 @@ func TestRolePhaseRouting(t *testing.T) {
 	w := AgentConfig{Role: []string{RoleWorker}, Orchestration: OrchestrationConfig{ExcludePlan: true}}
 	if w.ParticipatesIn(PhasePlan) {
 		t.Fatal("exclude_plan should override the worker role")
+	}
+}
+
+func TestExpandRoles(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{"empty", nil, nil},
+		{"legacy worker", []string{"worker"}, []string{"planner", "builder"}},
+		{"legacy reviewer", []string{"reviewer"}, []string{"voter", "reviewer"}},
+		{"legacy both", []string{"worker", "reviewer"}, []string{"planner", "builder", "voter", "reviewer"}},
+		{"granular literal", []string{"planner"}, []string{"planner"}},
+		{"granular vote+review", []string{"voter", "reviewer"}, []string{"voter", "reviewer"}},
+		// A granular token present makes every token literal, so `reviewer`
+		// keeps its review-only meaning instead of expanding to voter+reviewer.
+		{"mixed keeps reviewer literal", []string{"planner", "reviewer"}, []string{"planner", "reviewer"}},
+		{"case and spaces", []string{" Worker "}, []string{"planner", "builder"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := expandRoles(c.in)
+			if !reflect.DeepEqual(got, c.want) {
+				t.Fatalf("expandRoles(%v) = %v, want %v", c.in, got, c.want)
+			}
+			// Idempotent: expanding the result again is a no-op.
+			if again := expandRoles(got); !reflect.DeepEqual(again, got) {
+				t.Fatalf("expandRoles not idempotent: %v -> %v", got, again)
+			}
+		})
 	}
 }
 

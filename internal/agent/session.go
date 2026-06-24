@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/umutarmut38/council/internal/config"
@@ -46,7 +47,7 @@ type Session struct {
 	ExitCode   *int
 
 	conn        ptyConn
-	rawLog      *os.File
+	rawLog      atomic.Pointer[os.File]
 	desiredCols int
 	desiredRows int
 	mu          sync.Mutex
@@ -65,18 +66,24 @@ func (s *Session) Start(onOutput OutputFunc, onExit ExitFunc) error {
 		return errors.New("no command configured")
 	}
 
-	if err := os.MkdirAll(filepath.Dir(s.RawLogPath), 0o755); err != nil {
-		return err
-	}
-
-	rawLog, err := os.OpenFile(s.RawLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return err
+	// The raw PTY log lives under the run directory, which the interactive TUI
+	// creates lazily on the first prompt. When no path is set yet, start without
+	// a log; EnableRawLog wires it up once the run exists.
+	var rawLog *os.File
+	if s.RawLogPath != "" {
+		if err := os.MkdirAll(filepath.Dir(s.RawLogPath), 0o755); err != nil {
+			return err
+		}
+		f, err := os.OpenFile(s.RawLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			return err
+		}
+		rawLog = f
 	}
 
 	cwd, err := expandPath(s.Config.CWD)
 	if err != nil {
-		_ = rawLog.Close()
+		closeFile(rawLog)
 		return err
 	}
 
@@ -84,17 +91,58 @@ func (s *Session) Start(onOutput OutputFunc, onExit ExitFunc) error {
 
 	conn, err := startPTY(s.Config, cwd, terminalEnv(s.Config), cols, rows)
 	if err != nil {
-		_ = rawLog.Close()
+		closeFile(rawLog)
 		return err
 	}
 
 	s.mu.Lock()
 	s.conn = conn
-	s.rawLog = rawLog
 	s.mu.Unlock()
+	if rawLog != nil {
+		s.rawLog.Store(rawLog)
+	}
 
 	go s.run(onOutput, onExit)
 	return nil
+}
+
+// EnableRawLog opens the raw PTY log once the run directory exists, turning on
+// persistence for a session that started before the first prompt. It is a no-op
+// if logging is already on or the path is empty, and is safe to call from the
+// TUI update loop while the session's reader goroutine is streaming.
+func (s *Session) EnableRawLog(path string) error {
+	if path == "" || s.rawLog.Load() != nil {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	if !s.rawLog.CompareAndSwap(nil, f) {
+		// Lost a race with another EnableRawLog; the other file wins.
+		closeFile(f)
+		return nil
+	}
+	// If the session finished between the open and the swap, the reader
+	// goroutine already swapped nil out and won't close ours — reclaim it.
+	s.mu.Lock()
+	done := s.Done
+	s.mu.Unlock()
+	if done {
+		if rl := s.rawLog.Swap(nil); rl != nil {
+			closeFile(rl)
+		}
+	}
+	return nil
+}
+
+func closeFile(f *os.File) {
+	if f != nil {
+		_ = f.Close()
+	}
 }
 
 // startupSize resolves the initial pseudo-terminal dimensions, honoring a fixed
@@ -197,8 +245,8 @@ func (s *Session) run(onOutput OutputFunc, onExit ExitFunc) {
 			n, err := s.conn.Read(buf)
 			if n > 0 {
 				chunk := append([]byte(nil), buf[:n]...)
-				if s.rawLog != nil {
-					_, _ = s.rawLog.Write(chunk)
+				if rl := s.rawLog.Load(); rl != nil {
+					_, _ = rl.Write(chunk)
 				}
 				if onOutput != nil {
 					onOutput(s.Name, chunk)
@@ -223,8 +271,8 @@ func (s *Session) run(onOutput OutputFunc, onExit ExitFunc) {
 	finalErr := normalizeReadExitError(lastReadErr, waitErr)
 	_ = s.conn.Close()
 	s.finish(exitCode)
-	if s.rawLog != nil {
-		_ = s.rawLog.Close()
+	if rl := s.rawLog.Swap(nil); rl != nil {
+		_ = rl.Close()
 	}
 	if onExit != nil {
 		onExit(s.Name, exitCode, finalErr)

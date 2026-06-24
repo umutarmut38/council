@@ -160,6 +160,29 @@ func (m *Model) completeCommand() bool {
 	return false
 }
 
+// ensureRun realizes the deferred run directory the first time the user sends a
+// prompt and turns on raw PTY logging for every session. It is idempotent — the
+// store's Ensure and each session's EnableRawLog are no-ops once done — and a
+// no-op when an orchestration phase already created a run. Keeping it on the
+// interactive send paths (not the shared low-level helpers) means simply
+// launching the TUI never creates a run directory.
+func (m *Model) ensureRun() {
+	if m.Store == nil {
+		return
+	}
+	newlyStarted := !m.Store.Started()
+	if err := m.Store.Ensure(); err != nil {
+		m.Status = "run dir error: " + err.Error()
+		return
+	}
+	for _, view := range m.Agents {
+		_ = view.Session.EnableRawLog(m.Store.RawLogPath(view.Session.Name))
+	}
+	if newlyStarted && m.initialPrompt != "" {
+		_ = m.Store.SavePrompt(m.initialPrompt)
+	}
+}
+
 func (m *Model) submitInput() tea.Cmd {
 	text := strings.TrimSpace(m.PromptInput)
 	m.PromptInput = ""
@@ -180,6 +203,7 @@ func (m *Model) submitInput() tea.Cmd {
 	}
 
 	text = m.expandRefs(text)
+	m.ensureRun()
 	switch m.Target {
 	case TargetAll:
 		m.sendAll(text)
@@ -515,6 +539,7 @@ func (m *Model) handleAddressedInput(text string) {
 
 	target := strings.TrimPrefix(fields[0], "@")
 	message := m.expandRefs(strings.TrimSpace(strings.TrimPrefix(text, fields[0])))
+	m.ensureRun()
 	if strings.EqualFold(target, "all") {
 		m.sendAll(message)
 		m.Status = "sent to all agents"

@@ -260,7 +260,9 @@ func (m *Model) launchEditor(path string) {
 // requires a writable path, so fall back to a temp file when there is no run
 // store.
 func editorRawLogPath(m *Model) string {
-	if m.Store != nil {
+	// Only log into the run dir once it exists; opening the editor must not
+	// create a run on its own.
+	if m.Store != nil && m.Store.Started() {
 		return m.Store.RawLogPath(editorSessionName)
 	}
 	return filepath.Join(os.TempDir(), "council-editor-raw.log")

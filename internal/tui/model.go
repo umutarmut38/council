@@ -328,7 +328,7 @@ func NewModelWithConfig(sessions []*agent.Session, store *runstore.Store, cfg co
 	}
 
 	status := "ready"
-	if store != nil {
+	if store != nil && store.Started() {
 		status = "session " + store.RunDir
 	}
 
@@ -440,6 +440,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case initialPromptMsg:
 		if !m.initialPromptSent {
+			m.ensureRun()
 			m.sendAll(string(msg))
 			m.initialPromptSent = true
 			m.Status = "broadcast initial prompt"
@@ -447,6 +448,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case initialAgentPromptsMsg:
 		if !m.initialPromptSent {
+			m.ensureRun()
 			m.sendPrompts(map[string]string(msg))
 			m.initialPromptSent = true
 			m.Status = "sent initial prompts"
