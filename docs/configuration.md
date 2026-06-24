@@ -69,22 +69,23 @@ one granular role per phase:
 | `planner` | `plan` (writes a plan) |
 | `builder` | `build` (implements the winning plan) |
 | `voter` | `vote` (ranks the anonymized plans) |
-| `reviewer` | `review` (ranks the built diffs) — but read the note below |
+| `review` | `review` (ranks the built diffs) — review-only |
 | *(omitted)* | all phases — the default, backward compatible |
 
-> **`reviewer` is special.** Because it doubles as the legacy alias, a role list
-> of just `[reviewer]` expands to `voter` + `reviewer` (**vote + review**), *not*
-> review-only. The literal "review" meaning only applies once a
-> `planner`/`builder`/`voter` token is also present — and that token then adds
-> its own phase, so `[planner, reviewer]` is plan + review. There is no way to
-> select `review` entirely on its own.
+> **`reviewer` vs `review`.** For back-compat, a role list of just `[reviewer]`
+> is the legacy alias for `voter` + `reviewer` (**vote + review**), *not*
+> review-only. Use **`review`** for an agent that only ranks built diffs (and
+> doesn't vote on plans). `reviewer` still selects the review phase when it
+> appears next to a granular token, so `[voter, reviewer]` and `[voter, review]`
+> are equivalent.
 
 ```yaml
 agents:
-  claude:  { role: [planner, builder, voter, reviewer] }  # every phase
+  claude:  { role: [planner, builder, voter, review] }    # every phase
   codex:   { role: [planner, builder] }                   # only plans and builds
-  copilot: { role: [voter, reviewer] }                    # only votes and reviews
+  copilot: { role: [voter, review] }                      # votes and reviews
   oracle:  { role: [planner] }                            # plan-only
+  judge:   { role: [review] }                             # review-only
 ```
 
 **Legacy aliases.** The old coarse roles still work, expanded automatically:
@@ -399,7 +400,7 @@ A map of agent name to config; the name labels the pane and artifacts.
 | `cwd` | string | `"."` | Working directory for the process. |
 | `color` | string | — | 256-color index (`"212"`) or hex (`"#ff5f87"`) tinting the pane border; falls back to the personality color. |
 | `personality` | string | — | Personality name (must exist under `personalities`). |
-| `role` | list | all phases | Orchestration phases the agent joins, one role per phase: `planner`, `builder`, `voter`, `reviewer`. Omit for all phases. Legacy aliases still work: `worker` = `planner`+`builder`, `reviewer` (alone) = `voter`+`reviewer`. |
+| `role` | list | all phases | Orchestration phases the agent joins, one token per phase: `planner`, `builder`, `voter`, `review`. Omit for all phases. Legacy aliases still work: `worker` = `planner`+`builder`, and a bare `reviewer` = `voter`+`reviewer` (use `review` for a review-only agent). |
 | `env` | map | — | Extra environment for this agent, merged over the top-level `env` (this wins). Experimental: requires `experimental.setup_env`. |
 | `terminal` | object | — | Rendering and prompt-delivery settings (see `agents.<name>.terminal`). |
 | `orchestration` | object | — | Per-phase behavior (see `agents.<name>.orchestration`). |

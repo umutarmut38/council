@@ -40,30 +40,35 @@ type AgentConfig struct {
 }
 
 // Orchestration roles. Roles are structural (which phase an agent joins) and are
-// orthogonal to personalities (which only inject prompt text). There is one
-// granular role per phase:
+// orthogonal to personalities (which only inject prompt text). One token per
+// phase:
 //
 //	planner  -> plan      (writes a plan)
 //	builder  -> build     (implements the winning plan)
 //	voter    -> vote      (ranks the anonymized plans)
-//	reviewer -> review    (ranks the built diffs)
+//	review   -> review    (ranks the built diffs) — review-only, unambiguous
 //
 // An empty role list means the agent joins every phase (backward compatible).
 //
-// The legacy coarse roles still work as aliases, expanded by expandRoles:
+// `reviewer` is overloaded for back-compat: on its own (a legacy-only list) it
+// expands to voter+reviewer (vote + review), so existing configs keep their
+// meaning. Alongside a granular token it still selects the review phase. Use
+// `review` for an agent that should only review. The other legacy alias:
 //
 //	worker   -> planner, builder
-//	reviewer -> voter, reviewer   (only when the list is legacy-only)
 //
 // See expandRoles for the precise legacy/literal rule.
 const (
-	RolePlanner  = "planner"
-	RoleBuilder  = "builder"
-	RoleVoter    = "voter"
+	RolePlanner = "planner"
+	RoleBuilder = "builder"
+	RoleVoter   = "voter"
+	// RoleReview is the unambiguous review-only token. RoleReviewer ("reviewer")
+	// also selects the review phase, but on its own it is the legacy alias for
+	// voter+reviewer, so use RoleReview for a review-only agent.
+	RoleReview   = "review"
 	RoleReviewer = "reviewer"
 
-	// RoleWorker is a legacy alias for planner+builder. RoleReviewer doubles as
-	// the legacy alias for voter+reviewer when no granular token is present.
+	// RoleWorker is a legacy alias for planner+builder.
 	RoleWorker = "worker"
 )
 
@@ -71,14 +76,15 @@ const (
 // pure and idempotent. The rule, applied case-insensitively after trimming:
 //
 //   - Empty list -> empty (means "all phases"; HasRole returns true for any).
-//   - Any of planner/builder/voter present -> the whole list is literal and
-//     returned as-is. A `reviewer` token then means review-only. Note `reviewer`
-//     is deliberately NOT a trigger on its own, because it doubles as the legacy
-//     alias below.
-//   - Only legacy tokens (worker and/or reviewer, with no planner/builder/voter)
-//     -> expand `worker -> planner, builder` and `reviewer -> voter, reviewer`
-//     (the legacy judge-both meaning). So a bare `[reviewer]` is vote+review, not
-//     review-only.
+//   - Any of planner/builder/voter/review present -> the whole list is literal
+//     and returned as-is. `review` (and `reviewer`) then select the review
+//     phase. `reviewer` is deliberately NOT a trigger on its own, because it
+//     doubles as the legacy alias below; `review` is the unambiguous
+//     review-only token.
+//   - Only legacy tokens (worker and/or reviewer, with no planner/builder/voter/
+//     review) -> expand `worker -> planner, builder` and
+//     `reviewer -> voter, reviewer` (the legacy judge-both meaning). So a bare
+//     `[reviewer]` is vote+review; use `[review]` for review-only.
 //
 // Idempotency holds because the legacy branch always introduces a trigger token
 // (planner or voter), so a second pass takes the literal branch. Mixing a lone
@@ -91,7 +97,7 @@ func expandRoles(roles []string) []string {
 	hasGranular := false
 	for _, r := range roles {
 		switch strings.ToLower(strings.TrimSpace(r)) {
-		case RolePlanner, RoleBuilder, RoleVoter:
+		case RolePlanner, RoleBuilder, RoleVoter, RoleReview:
 			hasGranular = true
 		}
 	}
@@ -211,7 +217,8 @@ func (a AgentConfig) ParticipatesIn(phase Phase) bool {
 	case PhaseVote:
 		return !a.Orchestration.ExcludeVote && a.HasRole(RoleVoter)
 	case PhaseReview:
-		return !a.Orchestration.ExcludeVote && a.HasRole(RoleReviewer)
+		// `review` (review-only) and `reviewer` (legacy judge) both join review.
+		return !a.Orchestration.ExcludeVote && (a.HasRole(RoleReviewer) || a.HasRole(RoleReview))
 	default:
 		return true
 	}

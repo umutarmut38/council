@@ -51,6 +51,42 @@ func TestEnableRawLogIsDeferredAndIdempotent(t *testing.T) {
 	}
 }
 
+// TestRawLogFlushesBufferedPreRunOutput covers the lazy-run regression Codex
+// flagged: output emitted before the run dir exists (banners, auth prompts,
+// early errors) is buffered and flushed into the log once EnableRawLog attaches
+// it, so nothing from before the first prompt is lost.
+func TestRawLogFlushesBufferedPreRunOutput(t *testing.T) {
+	dir := t.TempDir()
+	s := NewSession("a", config.AgentConfig{Command: []string{"true"}}, "")
+
+	// Simulate the reader goroutine producing output while no log is attached.
+	s.bufferRawOutput([]byte("boot banner\n"))
+	s.bufferRawOutput([]byte("trust this directory?\n"))
+	if s.rawLog.Load() != nil {
+		t.Fatal("no raw log should be attached before EnableRawLog")
+	}
+
+	path := filepath.Join(dir, "raw", "a.log")
+	if err := s.EnableRawLog(path); err != nil {
+		t.Fatalf("EnableRawLog: %v", err)
+	}
+	// Output after attachment goes straight to the file.
+	if rl := s.rawLog.Load(); rl != nil {
+		_, _ = rl.Write([]byte("after the first prompt\n"))
+	}
+	_ = s.Terminate()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"boot banner", "trust this directory?", "after the first prompt"} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("raw log missing %q; got:\n%s", want, data)
+		}
+	}
+}
+
 func TestTerminalEnvAppendsConfigEnv(t *testing.T) {
 	cfg := config.AgentConfig{Env: map[string]string{"OPENAI_BASE_URL": "http://127.0.0.1:8787"}}
 	env := terminalEnv(cfg)

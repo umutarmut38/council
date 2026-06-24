@@ -43,3 +43,29 @@ func TestRunDirDeferredUntilFirstPrompt(t *testing.T) {
 		t.Fatalf("run dir not created on first prompt: %v", err)
 	}
 }
+
+// TestSubmitInputRestoresComposerWhenRunCreationFails verifies the user's typed
+// prompt is not lost when the deferred run directory cannot be created.
+func TestSubmitInputRestoresComposerWhenRunCreationFails(t *testing.T) {
+	// A regular file where the runs root's parent should be a directory makes
+	// MkdirAll (and therefore Store.Ensure) fail.
+	blocker := filepath.Join(t.TempDir(), "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := runstore.NewDeferred(filepath.Join(blocker, "runs"), nil, nil)
+	session := agent.NewSession("a", config.AgentConfig{Command: []string{"true"}}, "")
+	defer session.Terminate()
+	model := NewModel([]*agent.Session{session}, store, 1000, "", 0, nil, nil)
+
+	model.PromptInput = "important prompt"
+	model.Target = TargetAll
+	model.submitInput()
+
+	if store.Started() {
+		t.Fatal("run must not be marked started when Ensure fails")
+	}
+	if model.PromptInput != "important prompt" {
+		t.Fatalf("composer should be restored on failure, got %q", model.PromptInput)
+	}
+}

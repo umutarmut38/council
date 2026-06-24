@@ -189,9 +189,9 @@ func configWizard() error {
 
 // parseRoleAnswer turns a setup answer into a role list. It accepts the legacy
 // "worker"/"reviewer"/"both" answers and any comma-separated mix of the granular
-// roles (planner, builder, voter, reviewer). An empty, "both", or "all" answer
-// leaves the role unset (all phases). A lone "reviewer" keeps its legacy
-// judge-both meaning (voter+reviewer); combine roles explicitly for review-only.
+// roles (planner, builder, voter, review, reviewer). An empty, "both", or "all"
+// answer leaves the role unset (all phases). A lone "reviewer" keeps its legacy
+// judge-both meaning (voter+reviewer); use "review" for a review-only agent.
 func parseRoleAnswer(answer string) ([]string, error) {
 	switch strings.ToLower(strings.TrimSpace(answer)) {
 	case "", "both", "all":
@@ -206,10 +206,10 @@ func parseRoleAnswer(answer string) ([]string, error) {
 		switch t := strings.ToLower(strings.TrimSpace(tok)); t {
 		case "":
 			// skip empty tokens from trailing/double commas
-		case config.RolePlanner, config.RoleBuilder, config.RoleVoter, config.RoleReviewer:
+		case config.RolePlanner, config.RoleBuilder, config.RoleVoter, config.RoleReview, config.RoleReviewer:
 			roles = append(roles, t)
 		default:
-			return nil, fmt.Errorf("unknown role %q (planner | builder | voter | reviewer; or legacy worker | reviewer | both)", strings.TrimSpace(tok))
+			return nil, fmt.Errorf("unknown role %q (planner | builder | voter | review | reviewer; or legacy worker | both)", strings.TrimSpace(tok))
 		}
 	}
 	return roles, nil

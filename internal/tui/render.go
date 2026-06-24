@@ -570,7 +570,7 @@ func (m Model) agentRoleLabel(name string) string {
 	if agentCfg.HasRole(config.RoleVoter) {
 		phases = append(phases, "vote")
 	}
-	if agentCfg.HasRole(config.RoleReviewer) {
+	if agentCfg.HasRole(config.RoleReviewer) || agentCfg.HasRole(config.RoleReview) {
 		phases = append(phases, "review")
 	}
 	if len(phases) == 0 {

@@ -392,6 +392,9 @@ func TestRolePhaseRouting(t *testing.T) {
 		// A granular token makes `reviewer` literal (review-only, no vote),
 		// unlike the legacy `[reviewer]` alias above.
 		{"granular-reviewer-is-literal", AgentConfig{Role: []string{RolePlanner, RoleReviewer}}, true, false, false, true},
+		// The unambiguous review-only token: review without voting.
+		{"review-only", AgentConfig{Role: []string{RoleReview}}, false, false, false, true},
+		{"review+vote", AgentConfig{Role: []string{RoleVoter, RoleReview}}, false, true, false, true},
 	}
 	for _, c := range cases {
 		got := []bool{
@@ -425,6 +428,9 @@ func TestExpandRoles(t *testing.T) {
 		{"legacy both", []string{"worker", "reviewer"}, []string{"planner", "builder", "voter", "reviewer"}},
 		{"granular literal", []string{"planner"}, []string{"planner"}},
 		{"granular vote+review", []string{"voter", "reviewer"}, []string{"voter", "reviewer"}},
+		// `review` is the unambiguous review-only token and is itself a trigger,
+		// so it stays literal (no legacy expansion).
+		{"review-only literal", []string{"review"}, []string{"review"}},
 		// A granular token present makes every token literal, so `reviewer`
 		// keeps its review-only meaning instead of expanding to voter+reviewer.
 		{"mixed keeps reviewer literal", []string{"planner", "reviewer"}, []string{"planner", "reviewer"}},

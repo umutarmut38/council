@@ -175,16 +175,23 @@ func (m *Model) ensureRun() error {
 		return err
 	}
 	for _, view := range m.Agents {
-		_ = view.Session.EnableRawLog(m.Store.RawLogPath(view.Session.Name))
+		// Best-effort: a raw-log failure shouldn't block the prompt, but surface
+		// it in the affected pane rather than swallowing it.
+		if err := view.Session.EnableRawLog(m.Store.RawLogPath(view.Session.Name)); err != nil {
+			view.addDisplayLine("council: raw logging unavailable: " + err.Error())
+		}
 	}
 	if newlyStarted && m.initialPrompt != "" {
-		_ = m.Store.SavePrompt(m.initialPrompt)
+		if err := m.Store.SavePrompt(m.initialPrompt); err != nil {
+			m.Status = "warning: could not save prompt.txt: " + err.Error()
+		}
 	}
 	return nil
 }
 
 func (m *Model) submitInput() tea.Cmd {
-	text := strings.TrimSpace(m.PromptInput)
+	raw := m.PromptInput
+	text := strings.TrimSpace(raw)
 	m.PromptInput = ""
 	if text == "" {
 		return nil
@@ -197,6 +204,11 @@ func (m *Model) submitInput() tea.Cmd {
 	if strings.HasPrefix(text, "@") {
 		first := strings.TrimPrefix(strings.Fields(text)[0], "@")
 		if strings.EqualFold(first, "all") || m.agentExists(first) {
+			if err := m.ensureRun(); err != nil {
+				m.PromptInput = raw // don't swallow the user's prompt
+				m.Status = "cannot start run: " + err.Error()
+				return nil
+			}
 			m.handleAddressedInput(text)
 			return nil
 		}
@@ -204,6 +216,7 @@ func (m *Model) submitInput() tea.Cmd {
 
 	text = m.expandRefs(text)
 	if err := m.ensureRun(); err != nil {
+		m.PromptInput = raw // don't swallow the user's prompt
 		m.Status = "cannot start run: " + err.Error()
 		return nil
 	}
@@ -542,10 +555,7 @@ func (m *Model) handleAddressedInput(text string) {
 
 	target := strings.TrimPrefix(fields[0], "@")
 	message := m.expandRefs(strings.TrimSpace(strings.TrimPrefix(text, fields[0])))
-	if err := m.ensureRun(); err != nil {
-		m.Status = "cannot start run: " + err.Error()
-		return
-	}
+	// The caller (submitInput) has already realized the run before dispatching.
 	if strings.EqualFold(target, "all") {
 		m.sendAll(message)
 		m.Status = "sent to all agents"

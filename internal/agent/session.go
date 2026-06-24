@@ -51,7 +51,22 @@ type Session struct {
 	desiredCols int
 	desiredRows int
 	mu          sync.Mutex
+
+	// Until EnableRawLog attaches a file (the interactive run dir is created
+	// lazily on the first prompt), pre-prompt PTY output — banners, auth
+	// prompts, startup errors, early exits — is buffered here and flushed into
+	// the log once it exists, so it isn't lost. Guarded by rawMu, capped at
+	// maxRawBuffer.
+	rawMu         sync.Mutex
+	rawBuf        []byte
+	rawBufFlushed bool
 }
+
+// maxRawBuffer bounds the pre-run raw-output buffer per session so an agent that
+// streams a lot before the first prompt can't grow it without limit. The
+// earliest bytes (startup banner/auth prompt) are the useful ones, so buffering
+// stops once full rather than evicting them.
+const maxRawBuffer = 1 << 20 // 1 MiB
 
 func NewSession(name string, cfg config.AgentConfig, rawLogPath string) *Session {
 	return &Session{
@@ -107,9 +122,11 @@ func (s *Session) Start(onOutput OutputFunc, onExit ExitFunc) error {
 }
 
 // EnableRawLog opens the raw PTY log once the run directory exists, turning on
-// persistence for a session that started before the first prompt. It is a no-op
-// if logging is already on or the path is empty, and is safe to call from the
-// TUI update loop while the session's reader goroutine is streaming.
+// persistence for a session that started before the first prompt. Any output
+// buffered before now (startup banner, auth prompt, early errors) is flushed
+// into the log first, so nothing emitted before the first prompt is lost. It is
+// a no-op if logging is already on or the path is empty, and is safe to call
+// from the TUI update loop while the session's reader goroutine is streaming.
 func (s *Session) EnableRawLog(path string) error {
 	if path == "" || s.rawLog.Load() != nil {
 		return nil
@@ -121,13 +138,26 @@ func (s *Session) EnableRawLog(path string) error {
 	if err != nil {
 		return err
 	}
-	if !s.rawLog.CompareAndSwap(nil, f) {
-		// Lost a race with another EnableRawLog; the other file wins.
+
+	// Flush the pre-run buffer and publish the file under rawMu, so the reader
+	// goroutine (which buffers under the same lock while rawLog is nil) can't
+	// append output that lands neither in the buffer nor the file.
+	s.rawMu.Lock()
+	if s.rawLog.Load() != nil { // lost a race with another EnableRawLog
+		s.rawMu.Unlock()
 		closeFile(f)
 		return nil
 	}
-	// If the session finished between the open and the swap, the reader
-	// goroutine already swapped nil out and won't close ours — reclaim it.
+	if len(s.rawBuf) > 0 {
+		_, _ = f.Write(s.rawBuf)
+	}
+	s.rawBuf = nil
+	s.rawBufFlushed = true
+	s.rawLog.Store(f)
+	s.rawMu.Unlock()
+
+	// If the session finished before we attached, the reader goroutine already
+	// swapped nil out and won't close ours — reclaim it.
 	s.mu.Lock()
 	done := s.Done
 	s.mu.Unlock()
@@ -137,6 +167,27 @@ func (s *Session) EnableRawLog(path string) error {
 		}
 	}
 	return nil
+}
+
+// bufferRawOutput retains PTY output emitted before a raw log is attached. It is
+// called from the reader goroutine when rawLog is nil; the rawMu re-check covers
+// the window where EnableRawLog attaches the file between the Load and the lock.
+func (s *Session) bufferRawOutput(chunk []byte) {
+	s.rawMu.Lock()
+	defer s.rawMu.Unlock()
+	if rl := s.rawLog.Load(); rl != nil {
+		_, _ = rl.Write(chunk)
+		return
+	}
+	if s.rawBufFlushed {
+		return
+	}
+	if room := maxRawBuffer - len(s.rawBuf); room > 0 {
+		if len(chunk) > room {
+			chunk = chunk[:room]
+		}
+		s.rawBuf = append(s.rawBuf, chunk...)
+	}
 }
 
 func closeFile(f *os.File) {
@@ -221,6 +272,12 @@ func (s *Session) Terminate() error {
 	if rl := s.rawLog.Swap(nil); rl != nil {
 		_ = rl.Close()
 	}
+	// Drop any pre-run buffer (no run dir was ever attached to flush it to) and
+	// stop the reader from buffering more.
+	s.rawMu.Lock()
+	s.rawBuf = nil
+	s.rawBufFlushed = true
+	s.rawMu.Unlock()
 
 	if done || conn == nil {
 		return nil
@@ -256,6 +313,8 @@ func (s *Session) run(onOutput OutputFunc, onExit ExitFunc) {
 				chunk := append([]byte(nil), buf[:n]...)
 				if rl := s.rawLog.Load(); rl != nil {
 					_, _ = rl.Write(chunk)
+				} else {
+					s.bufferRawOutput(chunk)
 				}
 				if onOutput != nil {
 					onOutput(s.Name, chunk)
