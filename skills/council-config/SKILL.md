@@ -97,17 +97,20 @@ list. Current preset commands (from `internal/config/presets.go`):
 >   codex-worker:
 >     enabled: true
 >     command: ["codex", "--model", "gpt-5.4-mini"]
->     role: [worker]
+>     role: [planner, builder]
 >     terminal: { send_mode: paste, before_send_sequence: ctrl+u }
 >   codex-reviewer:
 >     inherit: codex-worker   # same command + terminal
 >     enabled: true
->     role: [reviewer]        # only the role differs
+>     role: [voter, review]   # only the role differs
 > ```
 
-**b. Role per member.** `role: [worker]` (plans + builds), `role: [reviewer]`
-(votes + reviews), or both / omitted (all phases). A useful council has at least
-one worker and one reviewer. Self-judging is always prevented automatically.
+**b. Role per member.** Roles select phases, one token each: `planner` (plan),
+`builder` (build), `voter` (vote), `review` (review). Omit `role` for all four
+phases. Legacy aliases still work: `worker` = `planner`+`builder`, and a bare
+`reviewer` = `voter`+`review` (so for a **review-only** agent use `review`, not
+`reviewer`). A useful council covers every phase with at least one member;
+self-judging is always prevented automatically.
 
 **c. Personality per member.** Optional. A `personality` injects a
 `prompt_prefix` into that agent's prompts and drives UI grouping. Define them
