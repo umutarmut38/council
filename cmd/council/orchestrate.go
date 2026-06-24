@@ -187,6 +187,27 @@ func councilVote(args []string) error {
 }
 
 func doVote(ctrl *orchestrate.Controller, cfg config.Config) error {
+	// A single plan has nothing to rank — auto-select it and skip the vote,
+	// mirroring how review collapses to one surviving build.
+	found, _, err := ctrl.CollectPlans()
+	if err != nil {
+		return err
+	}
+	switch len(found) {
+	case 0:
+		return errors.New("no plans found; run plan first")
+	case 1:
+		var name string
+		for n := range found {
+			name = n
+		}
+		if err := ctrl.SetSinglePlanWinner(name); err != nil {
+			return err
+		}
+		fmt.Printf("Only one plan (%s) — skipping vote; `council build` uses it.\n", name)
+		return nil
+	}
+
 	prompts, err := ctrl.VotePrompts()
 	if err != nil {
 		return err

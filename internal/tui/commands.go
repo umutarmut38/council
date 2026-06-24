@@ -375,7 +375,7 @@ func (m *Model) handleCommand(text string) (bool, tea.Cmd) {
 	case "judge":
 		m.cmdJudge(rest)
 	case "refine":
-		return true, m.cmdRefine()
+		return true, m.cmdRefine(rest)
 	case "artifacts":
 		m.cmdArtifacts()
 	case "edit":

@@ -55,6 +55,30 @@ func (m *Model) cmdVote() tea.Cmd {
 			return nil
 		}
 	}
+	// A single plan has nothing to rank — auto-select it and skip the vote,
+	// mirroring how review collapses to one surviving build.
+	found, _, err := m.orch.CollectPlans()
+	if err != nil {
+		m.Status = "vote: " + err.Error()
+		return nil
+	}
+	switch len(found) {
+	case 0:
+		m.Status = "vote: no plans found; run /plan first"
+		return nil
+	case 1:
+		var name string
+		for n := range found {
+			name = n
+		}
+		if err := m.orch.SetSinglePlanWinner(name); err != nil {
+			m.Status = "vote: " + err.Error()
+			return nil
+		}
+		m.refreshProgress()
+		m.Status = "only one plan (" + name + ") — /build (or /refine)"
+		return nil
+	}
 	if !m.scopePhaseOrWarn("vote") {
 		return nil
 	}
@@ -508,7 +532,7 @@ func (m *Model) cmdJudge(rest string) {
 
 // cmdRefine runs the consensus round: the winning planner absorbs the
 // reviewers' critiques and rewrites its plan before /build.
-func (m *Model) cmdRefine() tea.Cmd {
+func (m *Model) cmdRefine(note string) tea.Cmd {
 	if m.orch == nil {
 		m.Status = "orchestration unavailable"
 		return nil
@@ -519,7 +543,7 @@ func (m *Model) cmdRefine() tea.Cmd {
 			return nil
 		}
 	}
-	prompts, err := m.orch.RefinePrompts()
+	prompts, err := m.orch.RefinePrompts(note)
 	if err != nil {
 		m.Status = "refine: " + err.Error()
 		return nil

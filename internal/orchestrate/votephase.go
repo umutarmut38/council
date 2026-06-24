@@ -159,6 +159,25 @@ func (c *Controller) CollectVotesAndTally() (Result, error) {
 	return res, nil
 }
 
+// SetSinglePlanWinner records the lone plan as the vote winner without running a
+// vote — the plan-phase analog of SetSingleWinner. It is used when only one plan
+// was produced, so there is nothing to rank. Writing result.json (and the
+// summary) means Winner(), /build, /refine, and reports all work downstream.
+func (c *Controller) SetSinglePlanWinner(agent string) error {
+	refs := AnonymizePlans([]string{agent}, c.run.PlanPath)
+	if err := c.run.SaveVoteRefs(refs); err != nil {
+		return err
+	}
+	c.refs = refs
+	res := Result{
+		WinnerAgent:  agent,
+		WinnerLetter: refs[0].Letter,
+		Points:       map[string]int{refs[0].Letter: 0},
+		Firsts:       map[string]int{refs[0].Letter: 0},
+	}
+	return c.run.WriteResult(res, refs)
+}
+
 // Winner returns the winning agent and its plan text from a tallied run.
 func (c *Controller) Winner() (agentName, plan string, err error) {
 	agentName, err = c.winnerName()

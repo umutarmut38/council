@@ -156,7 +156,7 @@ func (c *Controller) resumeRefinePrompts(participants []string) (map[string]stri
 	if fileExists(planPath) || !fileExists(origPath) {
 		return nil, false
 	}
-	prompts, err := c.RefinePrompts()
+	prompts, err := c.RefinePrompts("")
 	if err != nil {
 		return nil, false
 	}
