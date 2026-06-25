@@ -190,7 +190,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.FileSuggestIndex = 0
 		m.CmdSuggestIndex = 0
 		m.fileSuggestHidden = ""
-		m.resetHistoryNav()
 		return m, nil
 	case "esc":
 		if token, ok := m.activeFileRefToken(); ok {
@@ -213,7 +212,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.FileSuggestIndex = 0
 			m.CmdSuggestIndex = 0
 			m.fileSuggestHidden = ""
-			m.resetHistoryNav()
 		}
 		return m, nil
 	}

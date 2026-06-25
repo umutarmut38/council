@@ -59,6 +59,31 @@ func TestInputHistoryCap(t *testing.T) {
 	}
 }
 
+func TestInputHistoryRestartsAfterExternalEdit(t *testing.T) {
+	var m Model
+	m.recordInputHistory("alpha")
+	m.recordInputHistory("beta")
+
+	m.historyPrev() // recall "beta"
+	if m.PromptInput != "beta" {
+		t.Fatalf("recall: got %q, want %q", m.PromptInput, "beta")
+	}
+
+	// Some other path clears the composer mid-browse (ctrl+u, esc, ctrl+c, …).
+	m.PromptInput = ""
+
+	// Up must treat the cleared line as the live draft, not continue from the
+	// stale position into "alpha".
+	m.historyPrev()
+	if m.PromptInput != "beta" {
+		t.Fatalf("after external clear, up: got %q, want %q", m.PromptInput, "beta")
+	}
+	m.historyNext()
+	if m.PromptInput != "" {
+		t.Fatalf("down should restore the cleared draft: got %q, want %q", m.PromptInput, "")
+	}
+}
+
 func TestInputHistoryEmptyNoop(t *testing.T) {
 	var m Model
 	m.PromptInput = "typing"
