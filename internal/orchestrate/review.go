@@ -103,6 +103,11 @@ func (c *Controller) captureBuildDiff(ctx context.Context, agent, wtPath, base s
 	switch {
 	case derr != nil:
 		warnings = append(warnings, fmt.Sprintf("git diff --cached %s: %v", base, derr))
+		// A failed recapture must not silently fall back to a stale diff from an
+		// earlier /compare capture — /review is meant to be authoritative.
+		if rmErr := os.Remove(c.run.BuildDiffPath(agent)); rmErr != nil && !os.IsNotExist(rmErr) {
+			warnings = append(warnings, fmt.Sprintf("remove stale %s diff: %v", agent, rmErr))
+		}
 	case len(strings.TrimSpace(string(diff))) > 0:
 		// A failed write would silently hide the work, so surface it and treat
 		// the build as unchanged (a diff we can't persist can't be reviewed).
