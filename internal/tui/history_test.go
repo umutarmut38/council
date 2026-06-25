@@ -84,6 +84,30 @@ func TestInputHistoryRestartsAfterExternalEdit(t *testing.T) {
 	}
 }
 
+func TestBrowsingHistory(t *testing.T) {
+	var m Model
+	m.recordInputHistory("/status")
+	m.recordInputHistory("/plan")
+
+	if m.browsingHistory() {
+		t.Fatal("not browsing before any recall")
+	}
+	m.historyPrev() // recall "/plan"
+	if !m.browsingHistory() {
+		t.Fatal("browsing while a recalled entry is shown unedited")
+	}
+	// Editing the recalled line ends browsing (arrows resume palette/file).
+	m.PromptInput = "/plan x"
+	if m.browsingHistory() {
+		t.Fatal("not browsing after editing the recalled line")
+	}
+	// Returning to the live draft ends browsing.
+	m.resetHistoryNav()
+	if m.browsingHistory() {
+		t.Fatal("not browsing at the live draft")
+	}
+}
+
 func TestInputHistoryEmptyNoop(t *testing.T) {
 	var m Model
 	m.PromptInput = "typing"

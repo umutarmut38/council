@@ -67,6 +67,14 @@ func (m *Model) setFromHistory(text string) {
 	m.historyLast = text
 }
 
+// browsingHistory reports that a recalled entry is currently shown unedited,
+// so up/down should keep walking history rather than driving the command
+// palette or @file picker — recalling a spaceless slash command (e.g.
+// "/status") would otherwise re-open the palette and trap the arrows.
+func (m *Model) browsingHistory() bool {
+	return m.historyPos < len(m.inputHistory) && m.PromptInput == m.historyLast
+}
+
 // resetHistoryNav points navigation back at the live draft, so the next arrow
 // up starts from the newest entry.
 func (m *Model) resetHistoryNav() {
