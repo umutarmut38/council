@@ -267,10 +267,10 @@ func (m *Model) handleArtifactViewerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "y":
 		if m.viewingAdoptPreview() {
-			cmd := m.applyAdopt(m.pendingAdopt.Agent)
-			m.closeArtifactView()
-			m.ScreenMode = ScreenPanes
-			return m, cmd
+			// applyAdopt owns the post-apply screen: a receipt on success, the
+			// panes on failure. Don't force a transition here or it would clobber
+			// the receipt the user needs to see.
+			return m, m.applyAdopt(m.pendingAdopt.Agent)
 		}
 	case "n":
 		if m.viewingAdoptPreview() {
