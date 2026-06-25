@@ -15,6 +15,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/umutarmut38/council/internal/capbuf"
 )
 
 // maxCaptureBytes caps the stdout/stderr retained per setup command, so a
@@ -51,7 +53,7 @@ type command struct {
 	state       State
 	ready       bool
 	err         string
-	output      *capBuffer
+	output      *capbuf.Writer
 }
 
 // CommandView is an immutable snapshot of one setup command's state.
@@ -107,7 +109,7 @@ func (s *Status) Begin(label string, args []string, kind Kind, waitForPort int) 
 		kind:        kind,
 		waitForPort: waitForPort,
 		state:       StatePending,
-		output:      &capBuffer{max: maxCaptureBytes},
+		output:      &capbuf.Writer{Max: maxCaptureBytes},
 	}
 	s.commands = append(s.commands, c)
 	return &Handle{s: s, idx: len(s.commands) - 1}
@@ -115,7 +117,7 @@ func (s *Status) Begin(label string, args []string, kind Kind, waitForPort int) 
 
 // Writer returns the sink for this command's stdout/stderr. It is safe for
 // concurrent writes.
-func (h *Handle) Writer() *capBuffer {
+func (h *Handle) Writer() *capbuf.Writer {
 	h.s.mu.Lock()
 	defer h.s.mu.Unlock()
 	return h.s.commands[h.idx].output
