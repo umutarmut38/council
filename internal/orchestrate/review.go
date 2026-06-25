@@ -179,17 +179,41 @@ func (c *Controller) ensureBuildDiffs() {
 			}
 			continue
 		}
-		if hasDiff {
-			continue // already captured and still dirty/inconclusive; /review re-captures
+		if !ok && hasDiff {
+			continue // keep the last captured diff when the live probe is inconclusive
 		}
 		// Surface best-effort capture failures: without this, a failed git
-		// add/diff would leave /compare reporting "no build changes yet" with no
-		// way to diagnose. Logged to the same warnings.log /review uses.
+		// add/diff would leave /compare reporting stale or missing changes with
+		// no way to diagnose. Logged to the same warnings.log /review uses.
 		if _, warnings := c.captureBuildDiff(ctx, wt.Agent, wt.Path, base); len(warnings) > 0 {
 			warned = append(warned, BuildCheck{Agent: wt.Agent, Warnings: warnings})
 		}
 	}
 	c.logCheckWarnings(warned)
+}
+
+// refreshBuildDiff re-captures one live build worktree's diff when available,
+// falling back to the last captured artifact if the worktree has been cleaned.
+func (c *Controller) refreshBuildDiff(agent string) {
+	if c.run == nil || strings.TrimSpace(agent) == "" {
+		return
+	}
+	base, err := c.run.BaseSHA()
+	if err != nil {
+		return
+	}
+	wtPath, ok := c.WorktreePath(agent)
+	if !ok {
+		return
+	}
+	if err := os.MkdirAll(c.run.BuildsDir(), fsperm.Dir()); err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), compareScanBudget)
+	defer cancel()
+	if _, warnings := c.captureBuildDiff(ctx, agent, wtPath, base); len(warnings) > 0 {
+		c.logCheckWarnings([]BuildCheck{{Agent: agent, Warnings: warnings}})
+	}
 }
 
 // logCheckWarnings appends ignored best-effort errors to a per-run warnings
@@ -511,6 +535,11 @@ type AdoptPlan struct {
 // result. It never modifies the working tree.
 func (c *Controller) PlanAdopt(override string) (AdoptPlan, error) {
 	agentName, diffPath, err := c.resolveAdopt(override)
+	if err != nil {
+		return AdoptPlan{}, err
+	}
+	c.refreshBuildDiff(agentName)
+	agentName, diffPath, err = c.resolveAdopt(agentName)
 	if err != nil {
 		return AdoptPlan{}, err
 	}

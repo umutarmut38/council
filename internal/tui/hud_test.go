@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -773,6 +774,85 @@ func TestCompareScreenNavigationAndDiffPager(t *testing.T) {
 	m = *updated.(*Model)
 	if m.ScreenMode != ScreenPanes {
 		t.Fatalf("esc from rows: screen = %v, want panes", m.ScreenMode)
+	}
+}
+
+func TestPreviewIsReadOnlyAndAdoptWaitsForAccept(t *testing.T) {
+	root := initTUITestRepo(t)
+	chdirTUI(t, root)
+	cfg := config.Config{
+		Agents:   map[string]config.AgentConfig{"a": {Enabled: true, Command: []string{"true"}}},
+		Sessions: config.SessionConfig{RootDir: filepath.Join(root, ".council", "runs")},
+	}
+	cfg.Normalize()
+	ctrl, err := orchestrate.NewController(cfg, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.StartRun("do it"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ctrl.Run().PlanPath("a"), []byte("plan"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.SetSinglePlanWinner("a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ctrl.BuildPrompt(); err != nil {
+		t.Fatal(err)
+	}
+	wt, ok := ctrl.WorktreePath("a")
+	if !ok {
+		t.Fatal("missing build worktree")
+	}
+	if err := os.WriteFile(filepath.Join(wt, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ctrl.CompareBuilds(); err != nil {
+		t.Fatalf("capture diff: %v", err)
+	}
+
+	m := NewModelWithConfig(nil, nil, cfg, "", nil, 0, nil, ctrl)
+	m.Width = 100
+	m.Height = 30
+
+	m.cmdPreview("a")
+	if m.pendingAdopt != nil {
+		t.Fatal("/preview must not stage an adoption")
+	}
+	if m.viewingAdoptPreview() {
+		t.Fatal("/preview must not expose adopt-preview key handling")
+	}
+	if _, err := os.Stat(filepath.Join(root, "feature.txt")); !os.IsNotExist(err) {
+		t.Fatal("/preview wrote to the repo working tree")
+	}
+	updated, cmd := m.handleArtifactViewerKey(keyMsg("y"))
+	m = *updated.(*Model)
+	if cmd != nil {
+		t.Fatal("y in /preview should not schedule an apply command")
+	}
+	if _, err := os.Stat(filepath.Join(root, "feature.txt")); !os.IsNotExist(err) {
+		t.Fatal("y in /preview applied the diff")
+	}
+
+	m.cmdAdopt("a")
+	if m.pendingAdopt == nil {
+		t.Fatal("/adopt should stage an adoption after rendering its confirmation preview")
+	}
+	if !m.viewingAdoptPreview() {
+		t.Fatal("/adopt should expose adopt-preview key handling")
+	}
+	if _, err := os.Stat(filepath.Join(root, "feature.txt")); !os.IsNotExist(err) {
+		t.Fatal("/adopt applied before explicit acceptance")
+	}
+	updated, _ = m.handleArtifactViewerKey(keyMsg("y"))
+	m = *updated.(*Model)
+	data, err := os.ReadFile(filepath.Join(root, "feature.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.ReplaceAll(string(data), "\r\n", "\n") != "feature\n" {
+		t.Fatalf("accepted adoption wrote %q", data)
 	}
 }
 
