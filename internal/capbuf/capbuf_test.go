@@ -3,6 +3,7 @@ package capbuf
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -39,4 +40,32 @@ func TestWriterUnbounded(t *testing.T) {
 	if strings.Contains(w.String(), "truncated") {
 		t.Fatal("unbounded buffer should never truncate")
 	}
+}
+
+// TestWriterConcurrentReadWrite exercises the "safe for concurrent use" promise:
+// readers (String/Bytes) must not race with writers appending in place. Run with
+// -race; it fails if String/Bytes read the buffer outside the lock.
+func TestWriterConcurrentReadWrite(t *testing.T) {
+	w := &Writer{Max: 0}
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 500; j++ {
+				fmt.Fprintf(w, "chunk-%d\n", j)
+			}
+		}()
+	}
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 500; j++ {
+				_ = w.String()
+				_ = w.Bytes()
+			}
+		}()
+	}
+	wg.Wait()
 }

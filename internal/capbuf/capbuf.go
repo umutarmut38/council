@@ -42,13 +42,20 @@ func (w *Writer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// Bytes returns the retained output (capped, with a trailing marker when the
-// output was truncated).
+// Bytes returns a copy of the retained output (capped, with a trailing marker
+// when the output was truncated). It returns a copy, not the internal buffer,
+// so the result stays valid and race-free even if a concurrent Write appends in
+// place afterward.
 func (w *Writer) Bytes() []byte {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.buf
+	return append([]byte(nil), w.buf...)
 }
 
-// String returns the retained output as a string.
-func (w *Writer) String() string { return string(w.Bytes()) }
+// String returns the retained output as a string. The conversion happens under
+// the lock so it is safe to call while another goroutine is still writing.
+func (w *Writer) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return string(w.buf)
+}
