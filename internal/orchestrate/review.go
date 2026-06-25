@@ -215,14 +215,13 @@ func (c *Controller) refreshBuildDiff(agent string) {
 	ctx, cancel := context.WithTimeout(context.Background(), reviewCaptureTimeout)
 	defer cancel()
 	diffPath := c.run.BuildDiffPath(agent)
-	hasDiff := false
-	if fi, statErr := os.Stat(diffPath); statErr == nil && fi.Size() > 0 {
-		hasDiff = true
-	}
-	// Cheap read-only probe first, mirroring ensureBuildDiffs. captureBuildDiff
-	// drops the existing diff on any git error, so an inconclusive probe (a
-	// transient git error or an index.lock) must NOT trigger a recapture — that
-	// would discard the last good artifact DiffVsBase/PlanAdopt fall back to.
+	// Snapshot the last-known-good diff up front: captureBuildDiff deletes the
+	// artifact on a git/write error, and DiffVsBase/PlanAdopt fall back to it, so
+	// a failed recapture must not strand callers with no diff at all.
+	prev, hasDiff := readGoodDiff(diffPath)
+	// Cheap read-only probe first, mirroring ensureBuildDiffs. An inconclusive
+	// probe (a transient git error or an index.lock) must NOT trigger a recapture
+	// when we already hold a diff — that would risk discarding it.
 	changed, ok := worktreeProbe(ctx, wtPath, base)
 	if ok && !changed {
 		if hasDiff {
@@ -234,8 +233,27 @@ func (c *Controller) refreshBuildDiff(agent string) {
 		return // keep the last captured diff when the live probe is inconclusive
 	}
 	if _, warnings := c.captureBuildDiff(ctx, agent, wtPath, base); len(warnings) > 0 {
+		// The recapture errored. captureBuildDiff removes/empties the artifact on
+		// failure, so if a previous diff existed and is now gone, restore it —
+		// a transient error shouldn't lose the last-known-good diff. A fresh,
+		// non-empty recapture (e.g. only `git add -A` warned) is kept as-is.
+		if hasDiff {
+			if fi, statErr := os.Stat(diffPath); statErr != nil || fi.Size() == 0 {
+				_ = os.WriteFile(diffPath, prev, fsperm.File())
+			}
+		}
 		c.logCheckWarnings([]BuildCheck{{Agent: agent, Warnings: warnings}})
 	}
+}
+
+// readGoodDiff returns a captured diff artifact's bytes when it exists and is
+// non-empty, so a caller can restore it if a later recapture fails.
+func readGoodDiff(diffPath string) (data []byte, ok bool) {
+	data, err := os.ReadFile(diffPath)
+	if err != nil || len(data) == 0 {
+		return nil, false
+	}
+	return data, true
 }
 
 // logCheckWarnings appends ignored best-effort errors to a per-run warnings

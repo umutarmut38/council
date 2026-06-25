@@ -53,7 +53,7 @@ func (c *Controller) JudgeBuild(choice string) (string, error) {
 		}
 	}
 	if len(avail) == 0 {
-		return "", errors.New("no build diffs captured yet; run /review first")
+		return "", errors.New("no build diffs captured yet; run /compare or /review first")
 	}
 	return "", fmt.Errorf("no build diff for %q; available: %s", choice, strings.Join(avail, ", "))
 }

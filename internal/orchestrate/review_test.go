@@ -715,6 +715,54 @@ func TestDiffVsBaseDropsStaleDiffAfterRevert(t *testing.T) {
 	}
 }
 
+// TestRefreshPreservesDiffWhenRecaptureFails: when a live-worktree recapture
+// fails (here forced by pointing the run base at a ref git can't resolve, so
+// `git diff --cached <base>` errors and captureBuildDiff drops the artifact),
+// the last-known-good diff that DiffVsBase/PlanAdopt fall back to is restored
+// rather than lost.
+func TestRefreshPreservesDiffWhenRecaptureFails(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := newTestController(t, root, []string{"a"}, config.ReviewConfig{})
+	base, _ := revParse(root, "HEAD")
+	if err := ctrl.run.SaveBaseSHA(base); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.ensureWorktrees(config.PhaseBuild); err != nil {
+		t.Fatal(err)
+	}
+
+	wt := ctrl.worktrees["a"]
+	if err := os.WriteFile(filepath.Join(wt, "feature.txt"), []byte("impl\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ctrl.CompareBuilds(); err != nil {
+		t.Fatalf("capture diff: %v", err)
+	}
+	good, err := os.ReadFile(ctrl.run.BuildDiffPath("a"))
+	if err != nil || len(good) == 0 {
+		t.Fatalf("expected a captured diff: %v", err)
+	}
+
+	// Point the base at an unresolvable ref. The live probe still sees the
+	// worktree as changed (HEAD != base), so refreshBuildDiff recaptures, but
+	// `git diff --cached <bad base>` fails and captureBuildDiff drops the diff.
+	if err := ctrl.run.SaveBaseSHA("council-no-such-base-ref"); err != nil {
+		t.Fatal(err)
+	}
+
+	diff, err := ctrl.DiffVsBase("a")
+	if err != nil {
+		t.Fatalf("DiffVsBase should fall back to the preserved diff: %v", err)
+	}
+	if diff != string(good) {
+		t.Fatalf("preserved diff mismatch:\n got %q\nwant %q", diff, good)
+	}
+	if onDisk, err := os.ReadFile(ctrl.run.BuildDiffPath("a")); err != nil || string(onDisk) != string(good) {
+		t.Fatalf("artifact was not restored on disk: %v", err)
+	}
+}
+
 func TestBuildProgressCountsActiveWorktrees(t *testing.T) {
 	root := initRepo(t)
 	chdir(t, root)
