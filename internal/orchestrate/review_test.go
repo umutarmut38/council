@@ -676,6 +676,45 @@ func TestCompareDropsStaleDiff(t *testing.T) {
 	}
 }
 
+// TestDiffVsBaseDropsStaleDiffAfterRevert: the single-agent refresh path that
+// /compare's per-build diff and /adopt use must also drop a captured diff once
+// the worktree returns to base — not just the full ensureBuildDiffs scan.
+func TestDiffVsBaseDropsStaleDiffAfterRevert(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := newTestController(t, root, []string{"a"}, config.ReviewConfig{})
+	base, _ := revParse(root, "HEAD")
+	if err := ctrl.run.SaveBaseSHA(base); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.ensureWorktrees(config.PhaseBuild); err != nil {
+		t.Fatal(err)
+	}
+
+	wt := ctrl.worktrees["a"]
+	if err := os.WriteFile(filepath.Join(wt, "a.txt"), []byte("impl\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ctrl.CompareBuilds(); err != nil {
+		t.Fatalf("capture diff: %v", err)
+	}
+	if fi, statErr := os.Stat(ctrl.run.BuildDiffPath("a")); statErr != nil || fi.Size() == 0 {
+		t.Fatal("a's diff should have been captured")
+	}
+
+	// Revert the worktree to base, then read the diff again. The refresh must
+	// drop the stale artifact and report that nothing is captured.
+	gitIn(t, wt, "reset", "--hard", "HEAD")
+	_ = os.Remove(filepath.Join(wt, "a.txt"))
+
+	if _, err := ctrl.DiffVsBase("a"); err == nil {
+		t.Fatal("DiffVsBase should report no diff once the worktree returns to base")
+	}
+	if _, statErr := os.Stat(ctrl.run.BuildDiffPath("a")); !os.IsNotExist(statErr) {
+		t.Fatal("stale diff should have been dropped once the worktree returned to base")
+	}
+}
+
 func TestBuildProgressCountsActiveWorktrees(t *testing.T) {
 	root := initRepo(t)
 	chdir(t, root)

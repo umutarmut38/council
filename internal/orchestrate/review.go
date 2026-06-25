@@ -202,15 +202,37 @@ func (c *Controller) refreshBuildDiff(agent string) {
 	if err != nil {
 		return
 	}
-	wtPath, ok := c.WorktreePath(agent)
-	if !ok {
-		return
+	wtPath, live := c.WorktreePath(agent)
+	if !live {
+		return // worktree cleaned: callers fall back to the last captured artifact
 	}
 	if err := os.MkdirAll(c.run.BuildsDir(), fsperm.Dir()); err != nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), compareScanBudget)
+	// Single-agent, on-demand refresh: give it the generous per-worktree budget
+	// (what /review gives each worktree), not the /compare-wide scan budget that
+	// is shared across every worktree.
+	ctx, cancel := context.WithTimeout(context.Background(), reviewCaptureTimeout)
 	defer cancel()
+	diffPath := c.run.BuildDiffPath(agent)
+	hasDiff := false
+	if fi, statErr := os.Stat(diffPath); statErr == nil && fi.Size() > 0 {
+		hasDiff = true
+	}
+	// Cheap read-only probe first, mirroring ensureBuildDiffs. captureBuildDiff
+	// drops the existing diff on any git error, so an inconclusive probe (a
+	// transient git error or an index.lock) must NOT trigger a recapture — that
+	// would discard the last good artifact DiffVsBase/PlanAdopt fall back to.
+	changed, ok := worktreeProbe(ctx, wtPath, base)
+	if ok && !changed {
+		if hasDiff {
+			_ = os.Remove(diffPath) // worktree back at base: drop the stale diff
+		}
+		return
+	}
+	if !ok && hasDiff {
+		return // keep the last captured diff when the live probe is inconclusive
+	}
 	if _, warnings := c.captureBuildDiff(ctx, agent, wtPath, base); len(warnings) > 0 {
 		c.logCheckWarnings([]BuildCheck{{Agent: agent, Warnings: warnings}})
 	}
