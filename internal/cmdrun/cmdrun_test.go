@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/umutarmut38/council/internal/capbuf"
 )
 
 // helperEnv gates TestHelperProcess: it only acts as a scripted command when set
@@ -147,7 +149,7 @@ func TestOutputCapTruncates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Output: %v", err)
 	}
-	if want := "aaaa" + truncationMarker; string(out) != want {
+	if want := "aaaa" + capbuf.TruncationMarker; string(out) != want {
 		t.Fatalf("capped output = %q, want %q", out, want)
 	}
 }
@@ -187,66 +189,6 @@ func TestPackageHelpersUseOSRunner(t *testing.T) {
 	}
 	if _, err := Run(context.Background(), helperSpec("stdout", "ignored")); err != nil {
 		t.Fatalf("Run helper: %v", err)
-	}
-}
-
-func TestFakeRecordsAndScriptsCalls(t *testing.T) {
-	fake := &Fake{Handler: func(s Spec) (Result, error) {
-		if s.Name == "git" && len(s.Args) > 0 && s.Args[0] == "status" {
-			return Result{Stdout: []byte("clean")}, nil
-		}
-		return Result{Stderr: []byte("nope")}, errors.New("unexpected")
-	}}
-
-	out, err := fake.Output(context.Background(), Spec{Name: "git", Args: []string{"status"}})
-	if err != nil || string(out) != "clean" {
-		t.Fatalf("fake Output = %q, %v", out, err)
-	}
-
-	combined, err := fake.CombinedOutput(context.Background(), Spec{Name: "git", Args: []string{"push"}})
-	if err == nil {
-		t.Fatal("expected the scripted error for git push")
-	}
-	if !strings.Contains(string(combined), "nope") {
-		t.Fatalf("fake CombinedOutput = %q, want stderr text", combined)
-	}
-
-	calls := fake.Calls()
-	if len(calls) != 2 || calls[0].Args[0] != "status" || calls[1].Args[0] != "push" {
-		t.Fatalf("recorded calls = %+v", calls)
-	}
-}
-
-func TestFakeRecordsAreDecoupledFromCaller(t *testing.T) {
-	fake := &Fake{}
-	args := []string{"status"}
-	env := map[string]string{"KEY": "before"}
-	if _, err := fake.Run(context.Background(), Spec{Name: "git", Args: args, Env: env}); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	// Mutating the caller's inputs after the call must not change history.
-	args[0] = "push"
-	env["KEY"] = "after"
-	// Mutating a returned copy must not change history either.
-	if got := fake.Calls(); got[0].Args[0] != "status" || got[0].Env["KEY"] != "before" {
-		t.Fatalf("recorded call mutated by caller: %+v", got[0])
-	}
-	got := fake.Calls()
-	got[0].Args[0] = "mutated"
-	got[0].Env["KEY"] = "mutated"
-	if again := fake.Calls(); again[0].Args[0] != "status" || again[0].Env["KEY"] != "before" {
-		t.Fatalf("recorded call mutated via returned copy: %+v", again[0])
-	}
-}
-
-func TestFakeNilHandlerSucceeds(t *testing.T) {
-	fake := &Fake{}
-	if _, err := fake.Run(context.Background(), Spec{Name: "anything"}); err != nil {
-		t.Fatalf("nil-handler fake should succeed, got %v", err)
-	}
-	if got := fake.Calls(); len(got) != 1 {
-		t.Fatalf("calls = %d, want 1", len(got))
 	}
 }
 

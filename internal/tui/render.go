@@ -1010,10 +1010,3 @@ func dropLastRune(value string) string {
 	}
 	return value[:len(value)-size]
 }
-
-func minInt(a int, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

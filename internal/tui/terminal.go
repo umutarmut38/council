@@ -648,12 +648,12 @@ func (v *agentView) insertBlanks(count int) {
 	for len(line) < v.CursorCol {
 		line = append(line, screenCell{Ch: ' '})
 	}
-	prefix := append([]screenCell(nil), line[:minInt(v.CursorCol, len(line))]...)
+	prefix := append([]screenCell(nil), line[:min(v.CursorCol, len(line))]...)
 	blanks := make([]screenCell, count)
 	for i := range blanks {
 		blanks[i] = v.blankCell()
 	}
-	suffix := append(blanks, line[minInt(v.CursorCol, len(line)):]...)
+	suffix := append(blanks, line[min(v.CursorCol, len(line)):]...)
 	line = append(prefix, suffix...)
 	if len(line) > v.Width {
 		line = line[:v.Width]
