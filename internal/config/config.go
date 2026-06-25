@@ -382,10 +382,11 @@ const (
 type PolicyConfig struct {
 	// Mode is one of safe, normal (default), aggressive.
 	//   safe:       refuse risky auto-approval phase flags, never expand
-	//               absolute @file refs, always confirm adopt/clean.
-	//   normal:     warn about risky flags, confirm adopt/clean.
-	//   aggressive: allow auto-approval flags and skip confirmations; meant
-	//               for sandboxed or fully-trusted environments.
+	//               absolute @file refs, always confirm destructive commands.
+	//   normal:     warn about risky flags, confirm destructive commands.
+	//   aggressive: allow auto-approval flags and skip non-interactive adopt
+	//               and clean confirmations; meant for sandboxed or
+	//               fully-trusted environments. In-chat /adopt still confirms.
 	Mode string `yaml:"mode,omitempty"`
 }
 
@@ -403,7 +404,8 @@ func (p PolicyConfig) Normalized() string {
 func (p PolicyConfig) IsSafe() bool       { return p.Normalized() == PolicySafe }
 func (p PolicyConfig) IsAggressive() bool { return p.Normalized() == PolicyAggressive }
 
-// ConfirmDestructive reports whether adopt/clean should ask before acting.
+// ConfirmDestructive reports whether policy-aware destructive commands should
+// ask before acting.
 func (p PolicyConfig) ConfirmDestructive() bool { return !p.IsAggressive() }
 
 type PersonalityCategoryConfig struct {

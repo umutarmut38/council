@@ -128,16 +128,17 @@ func gitProbe(ctx context.Context, wtPath string, args ...string) (string, bool)
 	return strings.TrimSpace(string(out)), true
 }
 
-// DiffVsBase returns an agent's captured implementation diff (worktree
-// against the recorded build base). It reads the run artifact, so it works
-// even after the worktrees were cleaned.
+// DiffVsBase returns an agent's implementation diff (worktree against the
+// recorded build base). When the live worktree is still present it refreshes
+// the run artifact first; after cleanup it falls back to the captured diff.
 func (c *Controller) DiffVsBase(agent string) (string, error) {
 	if c.run == nil {
 		return "", errors.New("no active run")
 	}
+	c.refreshBuildDiff(agent)
 	data, err := os.ReadFile(c.run.BuildDiffPath(agent))
 	if err != nil {
-		return "", fmt.Errorf("no captured diff for %q; run /review first", agent)
+		return "", fmt.Errorf("no captured diff for %q; run /compare or /review first", agent)
 	}
 	return string(data), nil
 }

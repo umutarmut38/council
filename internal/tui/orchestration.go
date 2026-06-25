@@ -257,7 +257,7 @@ func (m *Model) agentsMatching(pred func(string) bool) []string {
 // waits for an explicit y — a status-line-only confirmation proved far too
 // easy to miss, leaving users certain they had adopted when nothing was
 // applied. With no argument it adopts the reviewed winner; "/adopt <agent>"
-// overrides. policy.mode: aggressive applies immediately.
+// overrides.
 func (m *Model) cmdAdopt(rest string) tea.Cmd {
 	if m.orch == nil {
 		m.Status = "orchestration unavailable"
@@ -279,19 +279,7 @@ func (m *Model) cmdAdopt(rest string) tea.Cmd {
 		return m.applyAdopt(m.pendingAdopt.Agent)
 	}
 
-	if !m.Config.Policy.ConfirmDestructive() {
-		plan, err := m.orch.PlanAdopt(arg)
-		if err != nil {
-			m.Status = "adopt: " + err.Error()
-			return nil
-		}
-		if plan.CheckError != "" {
-			m.Status = fmt.Sprintf("adopt: %s's diff does not apply cleanly: %s", plan.Agent, firstLine(plan.CheckError))
-			return nil
-		}
-		return m.applyAdopt(plan.Agent)
-	}
-	m.cmdPreview(arg)
+	m.openAdoptPreview(arg, true)
 	return nil
 }
 
@@ -312,26 +300,34 @@ func (m *Model) applyAdopt(agentName string) tea.Cmd {
 const previewDiffLimit = 512 << 10
 
 // cmdPreview shows what /adopt would change — files, dirty-tree overlap, and
-// the full diff content — without touching the tree. A clean preview is also
-// staged, so `/adopt confirm` right after applies exactly what was shown.
+// the full diff content — without touching the tree or staging an adoption.
 func (m *Model) cmdPreview(rest string) {
+	m.openAdoptPreview(rest, false)
+}
+
+func (m *Model) openAdoptPreview(rest string, allowApply bool) {
 	if m.orch == nil {
 		m.Status = "orchestration unavailable"
 		return
 	}
 	if m.orch.Run() == nil {
 		if err := m.orch.UseRun(""); err != nil {
-			m.Status = "preview: " + err.Error()
+			m.Status = adoptPreviewVerb(allowApply) + ": " + err.Error()
 			return
 		}
 	}
+	m.pendingAdopt = nil
 	plan, err := m.orch.PlanAdopt(strings.TrimSpace(rest))
 	if err != nil {
-		m.Status = "preview: " + err.Error()
+		m.Status = adoptPreviewVerb(allowApply) + ": " + err.Error()
 		return
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Adopt preview: %s\n\nDiff: %s\n\n## Files (%d)\n\n", plan.Agent, plan.DiffPath, len(plan.Files))
+	title := "Preview"
+	if allowApply {
+		title = "Adopt preview"
+	}
+	fmt.Fprintf(&b, "# %s: %s\n\nDiff: %s\n\n## Files (%d)\n\n", title, plan.Agent, plan.DiffPath, len(plan.Files))
 	for _, f := range plan.Files {
 		fmt.Fprintf(&b, "- %s\n", f)
 	}
@@ -344,13 +340,22 @@ func (m *Model) cmdPreview(rest string) {
 	status := ""
 	if plan.CheckError != "" {
 		fmt.Fprintf(&b, "\n## git apply --check FAILED\n\n%s\n", plan.CheckError)
-		m.pendingAdopt = nil
-		status = fmt.Sprintf("preview %s: diff does NOT apply cleanly", plan.Agent)
+		status = fmt.Sprintf("%s %s: diff does NOT apply cleanly", adoptPreviewVerb(allowApply), plan.Agent)
 	} else {
-		b.WriteString("\ngit apply --check: OK\n\nApply this diff to your working tree?  y = apply now · n = cancel · Esc = close (then /adopt confirm)\n")
-		staged := plan
-		m.pendingAdopt = &staged
-		status = fmt.Sprintf("previewing %s — y applies, n cancels", plan.Agent)
+		b.WriteString("\ngit apply --check: OK\n\n")
+		if allowApply {
+			b.WriteString("Apply this diff to your working tree?  y = apply now · n = cancel · Esc = close (then /adopt confirm)\n")
+			staged := plan
+			m.pendingAdopt = &staged
+			status = fmt.Sprintf("adopt preview %s — y applies, n cancels", plan.Agent)
+		} else {
+			b.WriteString("Read-only preview. Run /adopt")
+			if strings.TrimSpace(rest) != "" {
+				fmt.Fprintf(&b, " %s", strings.TrimSpace(rest))
+			}
+			b.WriteString(" to apply this diff.\n")
+			status = fmt.Sprintf("previewing %s — read-only", plan.Agent)
+		}
 	}
 
 	// The diff itself, so the change is inspectable without leaving the TUI.
@@ -360,16 +365,20 @@ func (m *Model) cmdPreview(rest string) {
 		fmt.Fprintf(&b, "\n## Diff\n\n%s\n", strings.TrimRight(string(data), "\n"))
 	}
 
-	m.openArtifactText("adopt preview: "+plan.Agent, b.String())
+	label := "preview: "
+	if allowApply {
+		label = "adopt preview: "
+	}
+	m.openArtifactText(label+plan.Agent, b.String())
 	m.artifactFile = plan.DiffPath // `e` opens the diff in $EDITOR
 	m.Status = status
 }
 
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
+func adoptPreviewVerb(allowApply bool) string {
+	if allowApply {
+		return "adopt"
 	}
-	return s
+	return "preview"
 }
 
 // cmdStatus opens a persistent full-screen snapshot of the run: the phase rail

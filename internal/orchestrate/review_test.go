@@ -256,6 +256,43 @@ func TestPlanAdoptReportsDirtyTreeAndFiles(t *testing.T) {
 	}
 }
 
+func TestPlanAdoptCapturesLiveDiffWithoutArtifact(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := newTestController(t, root, []string{"a"}, config.ReviewConfig{})
+	base, _ := revParse(root, "HEAD")
+	if err := ctrl.run.SaveBaseSHA(base); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.ensureWorktrees(config.PhaseBuild); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(ctrl.worktrees["a"], "feature.txt"), []byte("live\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Stat(ctrl.run.BuildDiffPath("a")); !os.IsNotExist(statErr) {
+		t.Fatalf("test setup should not pre-create a diff artifact: %v", statErr)
+	}
+
+	plan, err := ctrl.PlanAdopt("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Agent != "a" || plan.DiffPath != ctrl.run.BuildDiffPath("a") {
+		t.Fatalf("plan = %+v", plan)
+	}
+	if len(plan.Files) != 1 || plan.Files[0] != "feature.txt" {
+		t.Fatalf("plan files = %v, want [feature.txt]", plan.Files)
+	}
+	if fi, statErr := os.Stat(ctrl.run.BuildDiffPath("a")); statErr != nil || fi.Size() == 0 {
+		t.Fatalf("PlanAdopt did not capture the live worktree diff: %v", statErr)
+	}
+	if _, err := os.Stat(filepath.Join(root, "feature.txt")); !os.IsNotExist(err) {
+		t.Fatal("PlanAdopt applied the diff")
+	}
+}
+
 func TestAdoptRefusesConflictingDiff(t *testing.T) {
 	root := initRepo(t)
 	chdir(t, root)
@@ -502,6 +539,98 @@ func TestCompareBuildsBeforeReview(t *testing.T) {
 	}
 }
 
+func TestCompareRefreshesCapturedDiffAfterWorktreeEdit(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := newTestController(t, root, []string{"a"}, config.ReviewConfig{})
+	base, _ := revParse(root, "HEAD")
+	if err := ctrl.run.SaveBaseSHA(base); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.ensureWorktrees(config.PhaseBuild); err != nil {
+		t.Fatal(err)
+	}
+
+	wt := ctrl.worktrees["a"]
+	if err := os.WriteFile(filepath.Join(wt, "app.txt"), []byte("first\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ctrl.CompareBuilds(); err != nil {
+		t.Fatalf("first compare: %v", err)
+	}
+	first, err := os.ReadFile(ctrl.run.BuildDiffPath("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(first), "+first") {
+		t.Fatalf("first captured diff missing edit:\n%s", first)
+	}
+
+	if err := os.WriteFile(filepath.Join(wt, "app.txt"), []byte("second\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	diff, err := ctrl.DiffVsBase("a")
+	if err != nil {
+		t.Fatalf("diff vs base after edit: %v", err)
+	}
+	if !strings.Contains(diff, "+second") || strings.Contains(diff, "+first") {
+		t.Fatalf("diff was not refreshed after worktree edit:\n%s", diff)
+	}
+	onDisk, err := os.ReadFile(ctrl.run.BuildDiffPath("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(onDisk) != diff {
+		t.Fatal("refreshed compare diff was not written back to the run artifact")
+	}
+}
+
+func TestAdoptRefreshesCapturedDiffAfterWorktreeEdit(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := newTestController(t, root, []string{"a"}, config.ReviewConfig{})
+	base, _ := revParse(root, "HEAD")
+	if err := ctrl.run.SaveBaseSHA(base); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.ensureWorktrees(config.PhaseBuild); err != nil {
+		t.Fatal(err)
+	}
+
+	wt := ctrl.worktrees["a"]
+	if err := os.WriteFile(filepath.Join(wt, "feature.txt"), []byte("first\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ctrl.CompareBuilds(); err != nil {
+		t.Fatalf("capture initial diff: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, "feature.txt"), []byte("second\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := ctrl.PlanAdopt("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.CheckError != "" {
+		t.Fatalf("freshened diff should apply cleanly: %s", plan.CheckError)
+	}
+	if _, err := os.Stat(filepath.Join(root, "feature.txt")); !os.IsNotExist(err) {
+		t.Fatal("PlanAdopt applied the diff before confirmation")
+	}
+
+	if _, _, err := ctrl.Adopt("a"); err != nil {
+		t.Fatalf("adopt freshened diff: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "feature.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.ReplaceAll(string(data), "\r\n", "\n") != "second\n" {
+		t.Fatalf("adopted stale content: %q", data)
+	}
+}
+
 // TestCompareDropsStaleDiff: if an agent reverts its worktree back to the base
 // after a /compare captured its diff, a later /compare must drop the stale diff
 // instead of continuing to show changes that no longer exist.
@@ -544,6 +673,93 @@ func TestCompareDropsStaleDiff(t *testing.T) {
 	}
 	if fi, statErr := os.Stat(ctrl.run.BuildDiffPath("b")); statErr != nil || fi.Size() == 0 {
 		t.Fatal("b's diff should still be present")
+	}
+}
+
+// TestDiffVsBaseDropsStaleDiffAfterRevert: the single-agent refresh path that
+// /compare's per-build diff and /adopt use must also drop a captured diff once
+// the worktree returns to base — not just the full ensureBuildDiffs scan.
+func TestDiffVsBaseDropsStaleDiffAfterRevert(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := newTestController(t, root, []string{"a"}, config.ReviewConfig{})
+	base, _ := revParse(root, "HEAD")
+	if err := ctrl.run.SaveBaseSHA(base); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.ensureWorktrees(config.PhaseBuild); err != nil {
+		t.Fatal(err)
+	}
+
+	wt := ctrl.worktrees["a"]
+	if err := os.WriteFile(filepath.Join(wt, "a.txt"), []byte("impl\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ctrl.CompareBuilds(); err != nil {
+		t.Fatalf("capture diff: %v", err)
+	}
+	if fi, statErr := os.Stat(ctrl.run.BuildDiffPath("a")); statErr != nil || fi.Size() == 0 {
+		t.Fatal("a's diff should have been captured")
+	}
+
+	// Revert the worktree to base, then read the diff again. The refresh must
+	// drop the stale artifact and report that nothing is captured.
+	gitIn(t, wt, "reset", "--hard", "HEAD")
+	_ = os.Remove(filepath.Join(wt, "a.txt"))
+
+	if _, err := ctrl.DiffVsBase("a"); err == nil {
+		t.Fatal("DiffVsBase should report no diff once the worktree returns to base")
+	}
+	if _, statErr := os.Stat(ctrl.run.BuildDiffPath("a")); !os.IsNotExist(statErr) {
+		t.Fatal("stale diff should have been dropped once the worktree returned to base")
+	}
+}
+
+// TestRefreshPreservesDiffWhenRecaptureFails: when a live-worktree recapture
+// fails (here forced by pointing the run base at a ref git can't resolve, so
+// `git diff --cached <base>` errors and captureBuildDiff drops the artifact),
+// the last-known-good diff that DiffVsBase/PlanAdopt fall back to is restored
+// rather than lost.
+func TestRefreshPreservesDiffWhenRecaptureFails(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := newTestController(t, root, []string{"a"}, config.ReviewConfig{})
+	base, _ := revParse(root, "HEAD")
+	if err := ctrl.run.SaveBaseSHA(base); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.ensureWorktrees(config.PhaseBuild); err != nil {
+		t.Fatal(err)
+	}
+
+	wt := ctrl.worktrees["a"]
+	if err := os.WriteFile(filepath.Join(wt, "feature.txt"), []byte("impl\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ctrl.CompareBuilds(); err != nil {
+		t.Fatalf("capture diff: %v", err)
+	}
+	good, err := os.ReadFile(ctrl.run.BuildDiffPath("a"))
+	if err != nil || len(good) == 0 {
+		t.Fatalf("expected a captured diff: %v", err)
+	}
+
+	// Point the base at an unresolvable ref. The live probe still sees the
+	// worktree as changed (HEAD != base), so refreshBuildDiff recaptures, but
+	// `git diff --cached <bad base>` fails and captureBuildDiff drops the diff.
+	if err := ctrl.run.SaveBaseSHA("council-no-such-base-ref"); err != nil {
+		t.Fatal(err)
+	}
+
+	diff, err := ctrl.DiffVsBase("a")
+	if err != nil {
+		t.Fatalf("DiffVsBase should fall back to the preserved diff: %v", err)
+	}
+	if diff != string(good) {
+		t.Fatalf("preserved diff mismatch:\n got %q\nwant %q", diff, good)
+	}
+	if onDisk, err := os.ReadFile(ctrl.run.BuildDiffPath("a")); err != nil || string(onDisk) != string(good) {
+		t.Fatalf("artifact was not restored on disk: %v", err)
 	}
 }
 

@@ -179,17 +179,81 @@ func (c *Controller) ensureBuildDiffs() {
 			}
 			continue
 		}
-		if hasDiff {
-			continue // already captured and still dirty/inconclusive; /review re-captures
+		if !ok && hasDiff {
+			continue // keep the last captured diff when the live probe is inconclusive
 		}
 		// Surface best-effort capture failures: without this, a failed git
-		// add/diff would leave /compare reporting "no build changes yet" with no
-		// way to diagnose. Logged to the same warnings.log /review uses.
+		// add/diff would leave /compare reporting stale or missing changes with
+		// no way to diagnose. Logged to the same warnings.log /review uses.
 		if _, warnings := c.captureBuildDiff(ctx, wt.Agent, wt.Path, base); len(warnings) > 0 {
 			warned = append(warned, BuildCheck{Agent: wt.Agent, Warnings: warnings})
 		}
 	}
 	c.logCheckWarnings(warned)
+}
+
+// refreshBuildDiff re-captures one live build worktree's diff when available,
+// falling back to the last captured artifact if the worktree has been cleaned.
+func (c *Controller) refreshBuildDiff(agent string) {
+	if c.run == nil || strings.TrimSpace(agent) == "" {
+		return
+	}
+	base, err := c.run.BaseSHA()
+	if err != nil {
+		return
+	}
+	wtPath, live := c.WorktreePath(agent)
+	if !live {
+		return // worktree cleaned: callers fall back to the last captured artifact
+	}
+	if err := os.MkdirAll(c.run.BuildsDir(), fsperm.Dir()); err != nil {
+		return
+	}
+	// Single-agent, on-demand refresh: give it the generous per-worktree budget
+	// (what /review gives each worktree), not the /compare-wide scan budget that
+	// is shared across every worktree.
+	ctx, cancel := context.WithTimeout(context.Background(), reviewCaptureTimeout)
+	defer cancel()
+	diffPath := c.run.BuildDiffPath(agent)
+	// Snapshot the last-known-good diff up front: captureBuildDiff deletes the
+	// artifact on a git/write error, and DiffVsBase/PlanAdopt fall back to it, so
+	// a failed recapture must not strand callers with no diff at all.
+	prev, hasDiff := readGoodDiff(diffPath)
+	// Cheap read-only probe first, mirroring ensureBuildDiffs. An inconclusive
+	// probe (a transient git error or an index.lock) must NOT trigger a recapture
+	// when we already hold a diff — that would risk discarding it.
+	changed, ok := worktreeProbe(ctx, wtPath, base)
+	if ok && !changed {
+		if hasDiff {
+			_ = os.Remove(diffPath) // worktree back at base: drop the stale diff
+		}
+		return
+	}
+	if !ok && hasDiff {
+		return // keep the last captured diff when the live probe is inconclusive
+	}
+	if _, warnings := c.captureBuildDiff(ctx, agent, wtPath, base); len(warnings) > 0 {
+		// The recapture errored. captureBuildDiff removes/empties the artifact on
+		// failure, so if a previous diff existed and is now gone, restore it —
+		// a transient error shouldn't lose the last-known-good diff. A fresh,
+		// non-empty recapture (e.g. only `git add -A` warned) is kept as-is.
+		if hasDiff {
+			if fi, statErr := os.Stat(diffPath); statErr != nil || fi.Size() == 0 {
+				_ = os.WriteFile(diffPath, prev, fsperm.File())
+			}
+		}
+		c.logCheckWarnings([]BuildCheck{{Agent: agent, Warnings: warnings}})
+	}
+}
+
+// readGoodDiff returns a captured diff artifact's bytes when it exists and is
+// non-empty, so a caller can restore it if a later recapture fails.
+func readGoodDiff(diffPath string) (data []byte, ok bool) {
+	data, err := os.ReadFile(diffPath)
+	if err != nil || len(data) == 0 {
+		return nil, false
+	}
+	return data, true
 }
 
 // logCheckWarnings appends ignored best-effort errors to a per-run warnings
@@ -510,7 +574,12 @@ type AdoptPlan struct {
 // touched files, the current working-tree dirt, and a `git apply --check`
 // result. It never modifies the working tree.
 func (c *Controller) PlanAdopt(override string) (AdoptPlan, error) {
-	agentName, diffPath, err := c.resolveAdopt(override)
+	agentName, err := c.resolveAdoptAgent(override)
+	if err != nil {
+		return AdoptPlan{}, err
+	}
+	c.refreshBuildDiff(agentName)
+	diffPath, err := c.adoptDiffPath(agentName)
 	if err != nil {
 		return AdoptPlan{}, err
 	}
@@ -549,23 +618,31 @@ func (c *Controller) DirtyFiles() []string {
 	return files
 }
 
-func (c *Controller) resolveAdopt(override string) (agentName, diffPath string, err error) {
-	agentName = strings.TrimSpace(override)
-	if agentName == "" {
-		agentName, err = c.BuildWinner()
-		if err != nil {
-			return "", "", err
-		}
+func (c *Controller) resolveAdoptAgent(override string) (string, error) {
+	if c.run == nil {
+		return "", errors.New("no active run")
 	}
-	diffPath = c.run.BuildDiffPath(agentName)
+	agentName := strings.TrimSpace(override)
+	if agentName == "" {
+		winner, err := c.BuildWinner()
+		if err != nil {
+			return "", err
+		}
+		agentName = winner
+	}
+	return agentName, nil
+}
+
+func (c *Controller) adoptDiffPath(agentName string) (string, error) {
+	diffPath := c.run.BuildDiffPath(agentName)
 	if fi, statErr := os.Stat(diffPath); statErr != nil || fi.Size() == 0 {
 		avail := c.AdoptableBuilds()
 		if len(avail) == 0 {
-			return "", "", fmt.Errorf("no build diff for %q; run /review first", agentName)
+			return "", fmt.Errorf("no build diff for %q; run /compare or /review first", agentName)
 		}
-		return "", "", fmt.Errorf("no build diff for %q; available: %s", agentName, strings.Join(avail, ", "))
+		return "", fmt.Errorf("no build diff for %q; available: %s", agentName, strings.Join(avail, ", "))
 	}
-	return agentName, diffPath, nil
+	return diffPath, nil
 }
 
 // Adopt applies a build's diff onto the repo's working tree as uncommitted

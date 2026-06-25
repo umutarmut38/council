@@ -141,12 +141,11 @@ what `git diff` would say).
 `/adopt` is deliberately two-step: the first call preflights the diff
 (`git apply --check --3way`), shows the touched files, and warns when your
 working tree has uncommitted changes; `/adopt confirm` applies it — still
-**uncommitted**, for you to review and commit. `/preview` opens the same
-preflight **plus the full diff** in the pager and stages it: press `y` there
-to apply, `n` to cancel. **`/adopt <agent>`** stages a different agent's build
-to override the recommendation, and `/judge build <agent>` records your own
-pick as the winner. The same flow exists in the shell: `council review`,
-`council adopt [run] [agent] [--dry-run] [--yes]`.
+**uncommitted**, for you to review and commit. `/preview` opens a read-only
+preflight **plus the full diff** in the pager. **`/adopt <agent>`** previews a
+different agent's build to override the recommendation, and `/judge build
+<agent>` records your own pick as the winner. The same flow exists in the shell:
+`council review`, `council adopt [run] [agent] [--dry-run] [--yes]`.
 
 ### Optional: refine before building
 

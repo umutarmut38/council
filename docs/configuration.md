@@ -307,9 +307,9 @@ policy:
 
 | Mode | Behavior |
 |---|---|
-| `safe` | Refuses to run when enabled agents carry auto-approval flags; absolute `@file` refs never expand; adopt/clean always confirm. |
-| `normal` *(default)* | Doctor warns about risky flags; adopt/clean ask for confirmation. |
-| `aggressive` | Skips the adopt/clean confirmations — for sandboxed or fully-trusted environments. |
+| `safe` | Refuses to run when enabled agents carry auto-approval flags; absolute `@file` refs never expand; destructive commands always confirm. |
+| `normal` *(default)* | Doctor warns about risky flags; destructive commands ask for confirmation. |
+| `aggressive` | Skips non-interactive adopt and clean confirmations — for sandboxed or fully-trusted environments. In-chat `/adopt` still confirms. |
 
 ---
 
@@ -545,4 +545,3 @@ Limits for `@path` file-reference expansion in prompts and issues.
 | `order` | int | `0` | Sort order within groupings. |
 | `prompt_prefix` | string | — | Text prepended to prompts sent to this agent. |
 <!-- END GENERATED: config-schema -->
-
