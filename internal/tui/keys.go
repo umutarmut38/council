@@ -174,6 +174,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.moveFileSuggestion(-1) {
 			return m, nil
 		}
+		m.historyPrev()
 		return m, nil
 	case "down":
 		if m.movePaletteSelection(1) {
@@ -182,12 +183,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.moveFileSuggestion(1) {
 			return m, nil
 		}
+		m.historyNext()
 		return m, nil
 	case "backspace":
 		m.PromptInput = dropLastRune(m.PromptInput)
 		m.FileSuggestIndex = 0
 		m.CmdSuggestIndex = 0
 		m.fileSuggestHidden = ""
+		m.resetHistoryNav()
 		return m, nil
 	case "esc":
 		if token, ok := m.activeFileRefToken(); ok {
@@ -210,6 +213,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.FileSuggestIndex = 0
 			m.CmdSuggestIndex = 0
 			m.fileSuggestHidden = ""
+			m.resetHistoryNav()
 		}
 		return m, nil
 	}

@@ -177,6 +177,14 @@ type Model struct {
 	// names, newest first, so the palette can surface them near the top.
 	recentCommands []string
 
+	// inputHistory holds composer lines the user submitted this session,
+	// oldest first, for arrow up/down recall. historyPos walks it
+	// (len == "at the live draft"); historyDraft preserves the in-progress
+	// line while browsing history.
+	inputHistory []string
+	historyPos   int
+	historyDraft string
+
 	// setupStatus is the observability snapshot of pre-launch setup/env,
 	// shown by /setup. Nil when no setup/env was configured.
 	setupStatus *setup.Status

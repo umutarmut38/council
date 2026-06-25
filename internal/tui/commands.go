@@ -196,6 +196,7 @@ func (m *Model) submitInput() tea.Cmd {
 	if text == "" {
 		return nil
 	}
+	m.recordInputHistory(text)
 
 	if handled, cmd := m.handleCommand(text); handled {
 		return cmd
