@@ -256,6 +256,43 @@ func TestPlanAdoptReportsDirtyTreeAndFiles(t *testing.T) {
 	}
 }
 
+func TestPlanAdoptCapturesLiveDiffWithoutArtifact(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := newTestController(t, root, []string{"a"}, config.ReviewConfig{})
+	base, _ := revParse(root, "HEAD")
+	if err := ctrl.run.SaveBaseSHA(base); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.ensureWorktrees(config.PhaseBuild); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(ctrl.worktrees["a"], "feature.txt"), []byte("live\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, statErr := os.Stat(ctrl.run.BuildDiffPath("a")); !os.IsNotExist(statErr) {
+		t.Fatalf("test setup should not pre-create a diff artifact: %v", statErr)
+	}
+
+	plan, err := ctrl.PlanAdopt("a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Agent != "a" || plan.DiffPath != ctrl.run.BuildDiffPath("a") {
+		t.Fatalf("plan = %+v", plan)
+	}
+	if len(plan.Files) != 1 || plan.Files[0] != "feature.txt" {
+		t.Fatalf("plan files = %v, want [feature.txt]", plan.Files)
+	}
+	if fi, statErr := os.Stat(ctrl.run.BuildDiffPath("a")); statErr != nil || fi.Size() == 0 {
+		t.Fatalf("PlanAdopt did not capture the live worktree diff: %v", statErr)
+	}
+	if _, err := os.Stat(filepath.Join(root, "feature.txt")); !os.IsNotExist(err) {
+		t.Fatal("PlanAdopt applied the diff")
+	}
+}
+
 func TestAdoptRefusesConflictingDiff(t *testing.T) {
 	root := initRepo(t)
 	chdir(t, root)

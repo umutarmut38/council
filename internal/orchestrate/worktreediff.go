@@ -138,7 +138,7 @@ func (c *Controller) DiffVsBase(agent string) (string, error) {
 	c.refreshBuildDiff(agent)
 	data, err := os.ReadFile(c.run.BuildDiffPath(agent))
 	if err != nil {
-		return "", fmt.Errorf("no captured diff for %q; run /review first", agent)
+		return "", fmt.Errorf("no captured diff for %q; run /compare or /review first", agent)
 	}
 	return string(data), nil
 }

@@ -534,12 +534,12 @@ type AdoptPlan struct {
 // touched files, the current working-tree dirt, and a `git apply --check`
 // result. It never modifies the working tree.
 func (c *Controller) PlanAdopt(override string) (AdoptPlan, error) {
-	agentName, diffPath, err := c.resolveAdopt(override)
+	agentName, err := c.resolveAdoptAgent(override)
 	if err != nil {
 		return AdoptPlan{}, err
 	}
 	c.refreshBuildDiff(agentName)
-	agentName, diffPath, err = c.resolveAdopt(agentName)
+	diffPath, err := c.adoptDiffPath(agentName)
 	if err != nil {
 		return AdoptPlan{}, err
 	}
@@ -578,23 +578,31 @@ func (c *Controller) DirtyFiles() []string {
 	return files
 }
 
-func (c *Controller) resolveAdopt(override string) (agentName, diffPath string, err error) {
-	agentName = strings.TrimSpace(override)
-	if agentName == "" {
-		agentName, err = c.BuildWinner()
-		if err != nil {
-			return "", "", err
-		}
+func (c *Controller) resolveAdoptAgent(override string) (string, error) {
+	if c.run == nil {
+		return "", errors.New("no active run")
 	}
-	diffPath = c.run.BuildDiffPath(agentName)
+	agentName := strings.TrimSpace(override)
+	if agentName == "" {
+		winner, err := c.BuildWinner()
+		if err != nil {
+			return "", err
+		}
+		agentName = winner
+	}
+	return agentName, nil
+}
+
+func (c *Controller) adoptDiffPath(agentName string) (string, error) {
+	diffPath := c.run.BuildDiffPath(agentName)
 	if fi, statErr := os.Stat(diffPath); statErr != nil || fi.Size() == 0 {
 		avail := c.AdoptableBuilds()
 		if len(avail) == 0 {
-			return "", "", fmt.Errorf("no build diff for %q; run /review first", agentName)
+			return "", fmt.Errorf("no build diff for %q; run /compare or /review first", agentName)
 		}
-		return "", "", fmt.Errorf("no build diff for %q; available: %s", agentName, strings.Join(avail, ", "))
+		return "", fmt.Errorf("no build diff for %q; available: %s", agentName, strings.Join(avail, ", "))
 	}
-	return agentName, diffPath, nil
+	return diffPath, nil
 }
 
 // Adopt applies a build's diff onto the repo's working tree as uncommitted
