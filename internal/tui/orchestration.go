@@ -288,11 +288,43 @@ func (m *Model) applyAdopt(agentName string) tea.Cmd {
 	adopted, files, err := m.orch.Adopt(agentName)
 	if err != nil {
 		m.Status = "adopt: " + err.Error()
+		// Drop the staged preview and return to the panes so the error is the
+		// last thing standing, not a now-defunct "y apply" prompt.
+		m.closeArtifactView()
+		m.ScreenMode = ScreenPanes
 		return nil
 	}
 	m.Status = fmt.Sprintf("applied %s's changes (%d files, uncommitted) — review with `git diff`, then commit", adopted, len(files))
 	m.refreshProgress()
+	// A status line alone proved far too easy to miss — a real adoption was once
+	// silently missed that way. Surface a full-screen receipt (the apply path's
+	// mirror of the pre-adopt preview); it's informational, so Esc/q dismisses it.
+	m.openAdoptReceipt(adopted, files)
 	return nil
+}
+
+// openAdoptReceipt shows a non-blocking, full-screen confirmation after a
+// successful /adopt: the applied files, where they came from, and the next
+// steps. Nothing is committed, so it stops short of being a prompt.
+func (m *Model) openAdoptReceipt(agent string, files []string) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# Adopted %s\n\n", agent)
+	fmt.Fprintf(&b, "Applied %d file(s) to your working tree as **uncommitted** changes.\n", len(files))
+	if wt, ok := m.orch.WorktreeFor(agent); ok {
+		fmt.Fprintf(&b, "\nFrom branch: %s\nWorktree: %s\n", wt.Branch, wt.Path)
+	}
+	fmt.Fprintf(&b, "\n## Files (%d)\n\n", len(files))
+	if len(files) == 0 {
+		b.WriteString("- (none reported)\n")
+	}
+	for _, f := range files {
+		fmt.Fprintf(&b, "- %s\n", f)
+	}
+	b.WriteString("\n## Next steps\n\n")
+	b.WriteString("1. Review the changes — `git diff`\n")
+	b.WriteString("2. Commit when you're happy — `git commit`\n")
+	b.WriteString("\nNothing was committed for you. Press Esc or q to close.\n")
+	m.openArtifactText("adopted: "+agent, b.String())
 }
 
 // previewDiffLimit caps how much diff body the preview pager loads; beyond

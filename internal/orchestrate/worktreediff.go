@@ -17,28 +17,37 @@ import (
 	"github.com/umutarmut38/council/internal/cmdrun"
 )
 
-// WorktreePath returns the live worktree directory for an agent's build in
-// the current run, when it still exists on disk (i.e. before /clean).
-func (c *Controller) WorktreePath(agent string) (string, bool) {
+// WorktreeFor returns an agent's live build worktree (path and branch) for the
+// current run, when it still exists on disk (i.e. before /clean).
+func (c *Controller) WorktreeFor(agent string) (Worktree, bool) {
 	if c.run == nil {
-		return "", false
+		return Worktree{}, false
 	}
+	// Read the cached manager only — never write c.manager here, since this can
+	// be called off the UI thread; the local fallback covers an early call.
 	mgr := c.manager
 	if mgr == nil {
 		mgr = NewManager(c.repoRoot, c.run.Stamp)
 	}
 	worktrees, err := mgr.ListRun()
 	if err != nil {
-		return "", false
+		return Worktree{}, false
 	}
 	for _, wt := range worktrees {
 		if wt.Agent == agent {
 			if _, statErr := os.Stat(wt.Path); statErr == nil {
-				return wt.Path, true
+				return wt, true
 			}
 		}
 	}
-	return "", false
+	return Worktree{}, false
+}
+
+// WorktreePath returns the live worktree directory for an agent's build in
+// the current run, when it still exists on disk (i.e. before /clean).
+func (c *Controller) WorktreePath(agent string) (string, bool) {
+	wt, ok := c.WorktreeFor(agent)
+	return wt.Path, ok
 }
 
 // BuildProgress reports how many of the run's build worktrees show activity —

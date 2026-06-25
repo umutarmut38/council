@@ -856,6 +856,79 @@ func TestPreviewIsReadOnlyAndAdoptWaitsForAccept(t *testing.T) {
 	}
 }
 
+func TestAdoptShowsReceiptAfterApply(t *testing.T) {
+	root := initTUITestRepo(t)
+	chdirTUI(t, root)
+	cfg := config.Config{
+		Agents:   map[string]config.AgentConfig{"a": {Enabled: true, Command: []string{"true"}}},
+		Sessions: config.SessionConfig{RootDir: filepath.Join(root, ".council", "runs")},
+	}
+	cfg.Normalize()
+	ctrl, err := orchestrate.NewController(cfg, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.StartRun("do it"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ctrl.Run().PlanPath("a"), []byte("plan"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.SetSinglePlanWinner("a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ctrl.BuildPrompt(); err != nil {
+		t.Fatal(err)
+	}
+	wt, ok := ctrl.WorktreePath("a")
+	if !ok {
+		t.Fatal("missing build worktree")
+	}
+	if err := os.WriteFile(filepath.Join(wt, "feature.txt"), []byte("feature\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ctrl.CompareBuilds(); err != nil {
+		t.Fatalf("capture diff: %v", err)
+	}
+
+	m := NewModelWithConfig(nil, nil, cfg, "", nil, 0, nil, ctrl)
+	m.Width = 100
+	m.Height = 30
+
+	m.cmdAdopt("a")
+	updated, _ := m.handleArtifactViewerKey(keyMsg("y"))
+	m = *updated.(*Model)
+
+	// After applying, a full-screen receipt should be showing.
+	if m.ScreenMode != ScreenArtifacts {
+		t.Fatalf("after adopt the receipt should be on screen, got mode %v", m.ScreenMode)
+	}
+	if m.artifactPath != "adopted: a" {
+		t.Fatalf("receipt title = %q, want %q", m.artifactPath, "adopted: a")
+	}
+	if m.pendingAdopt != nil || m.viewingAdoptPreview() {
+		t.Fatal("the receipt must not be a staged adopt preview (y/n would re-trigger)")
+	}
+	wantBranch, ok := ctrl.WorktreeFor("a")
+	if !ok {
+		t.Fatal("worktree should still exist right after adopt")
+	}
+	for _, want := range []string{"Adopted a", "feature.txt", "Next steps", "git diff", "git commit", "From branch:", wantBranch.Branch} {
+		if !strings.Contains(m.artifactView, want) {
+			t.Fatalf("receipt missing %q:\n%s", want, m.artifactView)
+		}
+	}
+	// y on the receipt is inert (nothing staged); Esc/q dismisses it to the panes.
+	if _, cmd := m.handleArtifactViewerKey(keyMsg("y")); cmd != nil {
+		t.Fatal("y on the receipt should not schedule a command")
+	}
+	updated, _ = m.handleArtifactViewerKey(keyMsg("esc"))
+	m = *updated.(*Model)
+	if m.ScreenMode != ScreenPanes {
+		t.Fatalf("Esc should dismiss the receipt to the panes, got mode %v", m.ScreenMode)
+	}
+}
+
 func TestColorDiffLineStyles(t *testing.T) {
 	c := defaultChrome()
 	if colorDiffLine("+added line", 80, c) == "+added line" {
