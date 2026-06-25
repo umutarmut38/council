@@ -168,20 +168,26 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.submitInput()
 	case "up":
-		if m.movePaletteSelection(-1) {
-			return m, nil
+		if !m.browsingHistory() {
+			if m.movePaletteSelection(-1) {
+				return m, nil
+			}
+			if m.moveFileSuggestion(-1) {
+				return m, nil
+			}
 		}
-		if m.moveFileSuggestion(-1) {
-			return m, nil
-		}
+		m.historyPrev()
 		return m, nil
 	case "down":
-		if m.movePaletteSelection(1) {
-			return m, nil
+		if !m.browsingHistory() {
+			if m.movePaletteSelection(1) {
+				return m, nil
+			}
+			if m.moveFileSuggestion(1) {
+				return m, nil
+			}
 		}
-		if m.moveFileSuggestion(1) {
-			return m, nil
-		}
+		m.historyNext()
 		return m, nil
 	case "backspace":
 		m.PromptInput = dropLastRune(m.PromptInput)
