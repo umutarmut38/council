@@ -310,8 +310,8 @@ func (m *Model) openAdoptReceipt(agent string, files []string) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Adopted %s\n\n", agent)
 	fmt.Fprintf(&b, "Applied %d file(s) to your working tree as **uncommitted** changes.\n", len(files))
-	if wt, ok := m.orch.WorktreePath(agent); ok {
-		fmt.Fprintf(&b, "\nFrom worktree: %s\n", wt)
+	if wt, ok := m.orch.WorktreeFor(agent); ok {
+		fmt.Fprintf(&b, "\nFrom branch: %s\nWorktree: %s\n", wt.Branch, wt.Path)
 	}
 	fmt.Fprintf(&b, "\n## Files (%d)\n\n", len(files))
 	if len(files) == 0 {

@@ -909,7 +909,11 @@ func TestAdoptShowsReceiptAfterApply(t *testing.T) {
 	if m.pendingAdopt != nil || m.viewingAdoptPreview() {
 		t.Fatal("the receipt must not be a staged adopt preview (y/n would re-trigger)")
 	}
-	for _, want := range []string{"Adopted a", "feature.txt", "Next steps", "git diff", "git commit"} {
+	wantBranch, ok := ctrl.WorktreeFor("a")
+	if !ok {
+		t.Fatal("worktree should still exist right after adopt")
+	}
+	for _, want := range []string{"Adopted a", "feature.txt", "Next steps", "git diff", "git commit", "From branch:", wantBranch.Branch} {
 		if !strings.Contains(m.artifactView, want) {
 			t.Fatalf("receipt missing %q:\n%s", want, m.artifactView)
 		}
