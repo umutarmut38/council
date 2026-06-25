@@ -293,8 +293,9 @@ $prose-measure: 56rem;
 }
 
 // ---------------------------------------------------------------------------
-// Wordmark: the top-header brand is a legible mono (tamed — no glow, static
-// cursor). The VT323 pixel face survives only on the big home hero wordmark.
+// Wordmark: the top-header brand is a legible mono (tamed — no glow) with a
+// blinking block cursor that matches the home hero. The VT323 pixel face
+// survives only on the big home hero wordmark.
 // ---------------------------------------------------------------------------
 .site-title {
   font-family: $mono-font-family;
@@ -307,7 +308,7 @@ $prose-measure: 56rem;
     content: "▌";
     margin-left: 0.08em;
     color: $c-amber;
-    opacity: 0.8;
+    animation: crt-blink 1.1s steps(1) infinite;
   }
 }
 
@@ -576,7 +577,8 @@ a:focus-visible,
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hero .hero-wordmark .cursor {
+  .hero .hero-wordmark .cursor,
+  .site-title::after {
     animation: none;
   }
 }
