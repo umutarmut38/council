@@ -66,27 +66,130 @@ func (c *Controller) RunBuildChecks() ([]BuildCheck, error) {
 	for _, wt := range worktrees {
 		c.worktrees[wt.Agent] = wt.Path
 		res := BuildCheck{Agent: wt.Agent}
-
-		// Stage everything first (respecting .gitignore) so newly-created files
-		// are included — a plain `git diff` omits untracked files, which would
-		// hide an implementation that builds a project from scratch. Staging is
-		// best-effort, but a failure here can hide work, so record it.
-		if _, addErr := cmdrun.CombinedOutput(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", wt.Path, "add", "-A"}}); addErr != nil {
-			res.Warnings = append(res.Warnings, fmt.Sprintf("git add -A: %v", addErr))
-		}
-		diff, derr := cmdrun.Output(context.Background(), cmdrun.Spec{Name: "git", Args: []string{"-C", wt.Path, "diff", "--cached", base}})
-		if derr != nil {
-			res.Warnings = append(res.Warnings, fmt.Sprintf("git diff --cached %s: %v", base, derr))
-		} else if len(strings.TrimSpace(string(diff))) > 0 {
-			res.Changed = true
-			_ = os.WriteFile(c.run.BuildDiffPath(wt.Agent), diff, fsperm.File())
-		}
-
+		ctx, cancel := context.WithTimeout(context.Background(), reviewCaptureTimeout)
+		res.Changed, res.Warnings = c.captureBuildDiff(ctx, wt.Agent, wt.Path, base)
+		cancel()
 		res.Passed = c.runCheck(wt.Path, wt.Agent)
 		results = append(results, res)
 	}
 	c.logCheckWarnings(results)
 	return results, nil
+}
+
+// Git budgets for captureBuildDiff. /review gives each worktree a generous
+// per-worktree budget; an on-demand /compare bounds the WHOLE scan (across every
+// worktree) so the UI can never stall for long, no matter how many there are.
+const (
+	reviewCaptureTimeout = 30 * time.Second
+	compareScanBudget    = 10 * time.Second
+)
+
+// captureBuildDiff stages an agent's build worktree and writes its diff against
+// the recorded base to BuildDiffPath when non-empty. It mutates only the
+// worktree index (git add -A) — exactly what /review already does — and never
+// runs the check command, so it is safe to call on demand (e.g. /compare during
+// the build). It always re-captures, so a later /review records a fresh diff.
+// ctx bounds the git work; callers (especially /compare on the UI thread) pass a
+// deadline so a stuck git can't freeze rendering.
+func (c *Controller) captureBuildDiff(ctx context.Context, agent, wtPath, base string) (changed bool, warnings []string) {
+	// Stage everything first (respecting .gitignore) so newly-created files are
+	// included — a plain `git diff` omits untracked files, which would hide an
+	// implementation that builds a project from scratch. Staging is best-effort,
+	// but a failure here can hide work, so record it.
+	if _, addErr := cmdrun.CombinedOutput(ctx, cmdrun.Spec{Name: "git", Args: []string{"-C", wtPath, "add", "-A"}}); addErr != nil {
+		warnings = append(warnings, fmt.Sprintf("git add -A: %v", addErr))
+	}
+	diff, derr := cmdrun.Output(ctx, cmdrun.Spec{Name: "git", Args: []string{"-C", wtPath, "diff", "--cached", base}})
+	switch {
+	case derr != nil:
+		warnings = append(warnings, fmt.Sprintf("git diff --cached %s: %v", base, derr))
+		// A failed recapture must not silently fall back to a stale diff from an
+		// earlier /compare capture — /review is meant to be authoritative.
+		if rmErr := os.Remove(c.run.BuildDiffPath(agent)); rmErr != nil && !os.IsNotExist(rmErr) {
+			warnings = append(warnings, fmt.Sprintf("remove stale %s diff: %v", agent, rmErr))
+		}
+	case len(strings.TrimSpace(string(diff))) > 0:
+		// A failed write would silently hide the work, so surface it and treat
+		// the build as unchanged (a diff we can't persist can't be reviewed).
+		// Drop any prior diff too, so a stale capture isn't left to surface.
+		if werr := os.WriteFile(c.run.BuildDiffPath(agent), diff, fsperm.File()); werr != nil {
+			warnings = append(warnings, fmt.Sprintf("write %s diff: %v", agent, werr))
+			_ = os.Remove(c.run.BuildDiffPath(agent))
+		} else {
+			changed = true
+		}
+	default:
+		// The worktree now matches the base (e.g. an agent reverted work that an
+		// earlier /compare captured). Drop any stale diff so /compare and
+		// AdoptableBuilds don't keep showing changes that no longer exist.
+		if rmErr := os.Remove(c.run.BuildDiffPath(agent)); rmErr != nil && !os.IsNotExist(rmErr) {
+			warnings = append(warnings, fmt.Sprintf("remove stale %s diff: %v", agent, rmErr))
+		}
+	}
+	return changed, warnings
+}
+
+// ensureBuildDiffs captures any build worktree's diff that has not been written
+// yet, so /compare works during or right after the build — before /review runs
+// the checks that normally write them. Best-effort: it needs a recorded base
+// (saved at /build) and live worktrees, and it leaves agents that already have a
+// diff untouched so a later /review (which re-captures all) stays authoritative.
+func (c *Controller) ensureBuildDiffs() {
+	if c.run == nil {
+		return
+	}
+	base, err := c.run.BaseSHA()
+	if err != nil {
+		return
+	}
+	if c.manager == nil {
+		c.manager = NewManager(c.repoRoot, c.run.Stamp)
+	}
+	worktrees, err := c.manager.ListRun()
+	if err != nil {
+		return
+	}
+	if err := os.MkdirAll(c.run.BuildsDir(), fsperm.Dir()); err != nil {
+		return
+	}
+	// One deadline for the WHOLE scan: /compare runs on the TUI thread, so bound
+	// the total git work regardless of how many worktrees need capturing.
+	ctx, cancel := context.WithTimeout(context.Background(), compareScanBudget)
+	defer cancel()
+	var warned []BuildCheck
+	for _, wt := range worktrees {
+		c.worktrees[wt.Agent] = wt.Path
+		if ctx.Err() != nil {
+			break // budget spent; keep /compare responsive even with many worktrees
+		}
+		diffPath := c.run.BuildDiffPath(wt.Agent)
+		hasDiff := false
+		if fi, statErr := os.Stat(diffPath); statErr == nil && fi.Size() > 0 {
+			hasDiff = true
+		}
+		// Cheap read-only probe first: it decides whether to skip, refresh, or
+		// drop the heavier stage+diff so /compare doesn't stage idle worktrees.
+		changed, ok := worktreeProbe(ctx, wt.Path, base)
+		if ok && !changed {
+			// Conclusively back at base: drop any stale diff (best-effort) so
+			// /compare doesn't keep showing changes that no longer exist, then
+			// skip the capture.
+			if hasDiff {
+				_ = os.Remove(diffPath)
+			}
+			continue
+		}
+		if hasDiff {
+			continue // already captured and still dirty/inconclusive; /review re-captures
+		}
+		// Surface best-effort capture failures: without this, a failed git
+		// add/diff would leave /compare reporting "no build changes yet" with no
+		// way to diagnose. Logged to the same warnings.log /review uses.
+		if _, warnings := c.captureBuildDiff(ctx, wt.Agent, wt.Path, base); len(warnings) > 0 {
+			warned = append(warned, BuildCheck{Agent: wt.Agent, Warnings: warnings})
+		}
+	}
+	c.logCheckWarnings(warned)
 }
 
 // logCheckWarnings appends ignored best-effort errors to a per-run warnings
@@ -330,9 +433,12 @@ func (c *Controller) CompareBuilds() ([]BuildComparison, error) {
 	if c.run == nil {
 		return nil, errors.New("no active run")
 	}
+	// Capture any not-yet-written diffs so /compare works during the build,
+	// before /review runs the checks that normally write them.
+	c.ensureBuildDiffs()
 	agents := c.AdoptableBuilds()
 	if len(agents) == 0 {
-		return nil, errors.New("no build diffs captured; run /review first")
+		return nil, errors.New("no build changes yet")
 	}
 	letters := map[string]string{}
 	if refs, err := c.run.LoadReviewRefs(); err == nil {

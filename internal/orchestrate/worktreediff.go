@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/umutarmut38/council/internal/cmdrun"
 )
@@ -38,6 +39,93 @@ func (c *Controller) WorktreePath(agent string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// BuildProgress reports how many of the run's build worktrees show activity —
+// committed work (HEAD past the recorded base) or uncommitted/untracked changes
+// — out of the total worktrees. It is a cheap, read-only probe (no staging, no
+// writes), so the Build rail can climb during the build instead of snapping to
+// N/N only once /review captures the diffs.
+func (c *Controller) BuildProgress() (active, total int) {
+	if c.run == nil {
+		return 0, 0
+	}
+	base, err := c.run.BaseSHA()
+	if err != nil {
+		return 0, 0
+	}
+	// Read the cached manager only — never write c.manager from this off-thread
+	// probe. UI-thread code (EnsureManager) initializes it before the first tick;
+	// the local fallback covers an early/edge call without racing the field or
+	// allocating per tick in the normal case.
+	mgr := c.manager
+	if mgr == nil {
+		mgr = NewManager(c.repoRoot, c.run.Stamp)
+	}
+	worktrees, err := mgr.ListRun()
+	if err != nil {
+		return 0, 0
+	}
+	total = len(worktrees)
+	// Bound the whole scan so a slow/hung git can't make the probe run long. The
+	// per-probe gitProbe timeout still applies within this budget.
+	ctx, cancel := context.WithTimeout(context.Background(), buildProbeBudget)
+	defer cancel()
+	for i, wt := range worktrees {
+		if ctx.Err() != nil {
+			// Budget spent mid-scan: treat the unprobed remainder as active
+			// (inconclusive), matching how a single inconclusive probe counts.
+			active += len(worktrees) - i
+			break
+		}
+		changed, ok := worktreeProbe(ctx, wt.Path, base)
+		// Be conservative about progress: an inconclusive probe (a transient git
+		// error or an index.lock) counts as active, so the Build rail doesn't
+		// stall at 0 while work is actually happening.
+		if changed || !ok {
+			active++
+		}
+	}
+	return active, total
+}
+
+// buildProbeBudget bounds an entire BuildProgress scan so a slow git can't make
+// the off-thread probe run unboundedly; the per-probe gitProbe timeout still
+// applies within it.
+const buildProbeBudget = 6 * time.Second
+
+// worktreeProbe reports, read-only, whether a build worktree differs from base
+// (changed) and whether the probe was conclusive (ok). A moved HEAD or a
+// non-empty status means changed; ok is false when any git probe failed, so a
+// caller can fall back to a full capture instead of trusting a "clean" answer.
+// ctx bounds the probe so a scan-wide deadline is honored across both git calls.
+func worktreeProbe(ctx context.Context, wtPath, base string) (changed, ok bool) {
+	head, headOK := gitProbe(ctx, wtPath, "rev-parse", "HEAD")
+	if !headOK {
+		return false, false
+	}
+	if head != base {
+		return true, true // committed work
+	}
+	status, statusOK := gitProbe(ctx, wtPath, "status", "--porcelain")
+	if !statusOK {
+		return false, false
+	}
+	return status != "", true
+}
+
+// gitProbe runs a short read-only git command in wtPath, capping it at 2s but no
+// later than the caller's ctx deadline, so one slow probe can't starve the next
+// and a scan-wide budget is honored. On error/timeout it reports failure rather
+// than blocking.
+func gitProbe(ctx context.Context, wtPath string, args ...string) (string, bool) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	out, err := cmdrun.Output(ctx, cmdrun.Spec{Name: "git", Args: append([]string{"-C", wtPath}, args...)})
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(string(out)), true
 }
 
 // DiffVsBase returns an agent's captured implementation diff (worktree

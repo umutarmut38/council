@@ -141,7 +141,12 @@ func (m *Model) cmdStartBuild() tea.Cmd {
 	prompts := m.pendingBuild
 	m.pendingBuild = nil
 	m.Status = "build started"
-	return func() tea.Msg { return phasePromptsMsg(prompts) }
+	// Start the progress tick alongside the prompt: the build has no artifact
+	// watcher, so this tick is what makes the Build rail climb as agents work.
+	return tea.Batch(
+		func() tea.Msg { return phasePromptsMsg(prompts) },
+		buildProgressTick(),
+	)
 }
 
 // cmdReview gates the built implementations (run check command per worktree,
@@ -681,8 +686,9 @@ func (m *Model) beginPhase(label string, phase config.Phase, prompts map[string]
 	m.PromptInput = ""
 	m.Target = TargetAll
 	m.Store = store
-	m.pendingBuild = nil // any new phase invalidates a staged build
-	m.phasePrompts = nil // and the prompts /resend would repeat
+	m.pendingBuild = nil               // any new phase invalidates a staged build
+	m.phasePrompts = nil               // and the prompts /resend would repeat
+	m.buildActive, m.buildTotal = 0, 0 // stale build activity must not leak across phases
 	m.phase = label
 	m.watching = m.orch.ArtifactPaths(phase)
 	_ = m.orch.SaveActivePhase(phase, m.orch.AgentsForPhase(phase), false)
@@ -742,6 +748,14 @@ func (m *Model) phaseCmds(prompts map[string]string) tea.Cmd {
 	if len(m.watching) > 0 {
 		cmds = append(cmds, pollAfter())
 	}
+	// A resumed, already-running build has no artifact watcher, so its rail is
+	// driven by the dedicated progress tick. Start it here (a freshly staged
+	// build starts it from /start-build instead). The pendingBuild guard avoids
+	// a second loop when resuming a build that is only staged, and buildProgress
+	// self-terminates once the phase ends.
+	if m.phase == "build" && len(m.pendingBuild) == 0 {
+		cmds = append(cmds, buildProgressTick())
+	}
 	if len(cmds) == 0 {
 		return nil
 	}
@@ -750,6 +764,47 @@ func (m *Model) phaseCmds(prompts map[string]string) tea.Cmd {
 
 func pollAfter() tea.Cmd {
 	return tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg { return pollArtifactsMsg{} })
+}
+
+func buildProgressTick() tea.Cmd {
+	return tea.Tick(1500*time.Millisecond, func(time.Time) tea.Msg { return buildProgressMsg{} })
+}
+
+// buildProgress probes live build activity while the build is live. The probe
+// (BuildProgress) shells out to git per worktree, so it runs OFF the Update loop
+// as a tea.Cmd and reports back via buildProgressResultMsg — the UI never blocks
+// on git. It self-terminates as soon as the phase leaves "build" (e.g. at
+// /review) so it never races the artifact poll that drives the watched phases.
+func (m *Model) buildProgress() tea.Cmd {
+	if m.phase != "build" {
+		return nil
+	}
+	orch := m.orch
+	if orch != nil {
+		// Initialize the worktree manager here, on the Update loop, so the probe
+		// goroutine below only reads c.manager — it can't race the UI thread that
+		// also lazily creates it.
+		orch.EnsureManager()
+	}
+	return func() tea.Msg {
+		if orch == nil {
+			return buildProgressResultMsg{}
+		}
+		active, total := orch.BuildProgress()
+		return buildProgressResultMsg{active: active, total: total}
+	}
+}
+
+// handleBuildProgressResult caches an off-thread probe result, refreshes the HUD
+// (now a cheap, git-free read of the cached counts), and reschedules the tick
+// while the build is still live.
+func (m *Model) handleBuildProgressResult(msg buildProgressResultMsg) tea.Cmd {
+	m.buildActive, m.buildTotal = msg.active, msg.total
+	m.refreshProgress()
+	if m.phase != "build" {
+		return nil // the build ended while we were probing; stop the loop
+	}
+	return buildProgressTick()
 }
 
 // pollArtifacts marks panes done as their artifact files appear and finishes the

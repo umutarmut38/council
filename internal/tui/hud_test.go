@@ -107,6 +107,84 @@ func TestPhaseRailRendering(t *testing.T) {
 	}
 }
 
+func TestBuildRailDoneUsesMaxActivityDuringBuild(t *testing.T) {
+	// During the build, before any diff is captured, the rail reflects live
+	// worktree activity instead of sitting at 0.
+	if got := buildRailDone("build", 0, 2); got != 2 {
+		t.Fatalf("build with activity: got %d, want 2", got)
+	}
+	if got := buildRailDone("build", 0, 0); got != 0 {
+		t.Fatalf("idle build: got %d, want 0", got)
+	}
+	// It keeps climbing after /compare captured some diffs mid-build: Done is
+	// max(diffs, active), so a newly-active worktree still advances the rail.
+	if got := buildRailDone("build", 1, 2); got != 2 {
+		t.Fatalf("more activity than captured diffs: got %d, want 2", got)
+	}
+	// But it never drops below the captured-diff count.
+	if got := buildRailDone("build", 3, 1); got != 3 {
+		t.Fatalf("stale activity below diffs: got %d, want 3", got)
+	}
+	// Outside the build phase the count is always the captured diffs.
+	if got := buildRailDone("review", 2, 5); got != 2 {
+		t.Fatalf("review: got %d, want 2", got)
+	}
+}
+
+func TestBuildProgressTickSelfTerminates(t *testing.T) {
+	m := hudModel(t, "a")
+	// The build tick dispatches an off-thread probe only while the build is
+	// live, and the reschedule (in the result handler) stops once the phase
+	// leaves "build", so it can never leak into (and double-poll) the watched
+	// phases.
+	m.phase = "build"
+	if cmd := m.buildProgress(); cmd == nil {
+		t.Fatal("buildProgress should dispatch a probe while building")
+	}
+	if cmd := m.handleBuildProgressResult(buildProgressResultMsg{active: 1, total: 2}); cmd == nil {
+		t.Fatal("the result handler should reschedule while building")
+	}
+	for _, phase := range []string{"", "review", "vote"} {
+		m.phase = phase
+		if cmd := m.buildProgress(); cmd != nil {
+			t.Fatalf("buildProgress should stop in phase %q", phase)
+		}
+		if cmd := m.handleBuildProgressResult(buildProgressResultMsg{}); cmd != nil {
+			t.Fatalf("the result handler should stop rescheduling in phase %q", phase)
+		}
+	}
+}
+
+// TestBuildProgressResultCaches: the off-thread probe result updates the cached
+// build activity that the HUD reads (View must never shell out to git itself).
+func TestBuildProgressResultCaches(t *testing.T) {
+	m := hudModel(t, "a")
+	m.phase = "build"
+	m.handleBuildProgressResult(buildProgressResultMsg{active: 2, total: 3})
+	if m.buildActive != 2 || m.buildTotal != 3 {
+		t.Fatalf("cached build activity = %d/%d, want 2/3", m.buildActive, m.buildTotal)
+	}
+}
+
+func TestPhaseCmdsStartsBuildTickOnlyWhenRunning(t *testing.T) {
+	m := hudModel(t, "a")
+	m.phase = "build"
+	m.watching = nil
+
+	// A resumed, already-running build (no staged prompts) starts the tick so
+	// its rail keeps climbing.
+	m.pendingBuild = nil
+	if cmd := m.phaseCmds(nil); cmd == nil {
+		t.Fatal("running build resume should start the progress tick")
+	}
+	// A merely staged build must not — /start-build starts it, and a second
+	// loop would just double the refresh rate.
+	m.pendingBuild = map[string]string{"a": "do it"}
+	if cmd := m.phaseCmds(nil); cmd != nil {
+		t.Fatal("staged build should not start a tick before /start-build")
+	}
+}
+
 func TestShortAgent(t *testing.T) {
 	cases := map[string]string{
 		"codex":           "codex",

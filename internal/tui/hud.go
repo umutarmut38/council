@@ -83,14 +83,25 @@ func (m *Model) progressFromSummary(summary orchestrate.RunSummary) *runProgress
 		p.Adopted = adopted
 	}
 
+	// Reflect live worktree activity throughout the build, not just until the
+	// first diff: /compare can capture diffs mid-build, and the rail must keep
+	// climbing as more agents start working rather than freezing at that count.
+	// The count comes from the cache filled off-thread by the build progress
+	// tick — View/refreshProgress must never shell out to git themselves.
+	buildActive := 0
+	if m.phase == "build" {
+		buildActive = m.buildActive
+	}
+	buildDone := buildRailDone(m.phase, len(summary.Diffs), buildActive)
+
 	planExpected := m.phaseExpected("plan", config.PhasePlan, len(summary.Plans))
 	voteExpected := m.phaseExpected("vote", config.PhaseVote, len(summary.Votes))
-	buildExpected := m.phaseExpected("build", config.PhaseBuild, len(summary.Diffs))
+	buildExpected := m.phaseExpected("build", config.PhaseBuild, buildDone)
 	reviewExpected := m.phaseExpected("review", config.PhaseReview, len(summary.Reviews))
 
 	plan := phaseInfo{Label: "Plan", Done: len(summary.Plans), Expected: planExpected, Counted: true}
 	vote := phaseInfo{Label: "Vote", Done: len(summary.Votes), Expected: voteExpected, Counted: true}
-	build := phaseInfo{Label: "Build", Done: len(summary.Diffs), Expected: buildExpected, Counted: len(summary.Diffs) > 0 || m.phase == "build"}
+	build := phaseInfo{Label: "Build", Done: buildDone, Expected: buildExpected, Counted: buildDone > 0 || m.phase == "build"}
 	review := phaseInfo{Label: "Review", Done: len(summary.Reviews), Expected: reviewExpected, Counted: len(summary.Reviews) > 0 || m.phase == "review"}
 	adopt := phaseInfo{Label: "Adopt"}
 
@@ -123,6 +134,18 @@ func (m *Model) progressFromSummary(summary orchestrate.RunSummary) *runProgress
 	p.Next = m.nextCommand(p, summary.Plans, summary.Diffs)
 	p.Phases = []phaseInfo{plan, vote, build, review, adopt}
 	return p
+}
+
+// buildRailDone picks the Build rail's Done count. While the build is live it
+// tracks live worktree activity, but diffs may already be captured (via
+// /compare), so it uses max(diffs, active): a newly-active worktree still
+// advances the rail, and the count never drops below what was captured. Outside
+// the build it is simply the captured-diff count (the authoritative number).
+func buildRailDone(phase string, diffs, active int) int {
+	if phase == "build" && active > diffs {
+		return active
+	}
+	return diffs
 }
 
 // phaseExpected returns how many artifacts a phase should produce: the watch
@@ -158,7 +181,7 @@ func (m *Model) nextCommand(p *runProgress, plans, diffs []string) string {
 		if len(m.pendingBuild) > 0 {
 			return "/start-build"
 		}
-		return "/review when builds finish"
+		return "/review when builds finish · /compare to peek"
 	}
 	switch {
 	case p.Adopted != "":
@@ -258,7 +281,7 @@ func (m Model) contextHint() (string, bool) {
 		if len(m.pendingBuild) > 0 {
 			return "Build staged in worktrees · Next: /start-build (adjust the tools first if needed)", true
 		}
-		return "Build in progress · F2 direct if an agent needs approval · Next: /review when done", true
+		return "Build in progress · F2 direct if an agent needs approval · /compare to peek · Next: /review when done", true
 	}
 	switch {
 	case p.Adopted != "":

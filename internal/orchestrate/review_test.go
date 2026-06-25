@@ -455,3 +455,131 @@ func TestSplitUnifiedDiff(t *testing.T) {
 		t.Fatalf("per-file patch slicing wrong: %q", files[0].Patch)
 	}
 }
+
+func TestCompareBuildsBeforeReview(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := newTestController(t, root, []string{"a", "b"}, config.ReviewConfig{})
+	base, _ := revParse(root, "HEAD")
+	if err := ctrl.run.SaveBaseSHA(base); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.ensureWorktrees(config.PhaseBuild); err != nil {
+		t.Fatal(err)
+	}
+
+	// Nothing changed yet: /compare has nothing to show (and must not claim the
+	// user has to run /review first).
+	if _, err := ctrl.CompareBuilds(); err == nil {
+		t.Fatal("compare with no build changes should error")
+	}
+
+	// Both agents change their worktrees, but /review never runs — so no .diff
+	// files exist on disk.
+	for _, name := range []string{"a", "b"} {
+		if err := os.WriteFile(filepath.Join(ctrl.worktrees[name], name+".txt"), []byte("impl by "+name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rows, err := ctrl.CompareBuilds()
+	if err != nil {
+		t.Fatalf("compare before review: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(rows))
+	}
+	// The diffs were captured on demand, with non-empty file counts.
+	for _, name := range []string{"a", "b"} {
+		if fi, statErr := os.Stat(ctrl.run.BuildDiffPath(name)); statErr != nil || fi.Size() == 0 {
+			t.Fatalf("on-demand diff for %q not written", name)
+		}
+	}
+	for _, row := range rows {
+		if row.Files == 0 {
+			t.Fatalf("row %q has no files: %+v", row.Agent, row)
+		}
+	}
+}
+
+// TestCompareDropsStaleDiff: if an agent reverts its worktree back to the base
+// after a /compare captured its diff, a later /compare must drop the stale diff
+// instead of continuing to show changes that no longer exist.
+func TestCompareDropsStaleDiff(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := newTestController(t, root, []string{"a", "b"}, config.ReviewConfig{})
+	base, _ := revParse(root, "HEAD")
+	if err := ctrl.run.SaveBaseSHA(base); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.ensureWorktrees(config.PhaseBuild); err != nil {
+		t.Fatal(err)
+	}
+
+	// Both agents change their worktrees; /compare captures both diffs.
+	for _, name := range []string{"a", "b"} {
+		if err := os.WriteFile(filepath.Join(ctrl.worktrees[name], name+".txt"), []byte("impl by "+name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := ctrl.CompareBuilds(); err != nil {
+		t.Fatalf("first compare: %v", err)
+	}
+	if fi, statErr := os.Stat(ctrl.run.BuildDiffPath("a")); statErr != nil || fi.Size() == 0 {
+		t.Fatal("a's diff should have been captured")
+	}
+
+	// "a" reverts back to the base (unstage + remove the file) while "b" keeps
+	// its change. A fresh /compare must drop a's now-stale diff but keep b's.
+	wtA := ctrl.worktrees["a"]
+	gitIn(t, wtA, "reset", "--hard", "HEAD")
+	_ = os.Remove(filepath.Join(wtA, "a.txt"))
+
+	if _, err := ctrl.CompareBuilds(); err != nil {
+		t.Fatalf("second compare: %v", err)
+	}
+	if _, statErr := os.Stat(ctrl.run.BuildDiffPath("a")); !os.IsNotExist(statErr) {
+		t.Fatal("a's stale diff should have been dropped once its worktree returned to base")
+	}
+	if fi, statErr := os.Stat(ctrl.run.BuildDiffPath("b")); statErr != nil || fi.Size() == 0 {
+		t.Fatal("b's diff should still be present")
+	}
+}
+
+func TestBuildProgressCountsActiveWorktrees(t *testing.T) {
+	root := initRepo(t)
+	chdir(t, root)
+	ctrl := newTestController(t, root, []string{"a", "b"}, config.ReviewConfig{})
+	base, _ := revParse(root, "HEAD")
+	if err := ctrl.run.SaveBaseSHA(base); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.ensureWorktrees(config.PhaseBuild); err != nil {
+		t.Fatal(err)
+	}
+
+	// Fresh worktrees: no activity.
+	if active, total := ctrl.BuildProgress(); active != 0 || total != 2 {
+		t.Fatalf("idle build: %d/%d, want 0/2", active, total)
+	}
+
+	// "a" makes an uncommitted change — counts as active.
+	if err := os.WriteFile(filepath.Join(ctrl.worktrees["a"], "a.txt"), []byte("wip\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if active, total := ctrl.BuildProgress(); active != 1 || total != 2 {
+		t.Fatalf("one active: %d/%d, want 1/2", active, total)
+	}
+
+	// "b" commits its work (HEAD moves past base) — also counts as active.
+	wt := ctrl.worktrees["b"]
+	if err := os.WriteFile(filepath.Join(wt, "b.txt"), []byte("done\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt, "add", ".")
+	gitIn(t, wt, "commit", "-m", "impl b")
+	if active, total := ctrl.BuildProgress(); active != 2 || total != 2 {
+		t.Fatalf("both active: %d/%d, want 2/2", active, total)
+	}
+}
