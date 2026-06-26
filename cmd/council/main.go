@@ -34,14 +34,6 @@ func mainExitCode(args []string) int {
 
 func run(args []string) error {
 	if len(args) >= 1 {
-		switch args[0] {
-		case "help", "-h", "--help":
-			// Short-circuit before flag parsing: the stdlib flag package
-			// intercepts -h/--help during Parse and prints only its own
-			// terse flag dump, so these never reach the post-parse switch.
-			printUsage()
-			return nil
-		}
 		if c, ok := command.LookupCLI(args[0]); ok && c.Name == "version" {
 			fmt.Println(version.String())
 			return nil
@@ -69,6 +61,13 @@ func run(args []string) error {
 	agentList := flags.String("agents", "", "comma-separated agent names to launch")
 	noLocal := flags.Bool("no-local-config", false, "ignore repo-local .council.yaml")
 	if err := flags.Parse(args); err != nil {
+		// The flag package intercepts -h/--help (in any position) and returns
+		// ErrHelp after printing its own terse flag dump; show the full usage
+		// and exit 0 instead, matching `council help`.
+		if errors.Is(err, flag.ErrHelp) {
+			printUsage()
+			return nil
+		}
 		return err
 	}
 
@@ -81,7 +80,8 @@ func run(args []string) error {
 				return errors.New(`usage: council ask "<prompt>"`)
 			}
 			initialPrompt = strings.Join(remaining[1:], " ")
-		case "help", "-h", "--help":
+		case "help":
+			// Bare word only; -h/--help are caught at flags.Parse above.
 			printUsage()
 			return nil
 		default:

@@ -47,10 +47,13 @@ func TestMainExitCode(t *testing.T) {
 		{"--version", []string{"--version"}, 0, "council"},
 		{"-v", []string{"-v"}, 0, "council"},
 		{"help", []string{"help"}, 0, "Usage:"},
-		// -h/--help short-circuit before flag.Parse, so all three spellings
-		// print the same full usage and exit 0 (not flag's terse dump).
+		// help/-h/--help all print the full usage and exit 0 (not flag's terse
+		// dump). flags.Parse intercepts -h/--help in any position and returns
+		// ErrHelp, which run() turns into the full usage — including when help
+		// follows another global flag, which a first-arg-only check would miss.
 		{"-h", []string{"-h"}, 0, "Usage:"},
 		{"--help", []string{"--help"}, 0, "Usage:"},
+		{"--help after --agents", []string{"--agents", "claude", "--help"}, 0, "Usage:"},
 		{"unknown command", []string{"frobnicate"}, 1, "unknown command"},
 		{"ask without prompt", []string{"ask"}, 1, "usage: council ask"},
 		{"unknown flag", []string{"--nope"}, 1, "not defined"},

@@ -30,6 +30,6 @@ agents:
       submit_sequence: cr
 
 review:
-  # The build gate run in each worktree before a build is eligible to win.
+  # The build gate that runs in each worktree before a build is eligible to win.
   # Set it per project, e.g. ["npm", "test"]. Use [] to skip the gate.
   check_command: ["go", "test", "./..."]
