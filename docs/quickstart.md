@@ -67,6 +67,12 @@ Writing a config from scratch instead of editing the generated one? Start from
 — a standalone file must spell out the per-agent `terminal` quirks that the
 presets would otherwise provide (see the [agent table](requirements.md#runtime-requirements)).
 
+Already working inside an agent CLI? The
+[`council-config` skill](https://github.com/umutarmut38/council/blob/main/skills/README.md)
+interviews you about your council and writes a repo-local `.council.yaml`
+overlay (git-excluded, never committed). Install it into Claude Code, Codex,
+Cursor, Copilot, or OpenCode with `scripts/install-skill.sh`.
+
 > This config lives at `~/.council.yaml` (global). A repository can also carry a
 > local `.council.yaml` that layers on top — it must be trusted once with
 > `council trust`. See [Configuration](configuration.md).
