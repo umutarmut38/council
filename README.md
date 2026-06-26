@@ -175,23 +175,25 @@ for the exact stance, and [Requirements](docs/requirements.md) for more detail.
 
 ## Quick Start
 
-Create a config:
+Set up a config interactively — the wizard detects the agent CLIs on your
+`PATH`, lets you enable each one and pick its role, finds your project's test
+command for the build gate, and writes a complete `~/.council.yaml` (preset
+terminal quirks included):
 
 ```bash
-council config init
-$EDITOR ~/.council.yaml
+council config wizard
 ```
 
-Enable the agents you have installed:
+Prefer to edit by hand? `council config init` writes the same config with every
+agent disabled; open `~/.council.yaml` and flip on the ones you have installed
+(the preset quirks are already there, so you only change `enabled`):
 
 ```yaml
 agents:
   claude:
     enabled: true
-    command: ["claude"]
   codex:
     enabled: true
-    command: ["codex"]
 ```
 
 Check commands and launch:
@@ -324,7 +326,9 @@ The full docs are in `docs/` and can be published with GitHub Pages.
 
 ## Examples
 
-- [Worker/reviewer config](examples/configs/worker-reviewer.yaml)
+- [Minimal config](examples/configs/minimal.yaml) — two agents and a build gate, the smallest file that runs a council.
+- [Worker/reviewer config](examples/configs/worker-reviewer.yaml) — split builders and judges, with roles, personalities, and themes.
+- [Headroom proxy config](examples/configs/headroom.yaml) — route agents through a local proxy via the experimental `setup`/`env` hooks.
 - [Retry/backoff issue](examples/issues/retry-backoff.md)
 
 The example issue can be used directly:

@@ -47,10 +47,13 @@ func TestMainExitCode(t *testing.T) {
 		{"--version", []string{"--version"}, 0, "council"},
 		{"-v", []string{"-v"}, 0, "council"},
 		{"help", []string{"help"}, 0, "Usage:"},
-		// -h/--help are intercepted by flag.Parse, which prints its own usage
-		// and returns flag.ErrHelp — surfaced as a non-zero exit today.
-		{"-h returns flag.ErrHelp", []string{"-h"}, 1, "help requested"},
-		{"--help returns flag.ErrHelp", []string{"--help"}, 1, "help requested"},
+		// help/-h/--help all print the full usage and exit 0 (not flag's terse
+		// dump). flags.Parse intercepts -h/--help in any position and returns
+		// ErrHelp, which run() turns into the full usage — including when help
+		// follows another global flag, which a first-arg-only check would miss.
+		{"-h", []string{"-h"}, 0, "Usage:"},
+		{"--help", []string{"--help"}, 0, "Usage:"},
+		{"--help after --agents", []string{"--agents", "claude", "--help"}, 0, "Usage:"},
 		{"unknown command", []string{"frobnicate"}, 1, "unknown command"},
 		{"ask without prompt", []string{"ask"}, 1, "usage: council ask"},
 		{"unknown flag", []string{"--nope"}, 1, "not defined"},
@@ -66,6 +69,25 @@ func TestMainExitCode(t *testing.T) {
 				t.Fatalf("mainExitCode(%v) output = %q, want it to contain %q", tc.args, out, tc.contains)
 			}
 		})
+	}
+}
+
+// TestHelpHasNoTerseFlagDump guards against the FlagSet's default usage leaking
+// alongside ours: Parse calls flags.Usage for -h/--help, so unless it is
+// suppressed the terse two-flag dump ("Usage of council:") prints to stderr in
+// addition to the full usage. captureOutput merges stdout and stderr, so a leak
+// is visible here.
+func TestHelpHasNoTerseFlagDump(t *testing.T) {
+	for _, args := range [][]string{
+		{"help"}, {"-h"}, {"--help"}, {"--agents", "claude", "--help"},
+	} {
+		out := captureOutput(t, func() { _ = mainExitCode(args) })
+		if strings.Contains(out, "Usage of council:") {
+			t.Errorf("council %v leaked the terse flag dump:\n%s", args, out)
+		}
+		if !strings.Contains(out, "Examples:") {
+			t.Errorf("council %v missing the full usage:\n%s", args, out)
+		}
 	}
 }
 

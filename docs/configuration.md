@@ -212,7 +212,8 @@ The full list of roles (`title`, `heading`, `status`, `rail`, `border`,
 Council can export environment variables to agents and run commands before any
 agent launches — a vendor-agnostic way to wire agents to a local service (a
 context-compression proxy, a mock backend, a tunnel) without council knowing
-anything about it.
+anything about it. For a complete, runnable example, see
+[examples/configs/headroom.yaml](https://github.com/umutarmut38/council/blob/main/examples/configs/headroom.yaml).
 
 > **Experimental — off by default.** `setup` runs **arbitrary commands** and
 > `env` mutates the agent environment, so the whole feature is opt-in. Set

@@ -58,9 +58,22 @@ func run(args []string) error {
 
 	flags := flag.NewFlagSet("council", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
+	// Suppress the FlagSet's terse default usage: Parse calls it both for
+	// -h/--help and on a bad flag, but we print the full usage ourselves on
+	// ErrHelp below, and a flag error already prints its own message. Without
+	// this, `--help` would emit the two-flag dump to stderr and the full usage
+	// to stdout.
+	flags.Usage = func() {}
 	agentList := flags.String("agents", "", "comma-separated agent names to launch")
 	noLocal := flags.Bool("no-local-config", false, "ignore repo-local .council.yaml")
 	if err := flags.Parse(args); err != nil {
+		// The flag package intercepts -h/--help (in any position) and returns
+		// ErrHelp after printing its own terse flag dump; show the full usage
+		// and exit 0 instead, matching `council help`.
+		if errors.Is(err, flag.ErrHelp) {
+			printUsage()
+			return nil
+		}
 		return err
 	}
 
@@ -73,7 +86,8 @@ func run(args []string) error {
 				return errors.New(`usage: council ask "<prompt>"`)
 			}
 			initialPrompt = strings.Join(remaining[1:], " ")
-		case "help", "-h", "--help":
+		case "help":
+			// Bare word only; -h/--help are caught at flags.Parse above.
 			printUsage()
 			return nil
 		default:
