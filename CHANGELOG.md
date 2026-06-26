@@ -4,11 +4,14 @@ All notable changes will be documented here.
 
 This project follows semantic versioning once `v0.1.0` is tagged.
 
-## Unreleased
+## v1.0.0 - 2026-06-26
 
-Mouse support and configurable, integrated editing: scroll/click with the
-mouse, choose your editor, edit files in a VSCode-style PTY pane with a file
-tree, and edit run artifacts in place. Plus configurable color themes.
+The first stable release. The `.council.yaml` schema and platform support are
+settled — macOS, Linux, and Windows (ConPTY) ship prebuilt binaries — and
+configs written for 1.0 keep working. Headline work since v0.4.0: full per-phase
+roles, a `/refine` consensus round, build comparison and a post-adopt receipt,
+mouse support, an integrated editor with a file tree, and configurable color
+themes.
 
 ### Added
 
@@ -48,6 +51,23 @@ tree, and edit run artifacts in place. Plus configurable color themes.
   `color` still wins for pane borders, and `council doctor`'s color strip renders
   in the active theme. Indexed-256 only, so themes render identically across
   terminals.
+- **Full per-phase roles.** `role:` takes one token per phase — `planner`,
+  `builder`, `voter`, `review` — so an agent can plan without building or review
+  without voting; the legacy `worker`/`reviewer` aliases still expand to the
+  phase pairs.
+- **`/refine` consensus round.** Every planner revises its plan from the vote
+  critiques (or a note you pass), then the council revotes — for converging on a
+  single plan before building.
+- **`/compare` before review, with live build progress.** Inspect builds — files
+  and git-style diffs versus the base or between builds — and watch each
+  worktree's build advance live.
+- **Full-screen post-adopt receipt.** After `/adopt`, a full-screen receipt
+  summarizes exactly what was applied to your working tree.
+- **Composer input history.** Arrow up/down walks the prompts you've sent.
+- **Richer `/status`.** Shows the active run and phase with the pinned vote
+  winner.
+- **Confirm-before-interrupt.** `Ctrl+C` in the composer asks before
+  interrupting instead of dropping in-progress input.
 
 ### Fixed
 
@@ -62,6 +82,26 @@ tree, and edit run artifacts in place. Plus configurable color themes.
   that emit wheel reports council's runtime can't parse as mouse events (or when
   the escape is split across reads), the fragment is dropped instead of being
   typed into the composer as text.
+- **Live `/compare` refresh and safe adopt preview.** The compare view refreshes
+  as builds change, and `/preview`/`/adopt` never mutate the working tree while
+  showing what they would apply.
+
+### Changed
+
+- **`council --help` and `-h` now print the full usage.** Previously only the
+  bare word `council help` did; `--help`/`-h` were intercepted by flag parsing
+  and exited non-zero. The usage also gained a tagline, flag descriptions, an
+  examples block, and a docs footer.
+
+### Docs
+
+- New **Quick Start** guide and a `minimal.yaml` starter config; the interactive
+  `council config wizard` is featured as the recommended setup path.
+
+### Quality / CI
+
+- v1.0 cleanup: dropped an unused internal command-runner seam and de-duplicated
+  the bounded output writer behind a shared, concurrency-safe `capbuf` package.
 
 ## v0.4.0 - 2026-06-17
 
