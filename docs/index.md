@@ -20,7 +20,7 @@ permalink: /
     <span class="pipeline-step" role="listitem"><b>5</b>adopt</span>
   </div>
   <div class="hero-actions">
-    <a href="requirements.html" class="btn btn-primary mr-2">Get started</a>
+    <a href="quickstart.html" class="btn btn-primary mr-2">Get started</a>
     <a href="configuration.html" class="btn mr-2">Configuration</a>
     <a href="https://github.com/umutarmut38/council" class="btn">View on GitHub</a>
   </div>
@@ -29,6 +29,10 @@ permalink: /
 ## Start here
 
 <div class="cards">
+  <a class="card" href="quickstart.html">
+    <span class="card-title">Quick Start</span>
+    <span class="card-desc">Install, write a config, enable your agents, and drive a first plan → vote → build run.</span>
+  </a>
   <a class="card" href="requirements.html">
     <span class="card-title">Requirements</span>
     <span class="card-desc">Supported platforms, build and runtime needs, and per-agent notes.</span>

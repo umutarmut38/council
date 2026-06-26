@@ -1,0 +1,35 @@
+# The smallest config that runs a council: two agents and a build gate.
+#
+# Copy to ~/.council.yaml (global) or to .council.yaml at a repo root (a
+# repo-local file must be trusted once with `council trust`). Change the
+# commands to the agent CLIs installed on your machine, then run
+# `council doctor` to confirm they're on PATH and authenticated.
+#
+# The `terminal` blocks are the per-agent quirks each CLI needs to actually
+# submit a prompt — they are NOT optional. `council config init` writes these
+# for you (from the built-in presets); they're spelled out here so this file
+# also works as a complete, standalone config. See docs/configuration.md and
+# worker-reviewer.yaml for roles, personalities, themes, and the full schema.
+
+agents:
+  claude:
+    enabled: true
+    command: ["claude"]
+    terminal:
+      # Send Enter as its own keystroke a beat after the text; glued on, claude
+      # treats it as a literal newline and never submits.
+      submit_sequence: cr
+      submit_delay_ms: 250
+  codex:
+    enabled: true
+    command: ["codex"]
+    terminal:
+      # codex submits most reliably from a bracketed paste; clear the line first.
+      send_mode: paste
+      before_send_sequence: ctrl+u
+      submit_sequence: cr
+
+review:
+  # The build gate run in each worktree before a build is eligible to win.
+  # Set it per project, e.g. ["npm", "test"]. Use [] to skip the gate.
+  check_command: ["go", "test", "./..."]

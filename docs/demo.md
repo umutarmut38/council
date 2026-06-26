@@ -1,7 +1,7 @@
 ---
 title: Terminal Demo
 nav_section: Getting Started
-nav_order: 2
+nav_order: 3
 ---
 
 # Terminal Demo
