@@ -58,6 +58,12 @@ func run(args []string) error {
 
 	flags := flag.NewFlagSet("council", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
+	// Suppress the FlagSet's terse default usage: Parse calls it both for
+	// -h/--help and on a bad flag, but we print the full usage ourselves on
+	// ErrHelp below, and a flag error already prints its own message. Without
+	// this, `--help` would emit the two-flag dump to stderr and the full usage
+	// to stdout.
+	flags.Usage = func() {}
 	agentList := flags.String("agents", "", "comma-separated agent names to launch")
 	noLocal := flags.Bool("no-local-config", false, "ignore repo-local .council.yaml")
 	if err := flags.Parse(args); err != nil {

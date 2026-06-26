@@ -72,6 +72,25 @@ func TestMainExitCode(t *testing.T) {
 	}
 }
 
+// TestHelpHasNoTerseFlagDump guards against the FlagSet's default usage leaking
+// alongside ours: Parse calls flags.Usage for -h/--help, so unless it is
+// suppressed the terse two-flag dump ("Usage of council:") prints to stderr in
+// addition to the full usage. captureOutput merges stdout and stderr, so a leak
+// is visible here.
+func TestHelpHasNoTerseFlagDump(t *testing.T) {
+	for _, args := range [][]string{
+		{"help"}, {"-h"}, {"--help"}, {"--agents", "claude", "--help"},
+	} {
+		out := captureOutput(t, func() { _ = mainExitCode(args) })
+		if strings.Contains(out, "Usage of council:") {
+			t.Errorf("council %v leaked the terse flag dump:\n%s", args, out)
+		}
+		if !strings.Contains(out, "Examples:") {
+			t.Errorf("council %v missing the full usage:\n%s", args, out)
+		}
+	}
+}
+
 func TestMainExitCodeVersionMatchesVersionString(t *testing.T) {
 	var code int
 	out := captureOutput(t, func() { code = mainExitCode([]string{"version"}) })
