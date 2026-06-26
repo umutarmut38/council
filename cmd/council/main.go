@@ -34,6 +34,14 @@ func mainExitCode(args []string) int {
 
 func run(args []string) error {
 	if len(args) >= 1 {
+		switch args[0] {
+		case "help", "-h", "--help":
+			// Short-circuit before flag parsing: the stdlib flag package
+			// intercepts -h/--help during Parse and prints only its own
+			// terse flag dump, so these never reach the post-parse switch.
+			printUsage()
+			return nil
+		}
 		if c, ok := command.LookupCLI(args[0]); ok && c.Name == "version" {
 			fmt.Println(version.String())
 			return nil

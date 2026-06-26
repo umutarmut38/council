@@ -131,11 +131,20 @@ const generalUsageBlock = `Usage:
 
 func TestUsageStringRendersBothSections(t *testing.T) {
 	got := UsageString()
-	if !strings.HasPrefix(got, generalUsageBlock) {
+	if !strings.HasPrefix(got, tagline+"\n\n") {
+		t.Fatalf("usage should open with the tagline:\n%q", got)
+	}
+	if !strings.Contains(got, "\n"+generalUsageBlock) {
 		t.Fatalf("usage general section drifted:\n%q", got)
 	}
 	if !strings.Contains(got, "\n"+orchestrationHeader+"\n") {
 		t.Fatal("usage missing the orchestration header")
+	}
+	// Orientation blocks: global flags, examples, and the config/docs footer.
+	for _, want := range []string{flagsBlock, examplesBlock, footer} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("usage missing an orientation block:\nwant:\n%s\ngot:\n%s", want, got)
+		}
 	}
 	// A described command renders its summary at a padded column.
 	if !strings.Contains(got, "council vote [run]") || !strings.Contains(got, "tally ranked votes into a winner") {

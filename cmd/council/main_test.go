@@ -47,10 +47,10 @@ func TestMainExitCode(t *testing.T) {
 		{"--version", []string{"--version"}, 0, "council"},
 		{"-v", []string{"-v"}, 0, "council"},
 		{"help", []string{"help"}, 0, "Usage:"},
-		// -h/--help are intercepted by flag.Parse, which prints its own usage
-		// and returns flag.ErrHelp — surfaced as a non-zero exit today.
-		{"-h returns flag.ErrHelp", []string{"-h"}, 1, "help requested"},
-		{"--help returns flag.ErrHelp", []string{"--help"}, 1, "help requested"},
+		// -h/--help short-circuit before flag.Parse, so all three spellings
+		// print the same full usage and exit 0 (not flag's terse dump).
+		{"-h", []string{"-h"}, 0, "Usage:"},
+		{"--help", []string{"--help"}, 0, "Usage:"},
 		{"unknown command", []string{"frobnicate"}, 1, "unknown command"},
 		{"ask without prompt", []string{"ask"}, 1, "usage: council ask"},
 		{"unknown flag", []string{"--nope"}, 1, "not defined"},
