@@ -11,3 +11,17 @@ licensed under CC-BY-4.0
 
 Changes: the mesh was decimated into a compact point cloud
 (internal/tui/anim/mesh_data.go). The original mesh is not redistributed.
+
+Model pricing
+-------------
+internal/pricing is a behaviour-preserving Go port of the model-price lookup in
+codeburn by AgentSeal
+  https://github.com/getagentseal/codeburn
+licensed under the MIT License (Copyright (c) 2026 AgentSeal).
+
+Ported logic: the canonical-name/alias/longest-prefix lookup pipeline, the
+per-token clamp, and the LiteLLM cache/snapshot handling (internal/pricing/
+pricing.go). Copied data: the bundled LiteLLM price snapshot and gap-fill table
+(internal/pricing/data/{litellm-snapshot,pricing-fallback}.json), themselves
+derived from BerriAI/litellm, and the model-alias table
+(internal/pricing/aliases.go).

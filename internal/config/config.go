@@ -37,6 +37,7 @@ type AgentConfig struct {
 	Env           map[string]string   `yaml:"env,omitempty"`
 	Terminal      TerminalConfig      `yaml:"terminal"`
 	Orchestration OrchestrationConfig `yaml:"orchestration,omitempty"`
+	Usage         AgentUsageConfig    `yaml:"usage,omitempty"`
 }
 
 // Orchestration roles. Roles are structural (which phase an agent joins) and are
@@ -444,6 +445,7 @@ type Config struct {
 	Policy                PolicyConfig                         `yaml:"policy,omitempty"`
 	PersonalityCategories map[string]PersonalityCategoryConfig `yaml:"personality_categories,omitempty"`
 	Personalities         map[string]PersonalityConfig         `yaml:"personalities,omitempty"`
+	Usage                 UsageConfig                          `yaml:"usage,omitempty"`
 
 	// ExperimentalIgnored is computed by Normalize: true when env/setup were
 	// present but dropped because the experimental gate was off. Never
@@ -967,6 +969,7 @@ func (c *Config) Normalize() {
 	c.normalizeUI()
 	c.normalizeSessions()
 	c.normalizeAgentDefaults()
+	c.normalizeUsage()
 	c.applyExperimentalGate()
 }
 

@@ -71,6 +71,7 @@ See [Workflows → Personalities](workflows.md#personalities-categories-and-targ
 | `/judge build <agent>` | Record a human-picked build winner. |
 | `/finish` | Force-collect the current phase now (use if a pane finished but auto-detect didn't fire). |
 | `/status` | Show the active run and phase. |
+| `/cost` | Show per-session token usage and estimated cost for the active run (requires `usage.enabled`). |
 | `/report` | Write `report.md` for the run and open it in the viewer. |
 | `/artifacts` | Browse the run's plans, votes, diffs, check logs, reviews, and transcripts in a split view: the list on the left, the selected file open in the **integrated editor** (`ui.editor`) on the right. `↑/↓` select · `Enter` opens it in the editor pane (editable) · `Tab` jumps into the pane · `F2`/`Ctrl+O` back to the list · `e` opens it in the external configured editor (`ui.editor`, else `$VISUAL`/`$EDITOR`/`vim`) instead. |
 | `/edit [path]` | **Integrated editor.** A collapsible file-tree sidebar on the left and the configured editor (`ui.editor`, e.g. `nvim`) running inside council as a PTY pane on the right. `↑/↓` move, `→`/`Enter` expand a folder or open a file, `←` collapse, `Tab` jump to the editor pane. In the pane, keystrokes (including `Esc`) go to the editor; `F2`/`Ctrl+O` returns to the tree. Selecting another file opens it in the live editor via `ui.editor_open_cmd` (default `:e {path}`, tuned for vim/nvim). With a `path` argument that file is opened immediately. |
@@ -133,6 +134,7 @@ council adopt [run] [agent] [--dry-run] [--yes]          preview + apply a build
 council run "<issue>"                                    plan -> vote -> build
 council resume [run]                                     reopen an older run with fresh agent processes
 council status [run]                                     show a run's phase, artifacts, and winners
+council cost [run] [--since 30d] | cost prices refresh   per-session usage and estimated cost
 council report [run] [--post]                            write report.md (--post comments on the issue)
 council pr [run] [agent]                                 open a PR from a build branch (via gh)
 council scorecard                                        agent performance across runs

@@ -33,6 +33,8 @@ func runOrchestration(command string, args []string) error {
 		return councilCleanRuns(args)
 	case "status":
 		return councilStatus(args)
+	case "cost":
+		return councilCost(args)
 	case "resume":
 		return councilResume(args)
 	case "report":

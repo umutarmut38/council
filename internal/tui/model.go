@@ -820,6 +820,7 @@ func (m Model) saveTranscripts() error {
 		if err := m.Store.SaveTranscript(view.Session.Name, content); err != nil {
 			return err
 		}
+		m.recordUsageOutput(view.Session.Name, content)
 	}
 	return nil
 }

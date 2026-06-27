@@ -405,6 +405,7 @@ A map of agent name to config; the name labels the pane and artifacts.
 | `env` | map | — | Extra environment for this agent, merged over the top-level `env` (this wins). Experimental: requires `experimental.setup_env`. |
 | `terminal` | object | — | Rendering and prompt-delivery settings (see `agents.<name>.terminal`). |
 | `orchestration` | object | — | Per-phase behavior (see `agents.<name>.orchestration`). |
+| `usage` | object | — | Cost-tracking binding for this agent (see `agents.<name>.usage`). |
 
 ### `agents.<name>.terminal`
 
@@ -545,4 +546,41 @@ Limits for `@path` file-reference expansion in prompts and issues.
 | `color` | string | — | Optional 256-color code. |
 | `order` | int | `0` | Sort order within groupings. |
 | `prompt_prefix` | string | — | Text prepended to prompts sent to this agent. |
+
+### `usage`
+
+Local, provider-agnostic cost/usage ledger. Off by default; all data stays under `.council/`.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `false` | Record usage and show the cost UI (header total, pane-border cost, `/cost`). |
+| `currency` | string | `USD` | Currency label for displayed costs. |
+| `estimator` | string | `chars4` | Local token estimator (`chars4` = characters / 4). |
+| `show_total_in_header` | bool | `false` | Show a compact run cost total in the top status line. |
+| `show_agent_cost_in_border` | bool | `false` | Show each session's cost in its pane border. |
+| `stale_price_after_days` | int | `60` | Warn when a user price profile's `reviewed_at` is older than this. |
+| `model_aliases` | map | — | Map a model name council sees to one the price tables know. |
+| `prices` | map | — | User-reviewed price profiles (see `usage.prices.<name>`). |
+
+### `usage.prices.<name>`
+
+A user-defined price profile, in per-million-token units. Wins over the bundled/cached price tables.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `input_per_million` | float | `0` | Input price per 1M tokens. |
+| `output_per_million` | float | `0` | Output price per 1M tokens. |
+| `currency` | string | — | Currency for this profile (informational). |
+| `source` | string | — | Where the price came from (informational, e.g. `user`). |
+| `reviewed_at` | string | — | Date (`YYYY-MM-DD`) the price was last reviewed; drives the stale warning. |
+
+### `agents.<name>.usage`
+
+Binds an agent to a model and price for cost tracking.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `model` | string | — | Model name used for price lookup and the session-file reader. |
+| `price_profile` | string | — | A `usage.prices` entry; when set it wins over the price tables. |
+| `tool` | string | — | Override which native session reader to use when the command name isn't the tool name. |
 <!-- END GENERATED: config-schema -->

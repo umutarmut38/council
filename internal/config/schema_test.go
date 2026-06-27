@@ -51,6 +51,9 @@ func TestSchemaCoversConfigStructs(t *testing.T) {
 	check("personality_categories.<name>", reflect.TypeOf(PersonalityCategoryConfig{}))
 	check("personalities.<name>", reflect.TypeOf(PersonalityConfig{}))
 	check("ui.themes.<name>", reflect.TypeOf(theme.Palette{}))
+	check("usage", reflect.TypeOf(UsageConfig{}))
+	check("usage.prices.<name>", reflect.TypeOf(PriceProfile{}))
+	check("agents.<name>.usage", reflect.TypeOf(AgentUsageConfig{}))
 
 	for _, key := range []string{"env", "setup"} {
 		if !documented(sectionKeys["env, setup, experimental"], key) {

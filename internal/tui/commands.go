@@ -395,6 +395,8 @@ func (m *Model) handleCommand(text string) (bool, tea.Cmd) {
 		m.finishPhase()
 	case "status":
 		m.cmdStatus()
+	case "cost":
+		m.cmdCost()
 	case "setup":
 		m.cmdSetup()
 	case "clean":
