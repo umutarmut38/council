@@ -1,7 +1,10 @@
 package pricing
 
 import (
+	"encoding/json"
 	"math"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -94,6 +97,60 @@ func TestNegativeTokensClampToZero(t *testing.T) {
 	c, ok := r.CalculateCost("gpt-5", -100, -100, 0, 0, 0, false, 0)
 	if !ok || c != 0 {
 		t.Fatalf("negative tokens cost = %v, want 0", c)
+	}
+}
+
+func writeCache(t *testing.T, dir string, ts int64, models map[string][2]float64) {
+	t.Helper()
+	data := map[string][]*float64{}
+	for name, r := range models {
+		in, out := r[0], r[1]
+		data[name] = []*float64{&in, &out, nil, nil, nil}
+	}
+	b, err := json.Marshal(cacheDoc{Timestamp: ts, Data: data})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, cacheFile), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A fresh cache is used over the bundled snapshot and labels the source.
+func TestFreshCacheWinsOverBundled(t *testing.T) {
+	dir := t.TempDir()
+	writeCache(t, dir, time.Now().UnixMilli(), map[string][2]float64{"gpt-5": {2e-6, 8e-6}})
+	r := New(Options{CacheDir: dir})
+	if src, at := r.Origin(); src != SourceCache || at.IsZero() {
+		t.Fatalf("origin = %q/%v, want litellm-cache with a time", src, at)
+	}
+	costs, src, ok := r.Resolve("gpt-5", "")
+	if !ok || src != SourceCache || !approx(costs.Input, 2e-6) {
+		t.Fatalf("gpt-5 = %v src=%q, want cache 2e-6", costs.Input, src)
+	}
+}
+
+// A stale cache (older than the TTL) is ignored; the bundled snapshot is used.
+func TestStaleCacheFallsBackToBundled(t *testing.T) {
+	dir := t.TempDir()
+	writeCache(t, dir, time.Now().Add(-48*time.Hour).UnixMilli(), map[string][2]float64{"gpt-5": {99, 99}})
+	r := New(Options{CacheDir: dir})
+	if src, _ := r.Origin(); src != SourceBundled {
+		t.Fatalf("origin = %q, want litellm-bundled (stale cache ignored)", src)
+	}
+	costs, _, _ := r.Resolve("gpt-5", "")
+	if !approx(costs.Input, 1.25e-06) {
+		t.Fatalf("gpt-5 input = %v, want bundled 1.25e-06", costs.Input)
+	}
+}
+
+// The snapshot fills models the cache lacks (gap-fill), still labeled cache.
+func TestCacheGapFilledBySnapshot(t *testing.T) {
+	dir := t.TempDir()
+	writeCache(t, dir, time.Now().UnixMilli(), map[string][2]float64{"only-in-cache": {1e-6, 1e-6}})
+	r := New(Options{CacheDir: dir})
+	if _, _, ok := r.Resolve("claude-sonnet-4-6", ""); !ok { // only in bundled snapshot
+		t.Fatal("snapshot model should still resolve when a cache is active")
 	}
 }
 

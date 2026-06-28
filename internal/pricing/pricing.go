@@ -330,30 +330,34 @@ type cacheDoc struct {
 }
 
 type litellmEntry struct {
-	Input       *float64 `json:"input_cost_per_token"`
-	Output      *float64 `json:"output_cost_per_token"`
-	CacheCreate *float64 `json:"cache_creation_input_token_cost"`
-	CacheRead   *float64 `json:"cache_read_input_token_cost"`
+	Input            *float64 `json:"input_cost_per_token"`
+	Output           *float64 `json:"output_cost_per_token"`
+	CacheCreate      *float64 `json:"cache_creation_input_token_cost"`
+	CacheRead        *float64 `json:"cache_read_input_token_cost"`
+	ProviderSpecific *struct {
+		Fast *float64 `json:"fast"`
+	} `json:"provider_specific_entry"`
 }
 
-// RefreshCache fetches the LiteLLM table and writes the tuple cache atomically
-// (owner-only). dir is .council/usage. now is injected for testability.
-func RefreshCache(ctx context.Context, dir string, now time.Time) error {
+// FetchLiteLLM downloads the upstream LiteLLM price table and parses it into the
+// tuple form council stores. Shared by RefreshCache (live cache) and the
+// bundled-snapshot generator (internal/pricing/gen).
+func FetchLiteLLM(ctx context.Context) (map[string][]*float64, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, LiteLLMURL, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("litellm refresh: HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("litellm fetch: HTTP %d", resp.StatusCode)
 	}
 	var raw map[string]litellmEntry
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return err
+		return nil, err
 	}
 	data := map[string][]*float64{}
 	for name, e := range raw {
@@ -362,13 +366,29 @@ func RefreshCache(ctx context.Context, dir string, now time.Time) error {
 		if !ok || !ok2 {
 			continue
 		}
-		tup := []*float64{&in, &out, e.CacheCreate, e.CacheRead, nil}
+		var fast *float64
+		if e.ProviderSpecific != nil {
+			fast = e.ProviderSpecific.Fast
+		}
+		tup := []*float64{&in, &out, e.CacheCreate, e.CacheRead, fast}
 		data[name] = tup
+		// Also index the provider-prefix-stripped name (first write wins, so a
+		// direct-provider entry beats a re-hoster).
 		if stripped := reProvider.ReplaceAllString(name, ""); stripped != name {
 			if _, exists := data[stripped]; !exists {
 				data[stripped] = tup
 			}
 		}
+	}
+	return data, nil
+}
+
+// RefreshCache fetches the LiteLLM table and writes the tuple cache atomically
+// (owner-only). dir is .council/usage. now is injected for testability.
+func RefreshCache(ctx context.Context, dir string, now time.Time) error {
+	data, err := FetchLiteLLM(ctx)
+	if err != nil {
+		return err
 	}
 	doc, err := json.Marshal(cacheDoc{Timestamp: now.UnixMilli(), Data: data})
 	if err != nil {
