@@ -46,23 +46,21 @@ type Reader interface {
 // validated against real sessions — they expose per-session tokens keyed by the
 // working directory, so council can correlate them to a pane.
 //
-// cursor and copilot are NOT ported, after genuinely trying against real data:
-//   - cursor: token counts on disk are zero (cursor's own bubbles carry no
-//     usage; codeburn estimates them from bubble text), and — fatally — there
-//     is no composer→folder mapping in the current state.vscdb layout, so a
-//     call can't be attributed to a pane's cwd at all.
-//   - copilot: the only full-token source is an opt-in OTel database that is
-//     usually absent; the always-present session store records cwd but no
-//     tokens. There is nothing reliable to read.
+// cursor-agent provides model auto-discovery only (see ReaderFor): it records no
+// token usage on disk — even codeburn estimates cursor tokens from text — so
+// there is no reported total, but its model is recoverable, which lets council
+// price the estimated floor instead of showing "cost unknown".
 //
-// Both are covered instead by the estimated floor (internal/usage) plus the
-// codeburn adapter (machine-wide totals). New readers drop in here once a tool
-// exposes per-cwd usage council can verify.
+// copilot is NOT supported: its only full-token source is an opt-in OTel
+// database that is usually absent; the always-present session store records cwd
+// but no tokens. There is nothing reliable to read, so it stays on the estimated
+// floor + the codeburn adapter (machine-wide totals).
 func Native() []Reader {
 	return []Reader{Claude(""), Codex(""), Opencode("")}
 }
 
 // ReaderFor returns the native reader for a tool key, or nil when none exists.
+// cursor/cursor-agent resolve to a discovery-only reader (no reported tokens).
 func ReaderFor(tool string) Reader {
 	switch tool {
 	case "claude":
@@ -71,6 +69,8 @@ func ReaderFor(tool string) Reader {
 		return Codex("")
 	case "opencode":
 		return Opencode("")
+	case "cursor", "cursor-agent":
+		return Cursor("")
 	}
 	return nil
 }
