@@ -87,15 +87,46 @@ func TestReconcilePerModel(t *testing.T) {
 	}
 }
 
-// Two agents shared a cwd → ambiguous → no reconcile, estimates stand.
-func TestReconcileAmbiguousSharedCWD(t *testing.T) {
+// Several same-tool agents sharing one cwd overlap and can't be told apart → no
+// reconcile, estimates stand (no pane charged for another's spend).
+func TestReconcileMultipleSameToolSameCWD(t *testing.T) {
 	events := []Event{
 		{Agent: "claude-a", Tool: "claude", CWD: "/repo", At: "2026-06-27T10:00:00Z", Confidence: Estimated, InputTokens: 5},
-		{Agent: "claude-b", Tool: "claude", CWD: "/repo", At: "2026-06-27T10:00:00Z", Confidence: Estimated, InputTokens: 5},
+		{Agent: "claude-b", Tool: "claude", CWD: "/repo", At: "2026-06-27T10:00:01Z", Confidence: Estimated, InputTokens: 5},
 	}
-	rd := fakeReader{calls: map[string][]reader.Call{"/repo": {{InputTokens: 100}}}}
+	rd := fakeReader{calls: map[string][]reader.Call{"/repo": {
+		{Model: "m", Timestamp: mustTime("2026-06-27T10:00:05Z"), InputTokens: 100},
+	}}}
 	if rep := reconcileWith(events, lookup("claude", rd)); len(rep) != 0 {
-		t.Fatalf("ambiguous shared cwd must not reconcile, got %+v", rep)
+		t.Fatalf("multiple same-tool agents must not reconcile, got %+v", rep)
+	}
+}
+
+// One claude + one codex in the SAME cwd both reconcile — each is the only agent
+// of its tool there, and the tools read different stores.
+func TestReconcileCrossToolSameCWD(t *testing.T) {
+	events := []Event{
+		{Agent: "claude-w", Tool: "claude", CWD: "/repo", At: "2026-06-27T10:00:00Z", Confidence: Estimated, InputTokens: 5},
+		{Agent: "codex-w", Tool: "codex", CWD: "/repo", At: "2026-06-27T10:00:00Z", Confidence: Estimated, InputTokens: 5},
+	}
+	claudeRd := fakeReader{calls: map[string][]reader.Call{"/repo": {{Model: "claude-sonnet-4-6", InputTokens: 100, OutputTokens: 10}}}}
+	codexRd := fakeReader{calls: map[string][]reader.Call{"/repo": {{Model: "gpt-5", InputTokens: 200, OutputTokens: 20}}}}
+	readerFor := func(tool string) reader.Reader {
+		switch tool {
+		case "claude":
+			return claudeRd
+		case "codex":
+			return codexRd
+		}
+		return nil
+	}
+	rep := reconcileWith(events, readerFor)
+	byAgent := map[string]Event{}
+	for _, e := range rep {
+		byAgent[e.Agent] = e
+	}
+	if byAgent["claude-w"].InputTokens != 100 || byAgent["codex-w"].InputTokens != 200 {
+		t.Fatalf("cross-tool same-cwd should reconcile both: %+v", rep)
 	}
 }
 
