@@ -44,7 +44,7 @@ type Reader interface {
 // is implemented so far; codex/cursor/copilot/opencode are stubbed pending
 // their (SQLite-backed) ports, and fall back to estimated until then.
 func Native() []Reader {
-	return []Reader{Claude("")}
+	return []Reader{Claude(""), Codex("")}
 }
 
 // ReaderFor returns the native reader for a tool key, or nil when none exists.
@@ -52,6 +52,8 @@ func ReaderFor(tool string) Reader {
 	switch tool {
 	case "claude":
 		return Claude("")
+	case "codex":
+		return Codex("")
 	}
 	return nil
 }
