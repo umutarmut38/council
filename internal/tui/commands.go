@@ -582,6 +582,7 @@ func (m *Model) sendNamed(name string, message string) {
 	}
 	for _, view := range m.Agents {
 		if strings.EqualFold(view.Session.Name, name) {
+			m.recordUsageInput(view.Session.Name, m.phase, message)
 			if err := sendLine(view.Session, m.Config.PromptForAgent(view.Session.Name, message)); err != nil {
 				m.Status = err.Error()
 				return
@@ -599,6 +600,7 @@ func (m *Model) sendAll(message string) {
 		if view.Session.Done {
 			continue
 		}
+		m.recordUsageInput(view.Session.Name, m.phase, message)
 		_ = sendLine(view.Session, m.Config.PromptForAgent(view.Session.Name, message))
 	}
 }
@@ -606,6 +608,7 @@ func (m *Model) sendAll(message string) {
 func (m *Model) sendPersonality(personality string, message string) int {
 	count := 0
 	for _, view := range m.recipientViewsForPersonality(personality) {
+		m.recordUsageInput(view.Session.Name, m.phase, message)
 		_ = sendLine(view.Session, m.Config.PromptForAgent(view.Session.Name, message))
 		count++
 	}
@@ -615,6 +618,7 @@ func (m *Model) sendPersonality(personality string, message string) int {
 func (m *Model) sendCategory(category string, message string) int {
 	count := 0
 	for _, view := range m.recipientViewsForCategory(category) {
+		m.recordUsageInput(view.Session.Name, m.phase, message)
 		_ = sendLine(view.Session, m.Config.PromptForAgent(view.Session.Name, message))
 		count++
 	}

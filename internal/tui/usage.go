@@ -11,12 +11,36 @@ import (
 	"github.com/umutarmut38/council/internal/usage"
 )
 
-// recordUsageEvent appends one usage event for the active run. No-op when usage
-// is disabled. Runs on the Update goroutine; the append is self-contained so it
-// needs no shared ledger handle. Best-effort: a write error never blocks a run.
+// initUsage allocates the live tally and resolves each agent's price once, so
+// the header/border can render cost as cheap arithmetic in View. No-op when
+// usage is disabled (the maps stay nil and every usage path short-circuits).
+func (m *Model) initUsage() {
+	if !m.Config.Usage.Enabled {
+		return
+	}
+	m.usageTally = map[string]usage.TokenPair{}
+	m.usageRate = map[string]pricing.ModelCosts{}
+	r := m.usageResolver()
+	for name, a := range m.Config.Agents {
+		if costs, _, ok := r.Resolve(a.Usage.Model, a.Usage.PriceProfile); ok {
+			m.usageRate[name] = costs
+		}
+	}
+}
+
+// recordUsageEvent appends one usage event for the active run and bumps the live
+// tally. No-op when usage is disabled. Runs on the Update goroutine; the append
+// is self-contained so it needs no shared ledger handle. Best-effort: a write
+// error never blocks a run.
 func (m Model) recordUsageEvent(e usage.Event) {
 	if !m.Config.Usage.Enabled || m.Store == nil {
 		return
+	}
+	if m.usageTally != nil { // map is a reference type, so this persists
+		t := m.usageTally[e.Agent]
+		t.Input += e.InputTokens
+		t.Output += e.OutputTokens
+		m.usageTally[e.Agent] = t
 	}
 	dir := m.Store.RunDir
 	if dir == "" {
@@ -72,6 +96,51 @@ func (m Model) recordUsageOutput(agent, content string) {
 	})
 }
 
+// usageHeaderCost is the compact run total for the status line, e.g.
+// "Run $0.42 est". Empty when nothing is metered; "cost unknown" when tokens
+// exist but no agent has a known price. Pure read of the live tally.
+func (m Model) usageHeaderCost() string {
+	if !m.Config.Usage.ShowTotalInHeader || m.usageTally == nil {
+		return ""
+	}
+	var total float64
+	anyTokens, priced := false, false
+	for name, t := range m.usageTally {
+		if t.Input == 0 && t.Output == 0 {
+			continue
+		}
+		anyTokens = true
+		if r, ok := m.usageRate[name]; ok {
+			total += float64(t.Input)*r.Input + float64(t.Output)*r.Output
+			priced = true
+		}
+	}
+	if !anyTokens {
+		return ""
+	}
+	if !priced {
+		return "cost unknown"
+	}
+	return fmt.Sprintf("Run $%.2f est", total)
+}
+
+// usageBorderSuffix is the per-agent cost shown in a pane title, e.g. " | $0.18e".
+func (m Model) usageBorderSuffix(name string) string {
+	if !m.Config.Usage.ShowAgentCostInBorder || m.usageTally == nil {
+		return ""
+	}
+	t := m.usageTally[name]
+	if t.Input == 0 && t.Output == 0 {
+		return ""
+	}
+	r, ok := m.usageRate[name]
+	if !ok {
+		return " | $?"
+	}
+	cost := float64(t.Input)*r.Input + float64(t.Output)*r.Output
+	return fmt.Sprintf(" | $%.2fe", cost)
+}
+
 // usageResolver builds a pricing resolver from the active config + on-disk cache.
 func (m Model) usageResolver() *pricing.Resolver {
 	cacheDir := ""
@@ -101,12 +170,19 @@ func tuiUserPrices(prices map[string]config.PriceProfile) map[string]pricing.Use
 
 // cmdCost opens the per-session usage/cost breakdown for the active run.
 func (m *Model) cmdCost() {
-	if m.orch == nil || m.orch.Run() == nil {
-		m.Status = "no active run"
+	// Prefer the orchestration run; fall back to the free-chat session's run dir
+	// so /cost works outside an orchestrated flow too.
+	runDir, stamp := "", ""
+	if m.orch != nil && m.orch.Run() != nil {
+		runDir, stamp = m.orch.Run().Dir, m.orch.Run().Stamp
+	} else if m.Store != nil && m.Store.RunDir != "" {
+		runDir, stamp = m.Store.RunDir, filepath.Base(m.Store.RunDir)
+	}
+	if runDir == "" {
+		m.Status = "cost — no run yet (send a prompt first)"
 		return
 	}
-	run := m.orch.Run()
-	events, err := usage.LoadEvents(run.Dir)
+	events, err := usage.LoadEvents(runDir)
 	if err != nil {
 		m.Status = "cost: " + err.Error()
 		return
@@ -121,11 +197,11 @@ func (m *Model) cmdCost() {
 	summary.Price(m.usageResolver())
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Cost — run %s\n\n", run.Stamp)
+	fmt.Fprintf(&b, "# Cost — run %s\n\n", stamp)
 	b.WriteString(usage.FormatTable(summary))
 	if src, at := m.usageResolver().Origin(); !at.IsZero() {
 		fmt.Fprintf(&b, "\nprices: %s (%s)\n", src, at.Format("2006-01-02"))
 	}
-	m.openArtifactText("cost: "+run.Stamp, b.String())
-	m.Status = "cost — run " + run.Stamp
+	m.openArtifactText("cost: "+stamp, b.String())
+	m.Status = "cost — run " + stamp
 }

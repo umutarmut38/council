@@ -675,6 +675,12 @@ func ApplyLocalOverride(cfg Config, raw []byte) (Config, error) {
 			if err := val.Decode(&cfg.Policy); err != nil {
 				return cfg, err
 			}
+		case "usage":
+			// Decode onto the existing usage so a repo overlay can add price
+			// profiles/aliases without dropping any set globally.
+			if err := val.Decode(&cfg.Usage); err != nil {
+				return cfg, err
+			}
 		case "experimental":
 			// A trusted local config can opt into the experimental hooks.
 			if err := val.Decode(&cfg.Experimental); err != nil {

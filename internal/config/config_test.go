@@ -166,6 +166,41 @@ func TestFindLocalConfigWalksUpToGitRoot(t *testing.T) {
 	}
 }
 
+// Regression: the top-level usage block (and per-agent usage) must survive the
+// repo-overlay merge. ApplyLocalOverride is a key-by-key switch, so a new
+// top-level section silently vanishes unless it has a case.
+func TestApplyLocalOverrideUsage(t *testing.T) {
+	base := Default()
+	local := []byte(`
+usage:
+  enabled: true
+  show_total_in_header: true
+  prices:
+    gpt5-user:
+      input_per_million: 1.25
+      output_per_million: 10.0
+      reviewed_at: "2026-06-20"
+agents:
+  claude:
+    usage:
+      model: claude-sonnet-4-6
+      price_profile: gpt5-user
+`)
+	merged, err := ApplyLocalOverride(base, local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !merged.Usage.Enabled || !merged.Usage.ShowTotalInHeader {
+		t.Fatalf("usage block dropped: %+v", merged.Usage)
+	}
+	if p, ok := merged.Usage.Prices["gpt5-user"]; !ok || p.InputPerMillion != 1.25 {
+		t.Fatalf("price profile not merged: %+v", merged.Usage.Prices)
+	}
+	if merged.Agents["claude"].Usage.Model != "claude-sonnet-4-6" {
+		t.Fatalf("per-agent usage dropped: %+v", merged.Agents["claude"].Usage)
+	}
+}
+
 func TestApplyLocalOverrideDeepMerges(t *testing.T) {
 	base := Default()
 	claude := base.Agents["claude"]
