@@ -40,9 +40,15 @@ type Reader interface {
 	LatestModel(cwd string) (string, error)
 }
 
-// Native returns the built-in readers for tools council launches. Only claude
-// is implemented so far; codex/cursor/copilot/opencode are stubbed pending
-// their (SQLite-backed) ports, and fall back to estimated until then.
+// Native returns the built-in readers for tools council launches.
+//
+// claude and codex are implemented (both store JSONL, validated against real
+// sessions). cursor and opencode are deliberately NOT ported: their usage lives
+// in SQLite with a fragile per-workspace cwd↔composer↔bubble mapping, and
+// copilot has no stable local store to validate against — porting them blind
+// would risk wrong cost numbers. Those tools are covered instead by the
+// estimated floor (internal/usage) plus the codeburn adapter (machine-wide
+// totals). New readers drop in here once they can be validated.
 func Native() []Reader {
 	return []Reader{Claude(""), Codex("")}
 }
