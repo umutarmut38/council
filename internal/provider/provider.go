@@ -51,12 +51,11 @@ type Reader interface {
 // there is no reported total, but its model is recoverable, which lets council
 // price the estimated floor instead of showing "cost unknown".
 //
-// copilot is NOT supported: its only full-token source is an opt-in OTel
-// database that is usually absent; the always-present session store records cwd
-// but no tokens. There is nothing reliable to read, so it stays on the estimated
-// floor + the codeburn adapter (machine-wide totals).
+// copilot (the Copilot CLI) reports cumulative per-model token usage in its
+// session.shutdown event (~/.copilot/session-state/<id>/events.jsonl), with the
+// cwd in the sibling workspace.yaml — so it gets full reported tokens too.
 func Native() []Reader {
-	return []Reader{Claude(""), Codex(""), Opencode("")}
+	return []Reader{Claude(""), Codex(""), Opencode(""), Copilot("")}
 }
 
 // ReaderFor returns the native reader for a tool key, or nil when none exists.
@@ -69,6 +68,8 @@ func ReaderFor(tool string) Reader {
 		return Codex("")
 	case "opencode":
 		return Opencode("")
+	case "copilot":
+		return Copilot("")
 	case "cursor", "cursor-agent":
 		return Cursor("")
 	}
