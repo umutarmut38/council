@@ -205,10 +205,14 @@ type Model struct {
 	pendingClean bool
 	progress     *runProgress // cached HUD state; refreshProgress() updates it
 
-	// usage / cost (nil unless usage.enabled): live per-agent token tally and
-	// per-agent resolved price, read by the header/border in View.
+	// usage / cost (nil unless usage.enabled): live per-agent token tally,
+	// per-agent resolved price, and the model each agent uses (explicit in
+	// config or auto-discovered from its session files). The resolver is built
+	// once. Read by the header/border in View.
 	usageTally   map[string]usage.TokenPair
 	usageRate    map[string]pricing.ModelCosts
+	usageModel   map[string]string
+	usagePricer  *pricing.Resolver
 	buildActive  int  // cached live build activity; updated off-thread by buildProgressResultMsg
 	buildTotal   int  // cached worktree count from the same probe
 	layoutLocked bool // user adjusted rows/cols in settings: adaptive off

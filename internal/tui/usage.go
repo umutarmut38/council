@@ -20,12 +20,54 @@ func (m *Model) initUsage() {
 	}
 	m.usageTally = map[string]usage.TokenPair{}
 	m.usageRate = map[string]pricing.ModelCosts{}
-	r := m.usageResolver()
+	m.usageModel = map[string]string{}
+	m.usagePricer = m.usageResolver()
 	for name, a := range m.Config.Agents {
-		if costs, _, ok := r.Resolve(a.Usage.Model, a.Usage.PriceProfile); ok {
+		model := a.Usage.Model
+		if model == "" {
+			model = discoverModel(a) // auto-discover from the tool's session files
+		}
+		m.usageModel[name] = model
+		if costs, _, ok := m.usagePricer.Resolve(model, a.Usage.PriceProfile); ok {
 			m.usageRate[name] = costs
 		}
 	}
+}
+
+// agentTool maps an agent to the tool key used to pick a native session reader:
+// an explicit usage.tool, else the basename of its launch command.
+func agentTool(a config.AgentConfig) string {
+	if a.Usage.Tool != "" {
+		return a.Usage.Tool
+	}
+	if len(a.Command) > 0 {
+		return filepath.Base(a.Command[0])
+	}
+	return ""
+}
+
+// agentCWD is the agent's absolute working directory — the key tools record in
+// their session files, used for both discovery and event correlation.
+func agentCWD(a config.AgentConfig) string {
+	cwd := a.CWD
+	if cwd == "" {
+		cwd = "."
+	}
+	if abs, err := filepath.Abs(cwd); err == nil {
+		return abs
+	}
+	return cwd
+}
+
+// discoverModel reads the agent's most recent model from its tool's session
+// files. "" when the tool has no native reader or no session exists yet.
+func discoverModel(a config.AgentConfig) string {
+	rd := provider.ReaderFor(agentTool(a))
+	if rd == nil {
+		return ""
+	}
+	model, _ := rd.LatestModel(agentCWD(a))
+	return model
 }
 
 // recordUsageEvent appends one usage event for the active run and bumps the live
@@ -51,8 +93,12 @@ func (m Model) recordUsageEvent(e usage.Event) {
 	}
 	e.RunID = filepath.Base(dir)
 	au := m.Config.Agents[e.Agent].Usage
-	if e.Model == "" {
-		e.Model = au.Model
+	if e.Model == "" { // explicit model, else the auto-discovered one
+		if m.usageModel != nil && m.usageModel[e.Agent] != "" {
+			e.Model = m.usageModel[e.Agent]
+		} else {
+			e.Model = au.Model
+		}
 	}
 	e.PriceProfile = au.PriceProfile
 	_ = usage.Append(dir, e)
@@ -65,8 +111,29 @@ func (m Model) recordUsageInput(agent, phase, text string) {
 	}
 	m.recordUsageEvent(usage.Event{
 		Agent: agent, Phase: phase, Source: usage.SourcePrompt, Confidence: usage.Estimated,
-		CWD: m.Config.Agents[agent].CWD, InputChars: len(text), InputTokens: usage.EstimateTokens(text),
+		CWD: agentCWD(m.Config.Agents[agent]), InputChars: len(text), InputTokens: usage.EstimateTokens(text),
 	})
+}
+
+// rediscoverModel fills in an agent's model + rate once its session file exists
+// (the agent had to do work first), so the live header/border start pricing
+// mid-run without waiting for /cost. Maps are reference types, so the value
+// receiver's writes persist.
+func (m Model) rediscoverModel(agent string) {
+	if m.usageModel == nil || m.usageModel[agent] != "" {
+		return
+	}
+	a := m.Config.Agents[agent]
+	model := discoverModel(a)
+	if model == "" {
+		return
+	}
+	m.usageModel[agent] = model
+	if m.usagePricer != nil {
+		if costs, _, ok := m.usagePricer.Resolve(model, a.Usage.PriceProfile); ok {
+			m.usageRate[agent] = costs
+		}
+	}
 }
 
 // recordUsageOutput meters an agent's transcript. The transcript is cumulative,
@@ -77,6 +144,7 @@ func (m Model) recordUsageOutput(agent, content string) {
 	if !m.Config.Usage.Enabled || m.Store == nil || m.Store.RunDir == "" {
 		return
 	}
+	m.rediscoverModel(agent) // the agent has produced output → its session likely exists now
 	total := usage.EstimateTokens(content)
 	existing := 0
 	if evs, err := usage.LoadEvents(m.Store.RunDir); err == nil {
@@ -100,45 +168,42 @@ func (m Model) recordUsageOutput(agent, content string) {
 // "Run $0.42 est". Empty when nothing is metered; "cost unknown" when tokens
 // exist but no agent has a known price. Pure read of the live tally.
 func (m Model) usageHeaderCost() string {
-	if !m.Config.Usage.ShowTotalInHeader || m.usageTally == nil {
-		return ""
+	if m.usageTally == nil || !m.Config.Usage.HeaderTotalEnabled() {
+		return "" // usage off, or header total opted out
 	}
 	var total float64
-	anyTokens, priced := false, false
+	hasTokens, priced := false, false
 	for name, t := range m.usageTally {
 		if t.Input == 0 && t.Output == 0 {
 			continue
 		}
-		anyTokens = true
+		hasTokens = true
 		if r, ok := m.usageRate[name]; ok {
 			total += float64(t.Input)*r.Input + float64(t.Output)*r.Output
 			priced = true
 		}
 	}
-	if !anyTokens {
-		return ""
+	if hasTokens && !priced {
+		return "cost unknown" // metered but no known price → never a silent $0
 	}
-	if !priced {
-		return "cost unknown"
-	}
-	return fmt.Sprintf("Run $%.2f est", total)
+	return fmt.Sprintf("Run $%.2f est", total) // always shown; defaults to $0.00
 }
 
 // usageBorderSuffix is the per-agent cost shown in a pane title, e.g. " | $0.18e".
+// Always present when enabled, defaulting to " | $0.00".
 func (m Model) usageBorderSuffix(name string) string {
-	if !m.Config.Usage.ShowAgentCostInBorder || m.usageTally == nil {
+	if m.usageTally == nil || !m.Config.Usage.BorderCostEnabled() {
 		return ""
 	}
 	t := m.usageTally[name]
+	if r, ok := m.usageRate[name]; ok {
+		cost := float64(t.Input)*r.Input + float64(t.Output)*r.Output
+		return fmt.Sprintf(" | $%.2fe", cost)
+	}
 	if t.Input == 0 && t.Output == 0 {
-		return ""
+		return " | $0.00" // no usage yet
 	}
-	r, ok := m.usageRate[name]
-	if !ok {
-		return " | $?"
-	}
-	cost := float64(t.Input)*r.Input + float64(t.Output)*r.Output
-	return fmt.Sprintf(" | $%.2fe", cost)
+	return " | $?" // metered but price unknown
 }
 
 // usageResolver builds a pricing resolver from the active config + on-disk cache.

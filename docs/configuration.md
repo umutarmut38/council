@@ -556,8 +556,8 @@ Local, provider-agnostic cost/usage ledger. Off by default; all data stays under
 | `enabled` | bool | `false` | Record usage and show the cost UI (header total, pane-border cost, `/cost`). |
 | `currency` | string | `USD` | Currency label for displayed costs. |
 | `estimator` | string | `chars4` | Local token estimator (`chars4` = characters / 4). |
-| `show_total_in_header` | bool | `false` | Show a compact run cost total in the top status line. |
-| `show_agent_cost_in_border` | bool | `false` | Show each session's cost in its pane border. |
+| `show_total_in_header` | bool | `true` | Show a compact run cost total in the top status line (on by default when usage is enabled; set `false` to hide). |
+| `show_agent_cost_in_border` | bool | `true` | Show each session's cost in its pane border (on by default when usage is enabled; set `false` to hide). |
 | `stale_price_after_days` | int | `60` | Warn when a user price profile's `reviewed_at` is older than this. |
 | `model_aliases` | map | — | Map a model name council sees to one the price tables know. |
 | `prices` | map | — | User-reviewed price profiles (see `usage.prices.<name>`). |

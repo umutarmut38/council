@@ -15,9 +15,11 @@ type UsageConfig struct {
 	// Estimator names the local token estimator. Only "chars4" (chars/4) exists.
 	Estimator string `yaml:"estimator,omitempty"`
 	// ShowTotalInHeader shows a compact run total in the top status line.
-	ShowTotalInHeader bool `yaml:"show_total_in_header,omitempty"`
+	// Tri-state: unset (nil) defaults to on when usage is enabled.
+	ShowTotalInHeader *bool `yaml:"show_total_in_header,omitempty"`
 	// ShowAgentCostInBorder shows each session's cost in its pane border.
-	ShowAgentCostInBorder bool `yaml:"show_agent_cost_in_border,omitempty"`
+	// Tri-state: unset (nil) defaults to on when usage is enabled.
+	ShowAgentCostInBorder *bool `yaml:"show_agent_cost_in_border,omitempty"`
 	// StalePriceAfterDays warns when a user price profile's reviewed_at is older
 	// than this many days (default 60).
 	StalePriceAfterDays int `yaml:"stale_price_after_days,omitempty"`
@@ -45,6 +47,18 @@ type AgentUsageConfig struct {
 	// Tool overrides which native session reader to use when the command name
 	// isn't the tool name (e.g. a wrapper script around claude).
 	Tool string `yaml:"tool,omitempty"`
+}
+
+// HeaderTotalEnabled reports whether the run cost shows in the header (default
+// on when usage is enabled).
+func (u UsageConfig) HeaderTotalEnabled() bool {
+	return u.ShowTotalInHeader == nil || *u.ShowTotalInHeader
+}
+
+// BorderCostEnabled reports whether per-agent cost shows in pane borders
+// (default on when usage is enabled).
+func (u UsageConfig) BorderCostEnabled() bool {
+	return u.ShowAgentCostInBorder == nil || *u.ShowAgentCostInBorder
 }
 
 // normalizeUsage fills usage defaults; a no-op when usage is off.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -48,6 +49,53 @@ type claudeLine struct {
 			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 		} `json:"usage"`
 	} `json:"message"`
+}
+
+// LatestModel returns the model from the most recently modified session in cwd,
+// for auto-discovery when usage.model isn't pinned.
+func (r claudeReader) LatestModel(cwd string) (string, error) {
+	dir := filepath.Join(r.root, claudeSlug(cwd))
+	files, err := filepath.Glob(filepath.Join(dir, "*.jsonl"))
+	if err != nil || len(files) == 0 {
+		return "", err
+	}
+	// Newest first by mtime.
+	sort.Slice(files, func(i, j int) bool {
+		fi, _ := os.Stat(files[i])
+		fj, _ := os.Stat(files[j])
+		if fi == nil || fj == nil {
+			return false
+		}
+		return fi.ModTime().After(fj.ModTime())
+	})
+	for _, f := range files {
+		if m := lastModelIn(f); m != "" {
+			return m, nil
+		}
+	}
+	return "", nil
+}
+
+// lastModelIn returns the last non-synthetic assistant model in a session file.
+func lastModelIn(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 64*1024), 8<<20)
+	model := ""
+	for sc.Scan() {
+		var l claudeLine
+		if json.Unmarshal(sc.Bytes(), &l) != nil {
+			continue
+		}
+		if l.Type == "assistant" && l.Message.Model != "" && l.Message.Model != "<synthetic>" {
+			model = l.Message.Model
+		}
+	}
+	return model
 }
 
 func (r claudeReader) ReadForCWD(cwd string) ([]Call, error) {

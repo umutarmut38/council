@@ -190,7 +190,7 @@ agents:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !merged.Usage.Enabled || !merged.Usage.ShowTotalInHeader {
+	if !merged.Usage.Enabled || !merged.Usage.HeaderTotalEnabled() {
 		t.Fatalf("usage block dropped: %+v", merged.Usage)
 	}
 	if p, ok := merged.Usage.Prices["gpt5-user"]; !ok || p.InputPerMillion != 1.25 {

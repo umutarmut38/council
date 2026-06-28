@@ -35,6 +35,9 @@ type Reader interface {
 	// ReadForCWD returns the tool's reported calls whose sessions ran in cwd.
 	// A missing session store yields no calls and no error.
 	ReadForCWD(cwd string) ([]Call, error)
+	// LatestModel returns the model most recently used in cwd, for auto-
+	// discovery when the user did not pin usage.model. "" when unknown.
+	LatestModel(cwd string) (string, error)
 }
 
 // Native returns the built-in readers for tools council launches. Only claude
@@ -42,4 +45,13 @@ type Reader interface {
 // their (SQLite-backed) ports, and fall back to estimated until then.
 func Native() []Reader {
 	return []Reader{Claude("")}
+}
+
+// ReaderFor returns the native reader for a tool key, or nil when none exists.
+func ReaderFor(tool string) Reader {
+	switch tool {
+	case "claude":
+		return Claude("")
+	}
+	return nil
 }

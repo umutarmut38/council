@@ -13,6 +13,12 @@ func (fakeReader) Name() string { return "fake" }
 func (r fakeReader) ReadForCWD(cwd string) ([]provider.Call, error) {
 	return r.calls[cwd], nil
 }
+func (r fakeReader) LatestModel(cwd string) (string, error) {
+	if c := r.calls[cwd]; len(c) > 0 {
+		return c[0].Model, nil
+	}
+	return "", nil
+}
 
 func mustTime(s string) time.Time {
 	t, _ := time.Parse(time.RFC3339, s)
