@@ -10,8 +10,6 @@ import (
 
 	"github.com/umutarmut38/council/internal/config"
 	"github.com/umutarmut38/council/internal/orchestrate"
-	"github.com/umutarmut38/council/internal/pricing"
-	"github.com/umutarmut38/council/internal/provider"
 	"github.com/umutarmut38/council/internal/usage"
 )
 
@@ -39,10 +37,10 @@ func councilCost(args []string) error {
 	if err != nil {
 		return err
 	}
-	resolver := pricing.New(pricing.Options{
-		CacheDir:   usageDir(cfg),
-		UserAlias:  cfg.Usage.ModelAliases,
-		UserPrices: toUserPrices(cfg.Usage.Prices),
+	pricer := usage.NewPricer(usage.PricerOptions{
+		CacheDir:     usageDir(cfg),
+		ModelAliases: cfg.Usage.ModelAliases,
+		Prices:       toPriceProfiles(cfg.Usage.Prices),
 	})
 
 	var events []usage.Event
@@ -79,12 +77,12 @@ func councilCost(args []string) error {
 		return nil
 	}
 
-	events = append(events, usage.Reconcile(events, provider.Native())...)
+	events = append(events, usage.Reconcile(events)...)
 	summary := usage.Aggregate(events)
 	summary.Currency = cfg.Usage.Currency
-	summary.Price(resolver)
+	summary.Price(pricer)
 	fmt.Printf("Usage — %s\n\n%s", scope, usage.FormatTable(summary))
-	if src, at := resolver.Origin(); !at.IsZero() {
+	if src, at := pricer.Origin(); !at.IsZero() {
 		fmt.Printf("\nprices: %s (%s)\n", src, at.Format("2006-01-02"))
 	}
 	return nil
@@ -119,7 +117,7 @@ func councilCostPrices(args []string) error {
 	dir := usageDir(cfg)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := pricing.RefreshCache(ctx, dir, time.Now()); err != nil {
+	if err := usage.RefreshPrices(ctx, dir, time.Now()); err != nil {
 		return fmt.Errorf("refresh pricing: %w", err)
 	}
 	fmt.Println("refreshed:", filepath.Join(dir, "litellm-pricing-cache.json"))
@@ -131,14 +129,14 @@ func usageDir(cfg config.Config) string {
 	return filepath.Join(filepath.Dir(cfg.Sessions.RootDir), "usage")
 }
 
-// toUserPrices converts config price profiles to the pricing package's units.
-func toUserPrices(prices map[string]config.PriceProfile) map[string]pricing.UserPrice {
+// toPriceProfiles converts config price profiles to the usage facade's type.
+func toPriceProfiles(prices map[string]config.PriceProfile) map[string]usage.PriceProfile {
 	if len(prices) == 0 {
 		return nil
 	}
-	out := make(map[string]pricing.UserPrice, len(prices))
+	out := make(map[string]usage.PriceProfile, len(prices))
 	for name, p := range prices {
-		out[name] = pricing.UserPrice{
+		out[name] = usage.PriceProfile{
 			InputPerMillion:  p.InputPerMillion,
 			OutputPerMillion: p.OutputPerMillion,
 			Currency:         p.Currency,

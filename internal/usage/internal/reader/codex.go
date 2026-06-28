@@ -1,4 +1,4 @@
-package provider
+package reader
 
 import (
 	"bufio"
@@ -140,3 +140,5 @@ func (r codexReader) LatestModel(cwd string) (string, error) {
 	}
 	return "", nil
 }
+
+func init() { Register("codex", func() Reader { return Codex("") }) }

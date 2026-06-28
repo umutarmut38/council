@@ -12,7 +12,6 @@ import (
 	"github.com/umutarmut38/council/internal/agent"
 	"github.com/umutarmut38/council/internal/config"
 	"github.com/umutarmut38/council/internal/orchestrate"
-	"github.com/umutarmut38/council/internal/pricing"
 	runstore "github.com/umutarmut38/council/internal/session"
 	"github.com/umutarmut38/council/internal/setup"
 	"github.com/umutarmut38/council/internal/theme"
@@ -210,9 +209,9 @@ type Model struct {
 	// config or auto-discovered from its session files). The resolver is built
 	// once. Read by the header/border in View.
 	usageTally   map[string]usage.TokenPair
-	usageRate    map[string]pricing.ModelCosts
+	usageRate    map[string]usage.Rate
 	usageModel   map[string]string
-	usagePricer  *pricing.Resolver
+	usagePricer  *usage.Pricer
 	buildActive  int  // cached live build activity; updated off-thread by buildProgressResultMsg
 	buildTotal   int  // cached worktree count from the same probe
 	layoutLocked bool // user adjusted rows/cols in settings: adaptive off

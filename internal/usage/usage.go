@@ -2,7 +2,7 @@
 // records what council can observe locally — prompt sizes and transcript sizes
 // per agent session — as append-only JSONL events under a run, and aggregates
 // them per session (council member) so two instances of the same CLI stay
-// distinct. Cost is derived later from internal/pricing; usage is the raw fact.
+// distinct. Cost is derived later via the Pricer facade; usage is the raw fact.
 package usage
 
 import (
@@ -197,7 +197,7 @@ type SessionTotal struct {
 	Confidence   string
 	Input        int
 	Output       int
-	CostUSD      *float64 // nil until priced by internal/pricing
+	CostUSD      *float64 // nil until priced via Summary.Price
 }
 
 // Summary is a run's usage aggregated per session.

@@ -1,4 +1,4 @@
-package provider
+package reader
 
 import (
 	"database/sql"
@@ -55,4 +55,9 @@ func (r cursorReader) LatestModel(cwd string) (string, error) {
 		return "", err
 	}
 	return model.String, nil
+}
+
+func init() {
+	Register("cursor", func() Reader { return Cursor("") })
+	Register("cursor-agent", func() Reader { return Cursor("") })
 }

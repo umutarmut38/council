@@ -3,8 +3,20 @@ package usage
 import (
 	"time"
 
-	"github.com/umutarmut38/council/internal/provider"
+	"github.com/umutarmut38/council/internal/usage/internal/reader"
 )
+
+// DiscoverModel reads the model a tool most recently used in cwd, for pricing an
+// agent whose usage.model isn't pinned. "" when the tool has no reader or no
+// session yet.
+func DiscoverModel(tool, cwd string) string {
+	rd := reader.For(tool)
+	if rd == nil {
+		return ""
+	}
+	m, _ := rd.LatestModel(cwd)
+	return m
+}
 
 // Reconcile reads tool session files for the agents seen in events and returns
 // new `reported` events that upgrade council's estimate with real token counts.
@@ -20,7 +32,11 @@ import (
 // Returned events are meant to be aggregated alongside the estimates; Aggregate
 // then prefers the reported tier per agent. They are not persisted, so repeated
 // calls stay idempotent.
-func Reconcile(events []Event, readers []provider.Reader) []Event {
+func Reconcile(events []Event) []Event {
+	return reconcileWith(events, reader.All())
+}
+
+func reconcileWith(events []Event, readers []reader.Reader) []Event {
 	agentCWD := map[string]string{}
 	runID := ""
 	var minT, maxT time.Time

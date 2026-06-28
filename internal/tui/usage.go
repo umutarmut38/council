@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	"github.com/umutarmut38/council/internal/config"
-	"github.com/umutarmut38/council/internal/pricing"
-	"github.com/umutarmut38/council/internal/provider"
 	"github.com/umutarmut38/council/internal/usage"
 )
 
@@ -19,17 +17,17 @@ func (m *Model) initUsage() {
 		return
 	}
 	m.usageTally = map[string]usage.TokenPair{}
-	m.usageRate = map[string]pricing.ModelCosts{}
+	m.usageRate = map[string]usage.Rate{}
 	m.usageModel = map[string]string{}
-	m.usagePricer = m.usageResolver()
+	m.usagePricer = m.buildPricer()
 	for name, a := range m.Config.Agents {
 		model := a.Usage.Model
 		if model == "" {
-			model = discoverModel(a) // auto-discover from the tool's session files
+			model = usage.DiscoverModel(agentTool(a), agentCWD(a)) // auto-discover
 		}
 		m.usageModel[name] = model
-		if costs, _, ok := m.usagePricer.Resolve(model, a.Usage.PriceProfile); ok {
-			m.usageRate[name] = costs
+		if r := m.usagePricer.Rate(model, a.Usage.PriceProfile); r.Found {
+			m.usageRate[name] = r
 		}
 	}
 }
@@ -57,17 +55,6 @@ func agentCWD(a config.AgentConfig) string {
 		return abs
 	}
 	return cwd
-}
-
-// discoverModel reads the agent's most recent model from its tool's session
-// files. "" when the tool has no native reader or no session exists yet.
-func discoverModel(a config.AgentConfig) string {
-	rd := provider.ReaderFor(agentTool(a))
-	if rd == nil {
-		return ""
-	}
-	model, _ := rd.LatestModel(agentCWD(a))
-	return model
 }
 
 // recordUsageEvent appends one usage event for the active run and bumps the live
@@ -124,14 +111,14 @@ func (m Model) rediscoverModel(agent string) {
 		return
 	}
 	a := m.Config.Agents[agent]
-	model := discoverModel(a)
+	model := usage.DiscoverModel(agentTool(a), agentCWD(a))
 	if model == "" {
 		return
 	}
 	m.usageModel[agent] = model
 	if m.usagePricer != nil {
-		if costs, _, ok := m.usagePricer.Resolve(model, a.Usage.PriceProfile); ok {
-			m.usageRate[agent] = costs
+		if r := m.usagePricer.Rate(model, a.Usage.PriceProfile); r.Found {
+			m.usageRate[agent] = r
 		}
 	}
 }
@@ -165,8 +152,8 @@ func (m Model) recordUsageOutput(agent, content string) {
 }
 
 // usageHeaderCost is the compact run total for the status line, e.g.
-// "Run $0.42 est". Empty when nothing is metered; "cost unknown" when tokens
-// exist but no agent has a known price. Pure read of the live tally.
+// "Run $0.42 est". Always shown when enabled (default $0.00); "cost unknown"
+// when metered but no agent has a known price. Pure read of the live tally.
 func (m Model) usageHeaderCost() string {
 	if m.usageTally == nil || !m.Config.Usage.HeaderTotalEnabled() {
 		return "" // usage off, or header total opted out
@@ -179,7 +166,7 @@ func (m Model) usageHeaderCost() string {
 		}
 		hasTokens = true
 		if r, ok := m.usageRate[name]; ok {
-			total += float64(t.Input)*r.Input + float64(t.Output)*r.Output
+			total += float64(t.Input)*r.InputPerToken + float64(t.Output)*r.OutputPerToken
 			priced = true
 		}
 	}
@@ -197,7 +184,7 @@ func (m Model) usageBorderSuffix(name string) string {
 	}
 	t := m.usageTally[name]
 	if r, ok := m.usageRate[name]; ok {
-		cost := float64(t.Input)*r.Input + float64(t.Output)*r.Output
+		cost := float64(t.Input)*r.InputPerToken + float64(t.Output)*r.OutputPerToken
 		return fmt.Sprintf(" | $%.2fe", cost)
 	}
 	if t.Input == 0 && t.Output == 0 {
@@ -206,26 +193,26 @@ func (m Model) usageBorderSuffix(name string) string {
 	return " | $?" // metered but price unknown
 }
 
-// usageResolver builds a pricing resolver from the active config + on-disk cache.
-func (m Model) usageResolver() *pricing.Resolver {
+// buildPricer constructs a Pricer from the active config + on-disk price cache.
+func (m Model) buildPricer() *usage.Pricer {
 	cacheDir := ""
 	if m.Store != nil && m.Store.RootDir != "" {
 		cacheDir = filepath.Join(filepath.Dir(m.Store.RootDir), "usage")
 	}
-	return pricing.New(pricing.Options{
-		CacheDir:   cacheDir,
-		UserAlias:  m.Config.Usage.ModelAliases,
-		UserPrices: tuiUserPrices(m.Config.Usage.Prices),
+	return usage.NewPricer(usage.PricerOptions{
+		CacheDir:     cacheDir,
+		ModelAliases: m.Config.Usage.ModelAliases,
+		Prices:       toPriceProfiles(m.Config.Usage.Prices),
 	})
 }
 
-func tuiUserPrices(prices map[string]config.PriceProfile) map[string]pricing.UserPrice {
+func toPriceProfiles(prices map[string]config.PriceProfile) map[string]usage.PriceProfile {
 	if len(prices) == 0 {
 		return nil
 	}
-	out := make(map[string]pricing.UserPrice, len(prices))
+	out := make(map[string]usage.PriceProfile, len(prices))
 	for name, p := range prices {
-		out[name] = pricing.UserPrice{
+		out[name] = usage.PriceProfile{
 			InputPerMillion: p.InputPerMillion, OutputPerMillion: p.OutputPerMillion,
 			Currency: p.Currency, ReviewedAt: p.ReviewedAt,
 		}
@@ -256,15 +243,19 @@ func (m *Model) cmdCost() {
 		m.Status = "cost — no usage recorded yet"
 		return
 	}
-	events = append(events, usage.Reconcile(events, provider.Native())...)
+	pricer := m.usagePricer
+	if pricer == nil {
+		pricer = m.buildPricer()
+	}
+	events = append(events, usage.Reconcile(events)...)
 	summary := usage.Aggregate(events)
 	summary.Currency = m.Config.Usage.Currency
-	summary.Price(m.usageResolver())
+	summary.Price(pricer)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Cost — run %s\n\n", stamp)
 	b.WriteString(usage.FormatTable(summary))
-	if src, at := m.usageResolver().Origin(); !at.IsZero() {
+	if src, at := pricer.Origin(); !at.IsZero() {
 		fmt.Fprintf(&b, "\nprices: %s (%s)\n", src, at.Format("2006-01-02"))
 	}
 	m.openArtifactText("cost: "+stamp, b.String())

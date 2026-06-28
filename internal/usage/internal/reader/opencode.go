@@ -1,4 +1,4 @@
-package provider
+package reader
 
 import (
 	"database/sql"
@@ -94,3 +94,5 @@ func (r opencodeReader) LatestModel(cwd string) (string, error) {
 	}
 	return opencodeModelID(model.String), nil
 }
+
+func init() { Register("opencode", func() Reader { return Opencode("") }) }

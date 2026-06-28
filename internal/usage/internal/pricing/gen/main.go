@@ -17,7 +17,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/umutarmut38/council/internal/pricing"
+	"github.com/umutarmut38/council/internal/usage/internal/pricing"
 )
 
 func main() {

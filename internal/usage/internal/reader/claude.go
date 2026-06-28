@@ -1,4 +1,4 @@
-package provider
+package reader
 
 import (
 	"bufio"
@@ -196,3 +196,5 @@ func clip(s string) string {
 	}
 	return s
 }
+
+func init() { Register("claude", func() Reader { return Claude("") }) }

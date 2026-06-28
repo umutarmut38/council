@@ -1,4 +1,4 @@
-package provider
+package reader
 
 import (
 	"bufio"
@@ -174,3 +174,5 @@ func dirModTime(dir string) time.Time {
 	}
 	return time.Time{}
 }
+
+func init() { Register("copilot", func() Reader { return Copilot("") }) }
