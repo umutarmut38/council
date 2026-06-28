@@ -485,6 +485,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Status = "cannot start run: " + err.Error()
 				return m, nil
 			}
+			m.recordPhaseInputs(map[string]string(msg)) // meter on the Update goroutine
 			m.sendPrompts(map[string]string(msg))
 			m.initialPromptSent = true
 			m.Status = "sent initial prompts"
@@ -499,6 +500,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Remember what was sent so /resend can repeat it per agent.
 		m.phasePrompts = copyPrompts(prompts)
+		// Meter here, on the Update goroutine — the send below runs in a tea.Cmd
+		// and must not touch the usage maps that View reads.
+		m.recordPhaseInputs(prompts)
 		m.Status = m.phase + " prompt sent — agents working"
 		return m, func() tea.Msg {
 			m.sendPrompts(prompts)
@@ -831,7 +835,7 @@ func (m Model) saveTranscripts() error {
 		if err := m.Store.SaveTranscript(view.Session.Name, content); err != nil {
 			return err
 		}
-		m.recordUsageOutput(view.Session.Name, content)
+		m.recordUsageOutput(view.Session, content)
 	}
 	return nil
 }

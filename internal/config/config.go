@@ -1209,6 +1209,23 @@ func overlayAgent(base, child AgentConfig) AgentConfig {
 	out.Env = mergeEnv(base.Env, child.Env)
 	out.Terminal = overlayTerminal(base.Terminal, child.Terminal)
 	out.Orchestration = overlayOrchestration(base.Orchestration, child.Orchestration)
+	out.Usage = overlayAgentUsage(base.Usage, child.Usage)
+	return out
+}
+
+// overlayAgentUsage applies a child's set usage bindings over the base's, so an
+// inheriting agent keeps the base's model/tool/price_profile unless it overrides.
+func overlayAgentUsage(base, child AgentUsageConfig) AgentUsageConfig {
+	out := base
+	if child.Model != "" {
+		out.Model = child.Model
+	}
+	if child.PriceProfile != "" {
+		out.PriceProfile = child.PriceProfile
+	}
+	if child.Tool != "" {
+		out.Tool = child.Tool
+	}
 	return out
 }
 

@@ -61,6 +61,39 @@ func TestAggregateReportedSupersedesEstimatesAcrossPhases(t *testing.T) {
 	}
 }
 
+// A reported total supersedes estimates only for ITS cwd; a cwd that never
+// reconciled keeps its estimate (no undercount from a partial reconciliation).
+func TestAggregateKeepsEstimatesForUnreconciledCWD(t *testing.T) {
+	s := Aggregate([]Event{
+		{Agent: "claude", CWD: "/a", Model: "m", Confidence: Estimated, InputTokens: 100},
+		{Agent: "claude", CWD: "/a", Model: "m", Source: SourceProvider, Confidence: Reported, InputTokens: 80},
+		{Agent: "claude", CWD: "/b", Model: "m", Confidence: Estimated, InputTokens: 50}, // never reconciled
+	})
+	if s.Input != 130 { // reported 80 (cwd /a) + estimated 50 (cwd /b); not 80 and not 230
+		t.Fatalf("input = %d, want 130 (reported /a + estimated /b kept)", s.Input)
+	}
+	if s.Sessions[0].Confidence != Estimated { // weakest contributing tier
+		t.Fatalf("confidence = %q, want estimated (weakest)", s.Sessions[0].Confidence)
+	}
+}
+
+// A session that used two models becomes two rows so each prices at its own rate.
+func TestAggregateSplitsByModel(t *testing.T) {
+	s := Aggregate([]Event{
+		{Agent: "copilot", CWD: "/a", Model: "gpt-5", Source: SourceProvider, Confidence: Reported, InputTokens: 100, OutputTokens: 10},
+		{Agent: "copilot", CWD: "/a", Model: "claude-opus-4-6", Source: SourceProvider, Confidence: Reported, InputTokens: 200, OutputTokens: 20},
+	})
+	if len(s.Sessions) != 2 {
+		t.Fatalf("want 2 per-model rows, got %d (%+v)", len(s.Sessions), s.Sessions)
+	}
+	if s.Sessions[0].Model != "claude-opus-4-6" || s.Sessions[1].Model != "gpt-5" { // sorted by model
+		t.Fatalf("rows not split/sorted by model: %+v", s.Sessions)
+	}
+	if s.Input != 300 {
+		t.Fatalf("grand input = %d, want 300", s.Input)
+	}
+}
+
 func TestLedgerRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	l, err := Open(dir)

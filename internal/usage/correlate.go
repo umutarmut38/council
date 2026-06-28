@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"sort"
 	"time"
 
 	"github.com/umutarmut38/council/internal/usage/internal/reader"
@@ -21,31 +22,38 @@ func DiscoverModel(tool, cwd string) string {
 // Reconcile reads tool session files for the agents seen in events and returns
 // new `reported` events that upgrade council's estimate with real token counts.
 //
-// Attribution is by working directory: council knows each agent's cwd, and a
-// tool's session file records the cwd it ran in. When exactly one council agent
-// used a cwd, every tool call there is unambiguously that agent's. When several
-// agents shared a cwd (e.g. two of the same CLI planning in the repo root), the
-// match is ambiguous, so those agents are left at their estimate rather than
-// risk crediting one pane with another's spend. Build-phase agents each get
-// their own worktree, so they always reconcile cleanly.
+// Attribution is by (tool, working directory): council knows each agent's tool
+// and cwd, and a tool's session file records the cwd it ran in. A cwd used by
+// exactly one council agent is reconciled with that agent's OWN tool reader only
+// — never another tool that happened to run in the same directory. A cwd shared
+// by several agents is ambiguous and left at its estimate, so no pane is
+// credited with another's spend. Per (tool, cwd) the calls are grouped by model,
+// so a session that switched models is priced at each model's own rate.
 //
-// Returned events are meant to be aggregated alongside the estimates; Aggregate
-// then prefers the reported tier per agent. They are not persisted, so repeated
-// calls stay idempotent.
+// Returned events are aggregated alongside the estimates; Aggregate prefers the
+// reported tier per (agent, cwd). They are not persisted, so repeated calls stay
+// idempotent.
 func Reconcile(events []Event) []Event {
-	return reconcileWith(events, reader.All())
+	return reconcileWith(events, reader.For)
 }
 
-func reconcileWith(events []Event, readers []reader.Reader) []Event {
-	agentCWD := map[string]string{}
+func reconcileWith(events []Event, readerFor func(string) reader.Reader) []Event {
+	agentTool := map[string]string{}
+	cwdAgents := map[string]map[string]bool{}
 	runID := ""
 	var minT, maxT time.Time
 	for _, e := range events {
 		if e.RunID != "" {
 			runID = e.RunID
 		}
+		if e.Tool != "" {
+			agentTool[e.Agent] = e.Tool
+		}
 		if e.CWD != "" {
-			agentCWD[e.Agent] = e.CWD
+			if cwdAgents[e.CWD] == nil {
+				cwdAgents[e.CWD] = map[string]bool{}
+			}
+			cwdAgents[e.CWD][e.Agent] = true
 		}
 		if t, err := time.Parse(time.RFC3339, e.At); err == nil {
 			if minT.IsZero() || t.Before(minT) {
@@ -55,11 +63,6 @@ func reconcileWith(events []Event, readers []reader.Reader) []Event {
 				maxT = t
 			}
 		}
-	}
-
-	cwdAgents := map[string][]string{}
-	for agent, cwd := range agentCWD {
-		cwdAgents[cwd] = append(cwdAgents[cwd], agent)
 	}
 
 	inWindow := func(t time.Time) bool {
@@ -74,33 +77,45 @@ func reconcileWith(events []Event, readers []reader.Reader) []Event {
 		if len(agents) != 1 {
 			continue // ambiguous shared cwd → keep estimated
 		}
-		agent := agents[0]
-		for _, rd := range readers {
-			calls, err := rd.ReadForCWD(cwd)
-			if err != nil {
+		var agent string
+		for a := range agents {
+			agent = a
+		}
+		rd := readerFor(agentTool[agent])
+		if rd == nil {
+			continue // unknown / unsupported tool → estimate stands
+		}
+		calls, err := rd.ReadForCWD(cwd)
+		if err != nil {
+			continue
+		}
+		byModel := map[string]*TokenPair{}
+		for _, c := range calls {
+			if !inWindow(c.Timestamp) {
 				continue
 			}
-			var in, outTok int
-			var model string
-			matched := false
-			for _, c := range calls {
-				if !inWindow(c.Timestamp) {
-					continue
-				}
-				in += c.InputTokens
-				outTok += c.OutputTokens
-				if c.Model != "" {
-					model = c.Model
-				}
-				matched = true
+			t := byModel[c.Model]
+			if t == nil {
+				t = &TokenPair{}
+				byModel[c.Model] = t
 			}
-			if matched {
-				out = append(out, Event{
-					RunID: runID, Agent: agent, Source: SourceProvider, Confidence: Reported,
-					Model: model, CWD: cwd, InputTokens: in, OutputTokens: outTok,
-				})
-				break
+			t.Input += c.InputTokens
+			t.Output += c.OutputTokens
+		}
+		models := make([]string, 0, len(byModel))
+		for m := range byModel {
+			models = append(models, m)
+		}
+		sort.Strings(models) // deterministic output order
+		for _, model := range models {
+			t := byModel[model]
+			if t.Input == 0 && t.Output == 0 {
+				continue
 			}
+			out = append(out, Event{
+				RunID: runID, Agent: agent, Source: SourceProvider, Confidence: Reported,
+				Model: model, Tool: agentTool[agent], CWD: cwd, InputTokens: t.Input, OutputTokens: t.Output,
+			})
 		}
 	}
 	return out

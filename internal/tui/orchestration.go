@@ -957,7 +957,6 @@ func (m *Model) sendPrompts(prompts map[string]string) {
 		if prompt == "" {
 			continue
 		}
-		m.recordUsageInput(view.Session.Name, m.phase, prompt)
 		_ = sendLine(view.Session, m.Config.PromptForAgent(view.Session.Name, prompt))
 	}
 }

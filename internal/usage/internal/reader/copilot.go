@@ -161,9 +161,20 @@ func (r copilotReader) LatestModel(cwd string) (string, error) {
 		if copilotCWD(dir) != cwd {
 			continue
 		}
-		if calls := r.parseSession(dir, cwd); len(calls) > 0 {
-			return calls[len(calls)-1].Model, nil
+		calls := r.parseSession(dir, cwd)
+		if len(calls) == 0 {
+			continue
 		}
+		// parseSession's calls come from a map, so pick deterministically: the
+		// model with the most tokens (ties broken by name) rather than map order.
+		best := calls[0]
+		for _, c := range calls[1:] {
+			ct, bt := c.InputTokens+c.OutputTokens, best.InputTokens+best.OutputTokens
+			if ct > bt || (ct == bt && c.Model < best.Model) {
+				best = c
+			}
+		}
+		return best.Model, nil
 	}
 	return "", nil
 }

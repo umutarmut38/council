@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // cursorReader supports the cursor-agent CLI (the tool council launches, not the
@@ -44,10 +45,13 @@ func (r cursorReader) LatestModel(cwd string) (string, error) {
 		return "", nil
 	}
 	defer db.Close()
+	// Escape LIKE wildcards in the cwd so a path containing %/_ can't over-match
+	// a sibling directory.
+	pattern := likeEscape(cwd) + string(os.PathSeparator) + "%"
 	var model sql.NullString
 	err = db.QueryRow(`SELECT model FROM ai_code_hashes
-		WHERE fileName LIKE ? AND model IS NOT NULL
-		ORDER BY timestamp DESC LIMIT 1`, cwd+string(os.PathSeparator)+"%").Scan(&model)
+		WHERE fileName LIKE ? ESCAPE '\' AND model IS NOT NULL
+		ORDER BY timestamp DESC LIMIT 1`, pattern).Scan(&model)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}
@@ -55,6 +59,12 @@ func (r cursorReader) LatestModel(cwd string) (string, error) {
 		return "", err
 	}
 	return model.String, nil
+}
+
+// likeEscape escapes the SQL LIKE wildcards (and the escape char) so a literal
+// string matches only itself. Pair with `ESCAPE '\'`.
+func likeEscape(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }
 
 func init() {

@@ -201,6 +201,19 @@ agents:
 	}
 }
 
+// An inheriting agent keeps the base's usage bindings, overriding only what it sets.
+func TestOverlayAgentUsageInherits(t *testing.T) {
+	base := AgentConfig{Usage: AgentUsageConfig{Model: "gpt-5", Tool: "codex", PriceProfile: "p"}}
+	child := AgentConfig{Usage: AgentUsageConfig{Model: "claude-opus-4-6"}} // override model only
+	out := overlayAgent(base, child)
+	if out.Usage.Model != "claude-opus-4-6" {
+		t.Fatalf("child model override lost: %+v", out.Usage)
+	}
+	if out.Usage.Tool != "codex" || out.Usage.PriceProfile != "p" {
+		t.Fatalf("base tool/profile not inherited: %+v", out.Usage)
+	}
+}
+
 func TestApplyLocalOverrideDeepMerges(t *testing.T) {
 	base := Default()
 	claude := base.Agents["claude"]

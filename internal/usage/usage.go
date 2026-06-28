@@ -51,7 +51,8 @@ type Event struct {
 	Confidence    string `json:"confidence"`
 	Model         string `json:"model,omitempty"`
 	PriceProfile  string `json:"price_profile,omitempty"`
-	CWD           string `json:"cwd,omitempty"` // correlation key for provider session files
+	Tool          string `json:"tool,omitempty"` // which tool's reader can reconcile this agent
+	CWD           string `json:"cwd,omitempty"`  // correlation key for provider session files
 	InputChars    int    `json:"input_chars,omitempty"`
 	InputTokens   int    `json:"input_tokens,omitempty"`
 	OutputTokens  int    `json:"output_tokens,omitempty"`
@@ -154,7 +155,7 @@ func LoadEvents(runDir string) ([]Event, error) {
 		}
 		var e Event
 		if err := json.Unmarshal([]byte(line), &e); err != nil {
-			return nil, err
+			continue // tolerate a torn/partial trailing line rather than losing all events
 		}
 		out = append(out, e)
 	}
@@ -212,44 +213,70 @@ type Summary struct {
 
 var confTier = map[string]int{Unknown: 0, Estimated: 1, Reported: 2, Exact: 3}
 
-// Aggregate rolls events up per session (Agent), keyed so two instances of the
-// same CLI stay separate. Within each agent it keeps only the highest-confidence
-// tier present, so a reported reconciliation (a whole-session total from the
-// tool's own files) supersedes the per-prompt estimates rather than being summed
-// on top of them.
+// Aggregate rolls events up per session, keyed so two instances of the same CLI
+// stay separate. Two-level keying keeps the money math honest:
+//
+//   - The reported-beats-estimated decision is made per (agent, cwd): a tool's
+//     reported total for one working directory supersedes the estimates for that
+//     same directory only. Estimates for a directory that never reconciled (an
+//     ambiguous shared cwd, or a tool with no reader) are kept, so a partial
+//     reconciliation can't erase real spend.
+//   - Token totals accumulate per (agent, model) so a session that used several
+//     models (e.g. Copilot switching models) is priced at each model's own rate
+//     rather than billing everything at one. Rows display per agent+model; a
+//     single-model agent is one row, as before.
+//
+// A row's confidence is its weakest contributing tier, so a partly-estimated
+// agent never shows as fully reported.
 func Aggregate(events []Event) Summary {
-	byAgent := map[string][]Event{}
+	type acKey struct{ agent, cwd string }
+	byAC := map[acKey][]Event{}
 	for _, e := range events {
-		byAgent[e.Agent] = append(byAgent[e.Agent], e)
+		byAC[acKey{e.Agent, e.CWD}] = append(byAC[acKey{e.Agent, e.CWD}], e)
 	}
 
-	out := Summary{RunID: runID(events)}
-	for agent, evs := range byAgent {
+	type amKey struct{ agent, model string }
+	totals := map[amKey]*SessionTotal{}
+	for k, evs := range byAC {
 		best := ""
 		for _, e := range evs {
 			if confTier[e.Confidence] > confTier[best] {
 				best = e.Confidence
 			}
 		}
-		st := SessionTotal{Agent: agent, Confidence: best}
 		for _, e := range evs {
 			if e.Confidence != best {
-				continue
+				continue // a reported total for this cwd supersedes its estimates
+			}
+			mk := amKey{k.agent, e.Model}
+			st := totals[mk]
+			if st == nil {
+				st = &SessionTotal{Agent: k.agent, Model: e.Model, Confidence: best}
+				totals[mk] = st
 			}
 			st.Input += e.InputTokens
 			st.Output += e.OutputTokens
-			if e.Model != "" {
-				st.Model = e.Model
-			}
 			if e.PriceProfile != "" {
 				st.PriceProfile = e.PriceProfile
 			}
+			if confTier[best] < confTier[st.Confidence] {
+				st.Confidence = best // weakest tier wins for the row label
+			}
 		}
-		out.Sessions = append(out.Sessions, st)
+	}
+
+	out := Summary{RunID: runID(events)}
+	for _, st := range totals {
+		out.Sessions = append(out.Sessions, *st)
 		out.Input += st.Input
 		out.Output += st.Output
 	}
-	sort.Slice(out.Sessions, func(i, j int) bool { return out.Sessions[i].Agent < out.Sessions[j].Agent })
+	sort.Slice(out.Sessions, func(i, j int) bool {
+		if out.Sessions[i].Agent != out.Sessions[j].Agent {
+			return out.Sessions[i].Agent < out.Sessions[j].Agent
+		}
+		return out.Sessions[i].Model < out.Sessions[j].Model
+	})
 	return out
 }
 
@@ -291,12 +318,17 @@ func tokens(n int) string {
 	return fmt.Sprintf("%d", n)
 }
 
+var currencySymbols = map[string]string{"USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥"}
+
 func cost(c *float64, currency string) string {
 	if c == nil {
 		return "—"
 	}
-	if currency == "" {
-		currency = "USD"
+	if sym, ok := currencySymbols[strings.ToUpper(currency)]; ok {
+		return fmt.Sprintf("%s%.2f", sym, *c)
 	}
-	return fmt.Sprintf("$%.2f", *c)
+	if currency == "" {
+		return fmt.Sprintf("$%.2f", *c)
+	}
+	return fmt.Sprintf("%.2f %s", *c, strings.ToUpper(currency)) // unknown code: amount + code
 }

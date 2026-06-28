@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/umutarmut38/council/internal/agent"
 	"github.com/umutarmut38/council/internal/config"
 	"github.com/umutarmut38/council/internal/usage"
 )
@@ -91,14 +92,46 @@ func (m Model) recordUsageEvent(e usage.Event) {
 	_ = usage.Append(dir, e)
 }
 
-// recordUsageInput meters a prompt council sent to an agent (estimated tokens).
-func (m Model) recordUsageInput(agent, phase, text string) {
+// sessionCWD is the agent's live absolute working directory. It comes from the
+// session (not the static config) so build-phase panes — which run in their own
+// worktree — record the worktree path the tool's session file is keyed by.
+func sessionCWD(s *agent.Session) string {
+	cwd := s.Config.CWD
+	if cwd == "" {
+		cwd = "."
+	}
+	if abs, err := filepath.Abs(cwd); err == nil {
+		return abs
+	}
+	return cwd
+}
+
+// recordPhaseInputs meters the phase's prompts for every live agent. Called from
+// Update (never a tea.Cmd) so it stays on the bubbletea goroutine.
+func (m Model) recordPhaseInputs(prompts map[string]string) {
 	if !m.Config.Usage.Enabled {
 		return
 	}
+	for _, view := range m.Agents {
+		if view.Session.Done {
+			continue
+		}
+		if p := prompts[view.Session.Name]; p != "" {
+			m.recordUsageInput(view.Session, m.phase, p)
+		}
+	}
+}
+
+// recordUsageInput meters a prompt council sent to an agent (estimated tokens).
+// Tags the event with the agent's tool + live cwd so reconciliation can find it.
+func (m Model) recordUsageInput(s *agent.Session, phase, text string) {
+	if !m.Config.Usage.Enabled {
+		return
+	}
+	a := m.Config.Agents[s.Name]
 	m.recordUsageEvent(usage.Event{
-		Agent: agent, Phase: phase, Source: usage.SourcePrompt, Confidence: usage.Estimated,
-		CWD: agentCWD(m.Config.Agents[agent]), InputChars: len(text), InputTokens: usage.EstimateTokens(text),
+		Agent: s.Name, Phase: phase, Source: usage.SourcePrompt, Confidence: usage.Estimated,
+		Tool: agentTool(a), CWD: sessionCWD(s), InputChars: len(text), InputTokens: usage.EstimateTokens(text),
 	})
 }
 
@@ -106,19 +139,19 @@ func (m Model) recordUsageInput(agent, phase, text string) {
 // (the agent had to do work first), so the live header/border start pricing
 // mid-run without waiting for /cost. Maps are reference types, so the value
 // receiver's writes persist.
-func (m Model) rediscoverModel(agent string) {
-	if m.usageModel == nil || m.usageModel[agent] != "" {
+func (m Model) rediscoverModel(s *agent.Session) {
+	if m.usageModel == nil || m.usageModel[s.Name] != "" {
 		return
 	}
-	a := m.Config.Agents[agent]
-	model := usage.DiscoverModel(agentTool(a), agentCWD(a))
+	a := m.Config.Agents[s.Name]
+	model := usage.DiscoverModel(agentTool(a), sessionCWD(s))
 	if model == "" {
 		return
 	}
-	m.usageModel[agent] = model
+	m.usageModel[s.Name] = model
 	if m.usagePricer != nil {
 		if r := m.usagePricer.Rate(model, a.Usage.PriceProfile); r.Found {
-			m.usageRate[agent] = r
+			m.usageRate[s.Name] = r
 		}
 	}
 }
@@ -127,16 +160,16 @@ func (m Model) rediscoverModel(agent string) {
 // so it records only the delta over output already logged for this agent —
 // keeping the total equal to the estimate of the final transcript rather than
 // double-counting on each phase-end save.
-func (m Model) recordUsageOutput(agent, content string) {
+func (m Model) recordUsageOutput(s *agent.Session, content string) {
 	if !m.Config.Usage.Enabled || m.Store == nil || m.Store.RunDir == "" {
 		return
 	}
-	m.rediscoverModel(agent) // the agent has produced output → its session likely exists now
+	m.rediscoverModel(s) // the agent has produced output → its session likely exists now
 	total := usage.EstimateTokens(content)
 	existing := 0
 	if evs, err := usage.LoadEvents(m.Store.RunDir); err == nil {
 		for _, e := range evs {
-			if e.Agent == agent && e.Source == usage.SourceTranscript {
+			if e.Agent == s.Name && e.Source == usage.SourceTranscript {
 				existing += e.OutputTokens
 			}
 		}
@@ -145,9 +178,10 @@ func (m Model) recordUsageOutput(agent, content string) {
 	if delta <= 0 {
 		return
 	}
+	a := m.Config.Agents[s.Name]
 	m.recordUsageEvent(usage.Event{
-		Agent: agent, Phase: m.phase, Source: usage.SourceTranscript, Confidence: usage.Estimated,
-		OutputTokens: delta,
+		Agent: s.Name, Phase: m.phase, Source: usage.SourceTranscript, Confidence: usage.Estimated,
+		Tool: agentTool(a), CWD: sessionCWD(s), OutputTokens: delta,
 	})
 }
 

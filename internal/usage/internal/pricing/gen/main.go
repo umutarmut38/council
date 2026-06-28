@@ -2,7 +2,7 @@
 // from the repo root to update internal/pricing/data; it is NOT part of the
 // build (a network fetch must stay out of `go build`/CI).
 //
-//	go run ./internal/pricing/gen
+//	go run ./internal/usage/internal/pricing/gen
 //
 // ponytail: manual regen — the live cache (`council cost prices refresh`) keeps
 // runtime prices fresh; this only updates the offline fallback shipped in the
@@ -29,7 +29,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "fetch litellm:", err)
 		os.Exit(1)
 	}
-	dir := filepath.Join("internal", "pricing", "data")
+	dir := filepath.Join("internal", "usage", "internal", "pricing", "data")
 	data, err := json.Marshal(tuples)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
