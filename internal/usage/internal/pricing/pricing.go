@@ -19,7 +19,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
@@ -63,6 +62,7 @@ type UserPrice struct {
 	InputPerMillion  float64
 	OutputPerMillion float64
 	Currency         string
+	Source           string
 	ReviewedAt       string // RFC3339 date
 }
 
@@ -135,20 +135,23 @@ func loadTuples(data []byte) map[string]ModelCosts {
 
 // Resolver answers price lookups. Build once with New; read-only thereafter.
 type Resolver struct {
-	priced     map[string]ModelCosts
-	sortedKeys []string // longest-first, for prefix matching
-	lowerIndex map[string]ModelCosts
-	userAlias  map[string]string
-	userPrices map[string]UserPrice
-	origin     string    // SourceCache | SourceBundled
-	originAt   time.Time // build/fetch time of the active data
+	priced         map[string]ModelCosts
+	lowerIndex     map[string]ModelCosts
+	userAlias      map[string]string
+	userPrices     map[string]UserPrice
+	staleAfterDays int
+	now            time.Time
+	origin         string    // SourceCache | SourceBundled
+	originAt       time.Time // build/fetch time of the active data
 }
 
 // Options configure a Resolver.
 type Options struct {
-	CacheDir   string               // dir holding litellm-pricing-cache.json (optional)
-	UserAlias  map[string]string    // usage.model_aliases
-	UserPrices map[string]UserPrice // usage.prices
+	CacheDir       string               // dir holding litellm-pricing-cache.json (optional)
+	UserAlias      map[string]string    // usage.model_aliases
+	UserPrices     map[string]UserPrice // usage.prices
+	StaleAfterDays int
+	Now            time.Time
 }
 
 // New builds a Resolver from the bundled snapshot, overlaying a fresh on-disk
@@ -168,19 +171,20 @@ func New(opts Options) *Resolver {
 		}
 	}
 
+	now := opts.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
 	r := &Resolver{
-		priced:     snap,
-		lowerIndex: buildLowerIndex(snap),
-		userAlias:  opts.UserAlias,
-		userPrices: opts.UserPrices,
-		origin:     origin,
-		originAt:   at,
+		priced:         snap,
+		lowerIndex:     buildLowerIndex(snap),
+		userAlias:      opts.UserAlias,
+		userPrices:     opts.UserPrices,
+		staleAfterDays: opts.StaleAfterDays,
+		now:            now,
+		origin:         origin,
+		originAt:       at,
 	}
-	r.sortedKeys = make([]string, 0, len(snap))
-	for k := range snap {
-		r.sortedKeys = append(r.sortedKeys, k)
-	}
-	sort.Slice(r.sortedKeys, func(i, j int) bool { return len(r.sortedKeys[i]) > len(r.sortedKeys[j]) })
 	return r
 }
 
@@ -204,16 +208,6 @@ func buildLowerIndex(priced map[string]ModelCosts) map[string]ModelCosts {
 	return idx
 }
 
-func (r *Resolver) resolveAlias(model string) string {
-	if v, ok := r.userAlias[model]; ok {
-		return v
-	}
-	if v, ok := builtinAliases[model]; ok {
-		return v
-	}
-	return model
-}
-
 func canonicalName(model string) string {
 	s := stripPin(model)
 	s = reDate.ReplaceAllString(s, "")
@@ -227,58 +221,109 @@ func stripPin(model string) string {
 	return model
 }
 
-// getModelCosts ports codeburn's lookup pipeline.
-func (r *Resolver) getModelCosts(model string) (ModelCosts, bool) {
-	withPrefix := reDate.ReplaceAllString(stripPin(model), "")
-	canonicalNm := canonicalName(model)
-	canonical := r.resolveAlias(canonicalNm)
-
-	// A curated alias for a bare name beats a coincidental stripped reseller key.
-	if canonical != canonicalNm && withPrefix == canonicalNm {
-		if c, ok := r.priced[canonical]; ok {
-			return c, true
-		}
-	}
-	if c, ok := r.priced[withPrefix]; ok {
-		return c, true
-	}
-	if c, ok := r.priced[canonical]; ok {
-		return c, true
-	}
-	// Longest-prefix: gpt-5-mini must not collapse to gpt-5.
-	for _, key := range r.sortedKeys {
-		if canonical == key || strings.HasPrefix(canonical, key+"-") {
-			return r.priced[key], true
-		}
-	}
-	// Case-insensitive fallback (gap-filled lowercase slugs).
-	if c, ok := r.lowerIndex[strings.ToLower(canonical)]; ok {
-		return c, true
-	}
-	if c, ok := r.lowerIndex[strings.ToLower(withPrefix)]; ok {
-		return c, true
-	}
-	return ModelCosts{}, false
+type candidate struct {
+	key  string
+	note string
 }
 
-// Resolve returns the price for an agent's model. priceProfile, when set and
-// known, wins over the LiteLLM tables. found=false means unknown (no cost).
-func (r *Resolver) Resolve(model, priceProfile string) (costs ModelCosts, source string, found bool) {
-	if priceProfile != "" {
-		if up, ok := r.userPrices[priceProfile]; ok {
-			return ModelCosts{Input: up.InputPerMillion / 1e6, Output: up.OutputPerMillion / 1e6}, SourceUser, true
+// getModelCosts resolves only exact keys and explicit aliases. It deliberately
+// avoids family/latest and longest-prefix matching, so unknown selectors remain
+// unknown until a user maps them.
+func (r *Resolver) getModelCosts(model string) (ModelCosts, string, string, bool) {
+	model = strings.TrimSpace(model)
+	if model == "" || strings.EqualFold(model, "unknown") {
+		return ModelCosts{}, "", "model unknown", false
+	}
+	candidates := []candidate{}
+	if v, ok := r.userAlias[model]; ok {
+		candidates = append(candidates, candidate{key: v, note: "user alias " + model + " -> " + v})
+	}
+	if v, ok := builtinAliases[model]; ok {
+		candidates = append(candidates, candidate{key: v, note: "built-in alias " + model + " -> " + v})
+	}
+	candidates = append(candidates, candidate{key: model, note: "exact model"})
+	if stripped := stripPin(model); stripped != model {
+		candidates = append(candidates, candidate{key: stripped, note: "pin stripped for pricing"})
+	}
+	if canonical := canonicalName(model); canonical != model {
+		candidates = append(candidates, candidate{key: canonical, note: "provider/date prefix stripped for pricing"})
+		if v, ok := r.userAlias[canonical]; ok {
+			candidates = append(candidates, candidate{key: v, note: "user alias " + canonical + " -> " + v})
+		}
+		if v, ok := builtinAliases[canonical]; ok {
+			candidates = append(candidates, candidate{key: v, note: "built-in alias " + canonical + " -> " + v})
 		}
 	}
-	if c, ok := r.getModelCosts(model); ok {
-		return c, r.origin, true
+	seen := map[string]bool{}
+	for _, cand := range candidates {
+		if cand.key == "" || seen[cand.key] {
+			continue
+		}
+		seen[cand.key] = true
+		if c, ok := r.priced[cand.key]; ok {
+			return c, cand.key, cand.note, true
+		}
+		if c, ok := r.lowerIndex[strings.ToLower(cand.key)]; ok {
+			return c, cand.key, cand.note + "; case-insensitive exact match", true
+		}
 	}
-	return ModelCosts{}, SourceUnknown, false
+	return ModelCosts{}, "", "no exact price match", false
+}
+
+// Resolution is a rich price lookup result. Found=false means unknown (no cost).
+type Resolution struct {
+	Costs      ModelCosts
+	Source     string
+	SourceDate time.Time
+	ReviewedAt string
+	Stale      bool
+	Found      bool
+	PriceModel string
+	Note       string
+	Currency   string
+	Confidence string
+}
+
+// ResolveDetailed returns the price for an agent's model. priceProfile, when
+// set and known, wins over the LiteLLM tables.
+func (r *Resolver) ResolveDetailed(model, priceProfile string) Resolution {
+	if priceProfile != "" {
+		if up, ok := r.userPrices[priceProfile]; ok {
+			src := up.Source
+			if src == "" {
+				src = SourceUser
+			}
+			cur := up.Currency
+			if cur == "" {
+				cur = "USD"
+			}
+			return Resolution{
+				Costs:  ModelCosts{Input: up.InputPerMillion / 1e6, Output: up.OutputPerMillion / 1e6},
+				Source: src, ReviewedAt: up.ReviewedAt, Stale: up.IsStale(r.now, r.staleAfterDays),
+				Found: true, PriceModel: priceProfile, Note: "user price profile " + priceProfile,
+				Currency: cur, Confidence: "exact",
+			}
+		}
+	}
+	if c, priceModel, note, ok := r.getModelCosts(model); ok {
+		return Resolution{
+			Costs: c, Source: r.origin, SourceDate: r.originAt, Found: true,
+			PriceModel: priceModel, Note: note, Currency: "USD", Confidence: "exact",
+		}
+	}
+	return Resolution{Source: SourceUnknown, Found: false, PriceModel: "", Note: "price unknown", Currency: "", Confidence: "unknown"}
+}
+
+// Resolve returns the price for older callers.
+func (r *Resolver) Resolve(model, priceProfile string) (costs ModelCosts, source string, found bool) {
+	res := r.ResolveDetailed(model, priceProfile)
+	return res.Costs, res.Source, res.Found
 }
 
 // CalculateCost is the faithful full port (cache/web/fast aware); council passes
 // only input/output and 0 for the rest. found=false → 0 cost and unknown.
 func (r *Resolver) CalculateCost(model string, in, out, cacheCreate, cacheRead, webReq int, fast bool, oneHourCache int) (float64, bool) {
-	c, ok := r.getModelCosts(model)
+	c, _, _, ok := r.getModelCosts(model)
 	if !ok {
 		return 0, false
 	}

@@ -12,7 +12,7 @@ type UsageConfig struct {
 	Enabled bool `yaml:"enabled,omitempty"`
 	// Currency labels displayed costs (default USD).
 	Currency string `yaml:"currency,omitempty"`
-	// Estimator names the local token estimator. Only "chars4" (chars/4) exists.
+	// Estimator names the local token estimator: "bytes4" or "runes4".
 	Estimator string `yaml:"estimator,omitempty"`
 	// ShowTotalInHeader shows a compact run total in the top status line.
 	// Tri-state: unset (nil) defaults to on when usage is enabled.
@@ -40,12 +40,12 @@ type PriceProfile struct {
 
 // AgentUsageConfig is the per-agent cost binding.
 type AgentUsageConfig struct {
-	// Model is the model name used for price lookup and the session-file reader.
+	// Model is the configured observed model name used for price lookup.
 	Model string `yaml:"model,omitempty"`
 	// PriceProfile selects a usage.prices entry; when set it wins over the tables.
 	PriceProfile string `yaml:"price_profile,omitempty"`
-	// Tool overrides which native session reader to use when the command name
-	// isn't the tool name (e.g. a wrapper script around claude).
+	// Tool selects which native provider-session reader may reconcile this agent.
+	// AgentConfig.Command is opaque and is never inspected for tool detection.
 	Tool string `yaml:"tool,omitempty"`
 }
 
@@ -70,7 +70,7 @@ func (c *Config) normalizeUsage() {
 		c.Usage.Currency = "USD"
 	}
 	if c.Usage.Estimator == "" {
-		c.Usage.Estimator = "chars4"
+		c.Usage.Estimator = "bytes4"
 	}
 	if c.Usage.StalePriceAfterDays <= 0 {
 		c.Usage.StalePriceAfterDays = 60
@@ -81,6 +81,11 @@ func (c *Config) normalizeUsage() {
 func (c Config) validateUsage() error {
 	if !c.Usage.Enabled {
 		return nil
+	}
+	switch c.Usage.Estimator {
+	case "", "bytes4", "runes4":
+	default:
+		return fmt.Errorf("usage.estimator must be bytes4 or runes4")
 	}
 	profiles := make([]string, 0, len(c.Usage.Prices))
 	for name, p := range c.Usage.Prices {

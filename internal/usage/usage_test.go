@@ -27,13 +27,13 @@ func TestAggregateKeepsSameToolInstancesApart(t *testing.T) {
 	}
 }
 
-// A reported event must supersede the estimated event for the same (agent,
-// phase) rather than be summed with it — otherwise reconciliation double-counts.
-func TestAggregateReportedBeatsEstimated(t *testing.T) {
-	s := Aggregate([]Event{
-		{Agent: "codex", Phase: "build", Confidence: Estimated, InputTokens: 100, OutputTokens: 20},
-		{Agent: "codex", Phase: "build", Confidence: Reported, InputTokens: 80, OutputTokens: 25},
-	})
+// A reported event replaces only the estimated UsageKey it names.
+func TestAggregateReportedReplacesSameUsageKey(t *testing.T) {
+	est := Event{RunID: "r", Agent: "codex", Phase: "build", Tool: "codex", Model: UnknownValue, PromptHash: "p1", Confidence: Estimated, InputTokens: 100, OutputTokens: 20}
+	est.normalize()
+	rep := Event{RunID: "r", Agent: "codex", Phase: "build", Tool: "codex", Model: "gpt-5", Source: SourceProvider, Confidence: Reported, InputTokens: 80, OutputTokens: 25, Replaces: []string{est.ReconcileKey}}
+	rep.normalize()
+	s := Aggregate([]Event{est, rep})
 	if len(s.Sessions) != 1 {
 		t.Fatalf("got %d sessions, want 1", len(s.Sessions))
 	}
@@ -45,35 +45,34 @@ func TestAggregateReportedBeatsEstimated(t *testing.T) {
 	}
 }
 
-// A reported whole-session total supersedes the agent's per-prompt estimates
-// (across all phases) instead of being summed with them.
-func TestAggregateReportedSupersedesEstimatesAcrossPhases(t *testing.T) {
-	s := Aggregate([]Event{
-		{Agent: "codex", Phase: "plan", Confidence: Estimated, InputTokens: 10, OutputTokens: 2},
-		{Agent: "codex", Phase: "build", Confidence: Estimated, InputTokens: 30, OutputTokens: 5},
-		{Agent: "codex", Source: SourceProvider, Confidence: Reported, InputTokens: 99, OutputTokens: 88},
-	})
-	if s.Sessions[0].Confidence != Reported {
-		t.Fatalf("confidence = %q, want reported", s.Sessions[0].Confidence)
+func TestAggregateDifferentPhasesRemainSeparate(t *testing.T) {
+	plan := Event{RunID: "r", Agent: "codex", Phase: "plan", Tool: "codex", Model: UnknownValue, PromptHash: "p1", Confidence: Estimated, InputTokens: 10, OutputTokens: 2}
+	build := Event{RunID: "r", Agent: "codex", Phase: "build", Tool: "codex", Model: UnknownValue, PromptHash: "p2", Confidence: Estimated, InputTokens: 30, OutputTokens: 5}
+	plan.normalize()
+	build.normalize()
+	rep := Event{RunID: "r", Agent: "codex", Phase: "build", Tool: "codex", Model: "gpt-5", Source: SourceProvider, Confidence: Reported, InputTokens: 99, OutputTokens: 88, Replaces: []string{build.ReconcileKey}}
+	rep.normalize()
+	s := Aggregate([]Event{plan, build, rep})
+	if len(s.Sessions) != 2 {
+		t.Fatalf("got %d sessions, want plan estimate + build report", len(s.Sessions))
 	}
-	if s.Sessions[0].Input != 99 || s.Sessions[0].Output != 88 {
-		t.Fatalf("got %d/%d, want 99/88 (reported only)", s.Sessions[0].Input, s.Sessions[0].Output)
+	if s.Input != 109 {
+		t.Fatalf("input = %d, want 109 (plan estimate + build report)", s.Input)
 	}
 }
 
 // A reported total supersedes estimates only for ITS cwd; a cwd that never
 // reconciled keeps its estimate (no undercount from a partial reconciliation).
 func TestAggregateKeepsEstimatesForUnreconciledCWD(t *testing.T) {
-	s := Aggregate([]Event{
-		{Agent: "claude", CWD: "/a", Model: "m", Confidence: Estimated, InputTokens: 100},
-		{Agent: "claude", CWD: "/a", Model: "m", Source: SourceProvider, Confidence: Reported, InputTokens: 80},
-		{Agent: "claude", CWD: "/b", Model: "m", Confidence: Estimated, InputTokens: 50}, // never reconciled
-	})
+	a := Event{Agent: "claude", CWD: "/a", Tool: "claude", Model: "m", Confidence: Estimated, InputTokens: 100}
+	b := Event{Agent: "claude", CWD: "/b", Tool: "claude", Model: "m", Confidence: Estimated, InputTokens: 50}
+	a.normalize()
+	b.normalize()
+	rep := Event{Agent: "claude", CWD: "/a", Tool: "claude", Model: "m", Source: SourceProvider, Confidence: Reported, InputTokens: 80, Replaces: []string{a.ReconcileKey}}
+	rep.normalize()
+	s := Aggregate([]Event{a, rep, b})
 	if s.Input != 130 { // reported 80 (cwd /a) + estimated 50 (cwd /b); not 80 and not 230
 		t.Fatalf("input = %d, want 130 (reported /a + estimated /b kept)", s.Input)
-	}
-	if s.Sessions[0].Confidence != Estimated { // weakest contributing tier
-		t.Fatalf("confidence = %q, want estimated (weakest)", s.Sessions[0].Confidence)
 	}
 }
 

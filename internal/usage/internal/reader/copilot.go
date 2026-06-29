@@ -121,19 +121,19 @@ func (r copilotReader) parseSession(dir, cwd string) []Call {
 		ts = fi.ModTime()
 	}
 	sid := filepath.Base(dir)
-	mk := func(model string, in, out int) Call {
-		return Call{Provider: "copilot", SessionID: sid, ProjectPath: cwd, Model: model, InputTokens: in, OutputTokens: out, Timestamp: ts}
+	mk := func(model string, in, out, reasoning int) Call {
+		return Call{Provider: "copilot", SessionID: sid, CallID: sid + ":" + model, ProjectPath: cwd, Model: model, InputTokens: in, OutputTokens: out, ReasoningTokens: reasoning, Timestamp: ts}
 	}
 
 	if len(shutdown.Data.ModelMetrics) > 0 { // per-model breakdown is the most accurate
 		var calls []Call
 		for model, mm := range shutdown.Data.ModelMetrics {
-			calls = append(calls, mk(model, mm.Usage.InputTokens, mm.Usage.OutputTokens+mm.Usage.ReasoningTokens))
+			calls = append(calls, mk(model, mm.Usage.InputTokens, mm.Usage.OutputTokens, mm.Usage.ReasoningTokens))
 		}
 		return calls
 	}
 	td := shutdown.Data.TokenDetails
-	return []Call{mk(currentModel, td.Input.TokenCount, td.Output.TokenCount)}
+	return []Call{mk(currentModel, td.Input.TokenCount, td.Output.TokenCount, 0)}
 }
 
 func (r copilotReader) ReadForCWD(cwd string) ([]Call, error) {
@@ -142,48 +142,6 @@ func (r copilotReader) ReadForCWD(cwd string) ([]Call, error) {
 		calls = append(calls, r.parseSession(dir, cwd)...)
 	}
 	return calls, nil
-}
-
-func (r copilotReader) LatestModel(cwd string) (string, error) {
-	dirs := r.sessionDirs()
-	// newest session dir first
-	sort := func() {
-		for i := 1; i < len(dirs); i++ {
-			for j := i; j > 0; j-- {
-				if dirModTime(dirs[j]).After(dirModTime(dirs[j-1])) {
-					dirs[j], dirs[j-1] = dirs[j-1], dirs[j]
-				}
-			}
-		}
-	}
-	sort()
-	for _, dir := range dirs {
-		if copilotCWD(dir) != cwd {
-			continue
-		}
-		calls := r.parseSession(dir, cwd)
-		if len(calls) == 0 {
-			continue
-		}
-		// parseSession's calls come from a map, so pick deterministically: the
-		// model with the most tokens (ties broken by name) rather than map order.
-		best := calls[0]
-		for _, c := range calls[1:] {
-			ct, bt := c.InputTokens+c.OutputTokens, best.InputTokens+best.OutputTokens
-			if ct > bt || (ct == bt && c.Model < best.Model) {
-				best = c
-			}
-		}
-		return best.Model, nil
-	}
-	return "", nil
-}
-
-func dirModTime(dir string) time.Time {
-	if fi, err := os.Stat(filepath.Join(dir, "events.jsonl")); err == nil {
-		return fi.ModTime()
-	}
-	return time.Time{}
 }
 
 func init() { Register("copilot", func() Reader { return Copilot("") }) }

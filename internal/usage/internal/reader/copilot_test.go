@@ -37,13 +37,8 @@ func TestCopilotReportedTokens(t *testing.T) {
 		t.Fatalf("got %d calls, want 1", len(calls))
 	}
 	c := calls[0]
-	if c.Model != "gpt-5.4-mini" || c.InputTokens != 17454 || c.OutputTokens != 29+21 {
-		t.Fatalf("call = %+v, want gpt-5.4-mini 17454 in / 50 out (output+reasoning)", c)
-	}
-
-	m, _ := Copilot(root).LatestModel(cwd)
-	if m != "gpt-5.4-mini" {
-		t.Fatalf("LatestModel = %q", m)
+	if c.Model != "gpt-5.4-mini" || c.InputTokens != 17454 || c.OutputTokens != 29 || c.ReasoningTokens != 21 {
+		t.Fatalf("call = %+v, want gpt-5.4-mini 17454 in / 29 out / 21 reasoning", c)
 	}
 }
 

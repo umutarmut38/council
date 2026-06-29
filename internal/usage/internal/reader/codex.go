@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 )
@@ -40,6 +39,7 @@ type codexLine struct {
 		Cwd       string `json:"cwd"`
 		Model     string `json:"model"`
 		SessionID string `json:"session_id"`
+		Message   string `json:"message"` // event_msg/user_message: the typed prompt
 		Info      struct {
 			TotalTokenUsage struct {
 				InputTokens       int `json:"input_tokens"`
@@ -66,8 +66,8 @@ func (r codexReader) rollouts() []string {
 }
 
 // parseSession reads one rollout file. ok is false when its cwd != target.
-// ponytail: cumulative total_token_usage from the last token_count event is the
-// session total; cached_input is billed as input (no cache discount yet).
+// parseSession reads cumulative total_token_usage from the last token_count
+// event; cached_input stays separate so pricing can apply cache-read rates.
 func (r codexReader) parseSession(path, cwd string) (Call, bool) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -93,6 +93,7 @@ func (r codexReader) parseSession(path, cwd string) (Call, bool) {
 				matched = true
 				c.ProjectPath = l.Payload.Cwd
 				c.SessionID = l.Payload.SessionID
+				c.CallID = l.Payload.SessionID
 				if t, e := time.Parse(time.RFC3339, l.Timestamp); e == nil {
 					c.Timestamp = t
 				}
@@ -101,10 +102,19 @@ func (r codexReader) parseSession(path, cwd string) (Call, bool) {
 		if l.Payload.Model != "" {
 			c.Model = l.Payload.Model
 		}
+		// The first user_message event is the council prompt as typed (carrying the
+		// personality prefix) — unlike the response_item user turns, which codex
+		// pads with synthetic <environment_context> and AGENTS.md instruction blocks.
+		if c.UserMessage == "" && l.Type == "event_msg" && l.Payload.Type == "user_message" {
+			if t := strings.TrimSpace(l.Payload.Message); t != "" {
+				c.UserMessage = clip(t)
+			}
+		}
 		if l.Type == "event_msg" && l.Payload.Type == "token_count" {
 			u := l.Payload.Info.TotalTokenUsage
 			c.InputTokens = u.InputTokens // cumulative — last one wins
 			c.OutputTokens = u.OutputTokens
+			c.CacheRead = u.CachedInputTokens
 		}
 	}
 	if !matched {
@@ -121,24 +131,6 @@ func (r codexReader) ReadForCWD(cwd string) ([]Call, error) {
 		}
 	}
 	return calls, nil
-}
-
-func (r codexReader) LatestModel(cwd string) (string, error) {
-	files := r.rollouts()
-	sort.Slice(files, func(i, j int) bool {
-		fi, _ := os.Stat(files[i])
-		fj, _ := os.Stat(files[j])
-		if fi == nil || fj == nil {
-			return false
-		}
-		return fi.ModTime().After(fj.ModTime())
-	})
-	for _, f := range files {
-		if c, ok := r.parseSession(f, cwd); ok && c.Model != "" {
-			return c.Model, nil
-		}
-	}
-	return "", nil
 }
 
 func init() { Register("codex", func() Reader { return Codex("") }) }

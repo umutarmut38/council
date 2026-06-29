@@ -41,21 +41,17 @@ func TestOpencodeReader(t *testing.T) {
 	if len(calls) != 2 { // two sessions in /work/proj, /other excluded
 		t.Fatalf("got %d calls, want 2", len(calls))
 	}
-	var in, out int
+	var in, out, reasoning int
 	for _, c := range calls {
 		in += c.InputTokens
 		out += c.OutputTokens
+		reasoning += c.ReasoningTokens
 		if c.Model != "claude-sonnet-4.6" {
 			t.Fatalf("model = %q, want claude-sonnet-4.6 (parsed from JSON)", c.Model)
 		}
 	}
-	if in != 150 || out != 35 { // 100+50 in; (20+5)+(10+0) out — reasoning folded into output
-		t.Fatalf("totals = %d/%d, want 150/35", in, out)
-	}
-
-	m, _ := Opencode(path).LatestModel("/work/proj")
-	if m != "claude-sonnet-4.6" {
-		t.Fatalf("LatestModel = %q", m)
+	if in != 150 || out != 30 || reasoning != 5 {
+		t.Fatalf("totals = %d/%d/%d, want 150/30/5", in, out, reasoning)
 	}
 }
 

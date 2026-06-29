@@ -47,28 +47,6 @@ func TestClaudeReaderAggregatesSession(t *testing.T) {
 	}
 }
 
-func TestClaudeLatestModel(t *testing.T) {
-	root := t.TempDir()
-	cwd := "/test/proj"
-	writeSession(t, root, cwd, "s1.jsonl", `{"type":"assistant","cwd":"/test/proj","sessionId":"s1","timestamp":"2026-06-27T10:00:00Z","message":{"model":"claude-opus-4-6","usage":{"input_tokens":1}}}
-{"type":"assistant","cwd":"/test/proj","sessionId":"s1","timestamp":"2026-06-27T10:00:01Z","message":{"model":"<synthetic>","usage":{"input_tokens":1}}}
-`)
-	m, err := Claude(root).LatestModel(cwd)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m != "claude-opus-4-6" { // <synthetic> must be ignored
-		t.Fatalf("LatestModel = %q, want claude-opus-4-6", m)
-	}
-}
-
-func TestClaudeLatestModelNoSessions(t *testing.T) {
-	m, err := Claude(t.TempDir()).LatestModel("/nope")
-	if err != nil || m != "" {
-		t.Fatalf("no sessions should give empty/no-error, got %q / %v", m, err)
-	}
-}
-
 func TestClaudeReaderMissingDir(t *testing.T) {
 	calls, err := Claude(t.TempDir()).ReadForCWD("/nope")
 	if err != nil || len(calls) != 0 {

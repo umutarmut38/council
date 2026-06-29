@@ -26,12 +26,15 @@ func TestResolveExactAndCost(t *testing.T) {
 	}
 }
 
-// gpt-5-mini-foo must match gpt-5-mini, not collapse to the shorter gpt-5.
-func TestLongestPrefix(t *testing.T) {
+// Unknown nearby selectors must not fuzzy-match a priced model.
+func TestNoFuzzyPrefixMatch(t *testing.T) {
 	r := New(Options{})
-	costs, _, ok := r.Resolve("gpt-5-mini-foo", "")
-	if !ok || !approx(costs.Input, 2.5e-07) {
-		t.Fatalf("longest-prefix input = %v, want gpt-5-mini 2.5e-07", costs.Input)
+	if _, _, ok := r.Resolve("gpt-5-mini-foo", ""); ok {
+		t.Fatal("gpt-5-mini-foo resolved through fuzzy prefix; want unknown")
+	}
+	res := r.ResolveDetailed("gpt-5.4-mini", "")
+	if !res.Found || res.PriceModel != "gpt-5.4-mini" {
+		t.Fatalf("gpt-5.4-mini price model = %q found=%v, want exact gpt-5.4-mini", res.PriceModel, res.Found)
 	}
 }
 
@@ -56,6 +59,23 @@ func TestUserAliasOverridesBuiltin(t *testing.T) {
 	costs, _, ok := r.Resolve("my-model", "")
 	if !ok || !approx(costs.Input, 1.25e-06) {
 		t.Fatalf("user alias input = %v, want gpt-5", costs.Input)
+	}
+}
+
+func TestBareClaudeFamilyDoesNotAutoPrice(t *testing.T) {
+	r := New(Options{})
+	for _, model := range []string{"haiku", "sonnet", "opus"} {
+		if _, _, ok := r.Resolve(model, ""); ok {
+			t.Fatalf("%s auto-priced; want unknown without user alias", model)
+		}
+	}
+}
+
+func TestUserAliasCanPriceBareSelector(t *testing.T) {
+	r := New(Options{UserAlias: map[string]string{"haiku": "claude-haiku-4-5"}})
+	costs, _, ok := r.Resolve("haiku", "")
+	if !ok || !approx(costs.Input, 1e-06) {
+		t.Fatalf("haiku alias input = %v ok=%v, want claude-haiku-4-5", costs.Input, ok)
 	}
 }
 

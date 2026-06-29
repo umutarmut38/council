@@ -41,9 +41,26 @@ func TestCodexReaderTotalsAndModel(t *testing.T) {
 	if c.Model != "gpt-5-codex" || c.SessionID != "sx" {
 		t.Fatalf("meta wrong: %+v", c)
 	}
-	m, _ := Codex(root).LatestModel(cwd)
-	if m != "gpt-5-codex" {
-		t.Fatalf("LatestModel = %q, want gpt-5-codex", m)
+}
+
+// The captured UserMessage is the first user_message event (the council prompt
+// as typed), not codex's synthetic <environment_context>/AGENTS.md user turns —
+// so reconciliation can match it to a pane's personality fingerprint.
+func TestCodexReaderCapturesCouncilPrompt(t *testing.T) {
+	root := t.TempDir()
+	writeRollout(t, root, `{"type":"session_meta","timestamp":"2026-06-28T10:00:00Z","payload":{"cwd":"/work/proj","session_id":"sx"}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n  <cwd>/work/proj</cwd>\n</environment_context>"}]}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions\n<INSTRUCTIONS>..."}]}}
+{"type":"event_msg","payload":{"type":"user_message","message":"You are The Minimalist. Less is more.\n\nWrite the plan."}}
+{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"output_tokens":2}}}}
+`)
+	calls, _ := Codex(root).ReadForCWD("/work/proj")
+	if len(calls) != 1 {
+		t.Fatalf("got %d calls, want 1", len(calls))
+	}
+	want := "You are The Minimalist. Less is more."
+	if got := calls[0].UserMessage; got[:len(want)] != want {
+		t.Fatalf("UserMessage = %q, want it to start with the council prompt", got)
 	}
 }
 

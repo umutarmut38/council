@@ -184,7 +184,7 @@ func Schema() []SchemaSection {
 			Fields: []SchemaField{
 				{"enabled", "bool", "`false`", "Record usage and show the cost UI (header total, pane-border cost, `/cost`)."},
 				{"currency", "string", "`USD`", "Currency label for displayed costs."},
-				{"estimator", "string", "`chars4`", "Local token estimator (`chars4` = characters / 4)."},
+				{"estimator", "string", "`bytes4`", "Local token estimator: `bytes4` (UTF-8 bytes / 4) or `runes4` (Unicode code points / 4)."},
 				{"show_total_in_header", "bool", "`true`", "Show a compact run cost total in the top status line (on by default when usage is enabled; set `false` to hide)."},
 				{"show_agent_cost_in_border", "bool", "`true`", "Show each session's cost in its pane border (on by default when usage is enabled; set `false` to hide)."},
 				{"stale_price_after_days", "int", "`60`", "Warn when a user price profile's `reviewed_at` is older than this."},
@@ -205,11 +205,11 @@ func Schema() []SchemaSection {
 		},
 		{
 			Title: "agents.<name>.usage",
-			Intro: "Binds an agent to a model and price for cost tracking.",
+			Intro: "Binds explicit usage metadata for cost tracking. Council never inspects `agents.<name>.command` for tool or model inference.",
 			Fields: []SchemaField{
-				{"model", "string", "—", "Model name used for price lookup and the session-file reader."},
+				{"model", "string", "—", "Observed model name to use for estimated pricing until a provider-session report supplies a concrete model."},
 				{"price_profile", "string", "—", "A `usage.prices` entry; when set it wins over the price tables."},
-				{"tool", "string", "—", "Override which native session reader to use when the command name isn't the tool name."},
+				{"tool", "string", "—", "Native provider-session reader to enable for this agent, e.g. `claude`, `codex`, `copilot`, `cursor`, `opencode`."},
 			},
 		},
 	}

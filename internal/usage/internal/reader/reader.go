@@ -16,30 +16,32 @@ import (
 // Call is one tool-reported unit of usage. The non-token fields (SessionID,
 // ProjectPath, Timestamp, UserMessage) are correlation keys.
 type Call struct {
-	Provider     string
-	Model        string
-	SessionID    string
-	ProjectPath  string
-	UserMessage  string
-	Timestamp    time.Time
-	InputTokens  int
-	OutputTokens int
-	CacheCreate  int
-	CacheRead    int
+	Provider          string
+	Model             string
+	SessionID         string
+	CallID            string
+	ProjectPath       string
+	UserMessage       string
+	Timestamp         time.Time
+	InputTokens       int
+	OutputTokens      int
+	ReasoningTokens   int
+	CacheCreate       int
+	CacheRead         int
+	WebSearchRequests int
+	FastInputTokens   int
+	FastOutputTokens  int
 }
 
-// Reader reads one tool's sessions for a given working directory. A tool that
-// records no tokens (e.g. cursor-agent) returns nil from ReadForCWD but can
-// still implement LatestModel so council can price its estimated floor.
+// Reader reads one tool's sessions for a given working directory. Tools that
+// record no tokens return nil from ReadForCWD; council does not use "latest
+// session" model guesses as a pricing source.
 type Reader interface {
 	// Name is the tool key (e.g. "claude").
 	Name() string
 	// ReadForCWD returns the tool's reported calls whose sessions ran in cwd.
 	// A missing session store yields no calls and no error.
 	ReadForCWD(cwd string) ([]Call, error)
-	// LatestModel returns the model most recently used in cwd, for auto-
-	// discovery when the user did not pin usage.model. "" when unknown.
-	LatestModel(cwd string) (string, error)
 }
 
 // registry maps a tool key to a factory. Populated by each reader file's init().

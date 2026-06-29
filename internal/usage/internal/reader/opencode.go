@@ -62,12 +62,14 @@ func (r opencodeReader) ReadForCWD(cwd string) ([]Call, error) {
 			return nil, err
 		}
 		c := Call{
-			Provider:     "opencode",
-			SessionID:    id.String,
-			ProjectPath:  cwd,
-			Model:        opencodeModelID(model.String),
-			InputTokens:  int(in.Int64),
-			OutputTokens: int(out.Int64) + int(reasoning.Int64), // reasoning is billed as output
+			Provider:        "opencode",
+			SessionID:       id.String,
+			CallID:          id.String,
+			ProjectPath:     cwd,
+			Model:           opencodeModelID(model.String),
+			InputTokens:     int(in.Int64),
+			OutputTokens:    int(out.Int64),
+			ReasoningTokens: int(reasoning.Int64),
 		}
 		if created.Valid {
 			c.Timestamp = time.UnixMilli(created.Int64)
@@ -75,24 +77,6 @@ func (r opencodeReader) ReadForCWD(cwd string) ([]Call, error) {
 		calls = append(calls, c)
 	}
 	return calls, rows.Err()
-}
-
-func (r opencodeReader) LatestModel(cwd string) (string, error) {
-	db, err := openSQLite(r.db)
-	if err != nil {
-		return "", nil
-	}
-	defer db.Close()
-	var model sql.NullString
-	err = db.QueryRow(`SELECT model FROM session WHERE directory = ? AND model IS NOT NULL
-		ORDER BY time_created DESC LIMIT 1`, cwd).Scan(&model)
-	if err == sql.ErrNoRows {
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	return opencodeModelID(model.String), nil
 }
 
 func init() { Register("opencode", func() Reader { return Opencode("") }) }

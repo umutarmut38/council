@@ -28,26 +28,17 @@ func makeCursorTrackDB(t *testing.T, path string) {
 	}
 }
 
-func TestCursorLatestModelByCWD(t *testing.T) {
+func TestCursorHasNoReportedTokens(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "ai-code-tracking.db")
 	makeCursorTrackDB(t, path)
-
-	m, err := Cursor(path).LatestModel("/work/proj")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m != "claude-opus-4-8" { // newest under /work/proj, not the /other row
-		t.Fatalf("LatestModel = %q, want claude-opus-4-8", m)
-	}
-	// cursor-agent has no reported tokens.
 	if calls, _ := Cursor(path).ReadForCWD("/work/proj"); calls != nil {
 		t.Fatalf("ReadForCWD should be empty (no reported tokens), got %+v", calls)
 	}
 }
 
 func TestCursorMissingDB(t *testing.T) {
-	m, err := Cursor(filepath.Join(t.TempDir(), "nope.db")).LatestModel("/x")
-	if err != nil || m != "" {
-		t.Fatalf("missing db should be empty/no-error, got %q / %v", m, err)
+	calls, err := Cursor(filepath.Join(t.TempDir(), "nope.db")).ReadForCWD("/x")
+	if err != nil || calls != nil {
+		t.Fatalf("missing db should be empty/no-error, got %v / %v", calls, err)
 	}
 }
