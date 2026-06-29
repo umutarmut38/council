@@ -205,9 +205,9 @@ type Model struct {
 	progress     *runProgress // cached HUD state; refreshProgress() updates it
 
 	// usage / cost (nil unless usage.enabled): live per-agent token tally,
-	// per-agent resolved price, and the model each agent uses (explicit in
-	// config or auto-discovered from its session files). The resolver is built
-	// once. Read by the header/border in View.
+	// per-agent resolved price, and the configured model label. Provider session
+	// models are recorded only through reconciliation. Read by the header/border
+	// in View.
 	usageTally   map[string]usage.TokenPair
 	usageRate    map[string]usage.Rate
 	usageModel   map[string]string

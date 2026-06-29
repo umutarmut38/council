@@ -38,9 +38,10 @@ func councilCost(args []string) error {
 		return err
 	}
 	pricer := usage.NewPricer(usage.PricerOptions{
-		CacheDir:     usageDir(cfg),
-		ModelAliases: cfg.Usage.ModelAliases,
-		Prices:       toPriceProfiles(cfg.Usage.Prices),
+		CacheDir:       usageDir(cfg),
+		ModelAliases:   cfg.Usage.ModelAliases,
+		Prices:         toPriceProfiles(cfg.Usage.Prices),
+		StaleAfterDays: cfg.Usage.StalePriceAfterDays,
 	})
 
 	var events []usage.Event
@@ -66,6 +67,9 @@ func councilCost(args []string) error {
 		if events, err = usage.LoadEvents(run.Dir); err != nil {
 			return err
 		}
+		if events, _, err = usage.ReconcileAndAppend(run.Dir, events); err != nil {
+			return err
+		}
 		scope = "run " + run.Stamp
 	}
 
@@ -77,9 +81,7 @@ func councilCost(args []string) error {
 		return nil
 	}
 
-	events = append(events, usage.Reconcile(events)...)
 	summary := usage.Aggregate(events)
-	summary.Currency = cfg.Usage.Currency
 	summary.Price(pricer)
 	fmt.Printf("Usage — %s\n\n%s", scope, usage.FormatTable(summary))
 	if src, at := pricer.Origin(); !at.IsZero() {
@@ -92,7 +94,8 @@ func councilCost(args []string) error {
 // codeburn CLI, for tools council does not launch itself.
 func councilCostCodeburn() error {
 	if !usage.CodeburnAvailable() {
-		return fmt.Errorf("codeburn is not installed; install it for cross-tool totals: npm i -g codeburn")
+		fmt.Println("codeburn is not installed; install it for separate machine-wide totals: npm i -g codeburn")
+		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -140,6 +143,7 @@ func toPriceProfiles(prices map[string]config.PriceProfile) map[string]usage.Pri
 			InputPerMillion:  p.InputPerMillion,
 			OutputPerMillion: p.OutputPerMillion,
 			Currency:         p.Currency,
+			Source:           p.Source,
 			ReviewedAt:       p.ReviewedAt,
 		}
 	}
