@@ -1,6 +1,7 @@
 package usage
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -42,6 +43,30 @@ func TestAggregateReportedReplacesSameUsageKey(t *testing.T) {
 	}
 	if s.Sessions[0].Confidence != Reported {
 		t.Fatalf("confidence = %q, want reported", s.Sessions[0].Confidence)
+	}
+}
+
+func TestFormatTableCompactsRepeatedHintsAndHidesGenericRowUnknowns(t *testing.T) {
+	s := Aggregate([]Event{
+		{Agent: "claude", Phase: "session", Confidence: Estimated, InputTokens: 40},
+		{Agent: "codex", Phase: "session", Confidence: Estimated, InputTokens: 44},
+	})
+	s.Price(NewPricer(PricerOptions{}))
+	out := FormatTable(s)
+	if strings.Contains(out, "price unknown\t") || strings.Contains(out, "price unknown; price unknown") {
+		t.Fatalf("generic row note leaked into table:\n%s", out)
+	}
+	if strings.Count(out, "usage.tool is not configured") != 1 {
+		t.Fatalf("usage.tool hint should be compacted once:\n%s", out)
+	}
+	if strings.Count(out, "usage.model is not configured") != 1 {
+		t.Fatalf("usage.model hint should be compacted once:\n%s", out)
+	}
+	if strings.Count(out, "price unknown for model --") != 1 {
+		t.Fatalf("price unknown hint should be compacted once:\n%s", out)
+	}
+	if !strings.Contains(out, "2 sessions: usage.tool is not configured") {
+		t.Fatalf("missing compact session count:\n%s", out)
 	}
 }
 

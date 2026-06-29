@@ -1,22 +1,16 @@
 Output .tmp/vhs/council-vhs-codeburn-missing.gif
 Set Shell "bash"
-Set FontSize 14
-Set Width 1600
-Set Height 900
+Set FontSize 16
+Set Width 1920
+Set Height 1080
+Set Padding 24
+Set Theme "Dracula"
+Set TypingSpeed 60ms
+Set PlaybackSpeed 1.0
 
-Type "bash test/vhs/scenarios/codeburn-missing.sh setup"
-Enter
-Wait+Screen@30s /READY codeburn-missing/
-Type "source .tmp/vhs/codeburn-missing/env"
-Enter
-Type "clear"
-Enter
-Type "cd $WORK && PATH=$CASE_DIR/bin:/usr/bin:/bin $COUNCIL_BIN cost --source codeburn"
+Type "cd $WORK && PATH=$ROOT/bin:$CASE_DIR/bin:/usr/bin:/bin council cost --source codeburn"
 Enter
 Wait+Screen@30s /codeburn is not installed/
 Wait+Screen@30s /machine-wide totals/
-Sleep 1s
-Type "bash $ROOT/test/vhs/scenarios/codeburn-missing.sh assert"
-Enter
-Wait+Screen@30s /PASS codeburn-missing/
+Screenshot .tmp/vhs/codeburn-missing.png
 Sleep 1s

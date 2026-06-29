@@ -7,6 +7,7 @@ case "$1" in
   setup)
     setup_case
     make_fake_agent claude
+    make_fake_agent codex
     write_global_config <<EOF
 usage:
   enabled: true
@@ -16,9 +17,13 @@ ui:
 sessions:
   root_dir: "$WORK/.council/runs"
 agents:
-  fake:
+  claude:
     enabled: true
     command: ["$BIN_DIR/claude", "--model", "haiku"]
+    cwd: "$WORK"
+  codex:
+    enabled: true
+    command: ["$BIN_DIR/codex", "--model", "gpt-5.4-mini"]
     cwd: "$WORK"
 EOF
     ready
@@ -29,8 +34,10 @@ EOF
     assert_grep '"tool":"unknown"' "$events"
     assert_grep '"model":"unknown"' "$events"
     assert_not_grep '"tool":"claude"' "$events"
+    assert_not_grep '"tool":"codex"' "$events"
     assert_not_grep '"model":"haiku"' "$events"
-    "$COUNCIL_BIN" cost "$(basename "$(latest_run)")" >"$CASE_DIR/cost.out"
+    assert_not_grep '"model":"gpt-5.4-mini"' "$events"
+    (cd "$WORK" && "$COUNCIL_BIN" cost "$(basename "$(latest_run)")") >"$CASE_DIR/cost.out"
     assert_grep 'usage.tool is not configured' "$CASE_DIR/cost.out"
     assert_grep 'usage.model is not configured' "$CASE_DIR/cost.out"
     pass

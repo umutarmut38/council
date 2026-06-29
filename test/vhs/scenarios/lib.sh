@@ -34,7 +34,7 @@ write_env_file() {
     printf 'export WORK=%q\n' "$WORK"
     printf 'export CASE_DIR=%q\n' "$CASE_DIR"
     printf 'export COUNCIL_BIN=%q\n' "$COUNCIL_BIN"
-    printf 'export PATH=%q:"$PATH"\n' "$BIN_DIR"
+    printf 'export PATH=%q:%q:"$PATH"\n' "$BIN_DIR" "$ROOT/bin"
   } >"$ENV_FILE"
 }
 

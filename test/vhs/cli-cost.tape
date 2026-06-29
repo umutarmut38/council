@@ -1,22 +1,16 @@
 Output .tmp/vhs/council-vhs-cli-cost.gif
 Set Shell "bash"
-Set FontSize 14
-Set Width 1600
-Set Height 900
+Set FontSize 16
+Set Width 1920
+Set Height 1080
+Set Padding 24
+Set Theme "Dracula"
+Set TypingSpeed 60ms
+Set PlaybackSpeed 1.0
 
-Type "bash test/vhs/scenarios/cli-cost.sh setup"
-Enter
-Wait+Screen@30s /READY cli-cost/
-Type "source .tmp/vhs/cli-cost/env"
-Enter
-Type "clear"
-Enter
-Type "cd $WORK && $COUNCIL_BIN cost 20260628-cli-cost"
+Type "cd $WORK && council cost 20260628-cli-cost"
 Enter
 Wait+Screen@30s /local-free/
 Wait+Screen@30s /\$0\.00/
-Sleep 1s
-Type "bash $ROOT/test/vhs/scenarios/cli-cost.sh assert"
-Enter
-Wait+Screen@30s /PASS cli-cost/
+Screenshot .tmp/vhs/cli-cost.png
 Sleep 1s

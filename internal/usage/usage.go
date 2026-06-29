@@ -575,13 +575,7 @@ func FormatTable(s Summary) string {
 	tw := tabwriter.NewWriter(&b, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(tw, "Agent\tPhase\tTool\tModel\tPriceModel\tInput\tOutput\tCost\tSource\tConfidence\tNote")
 	for _, ses := range s.Sessions {
-		note := ses.PriceNote
-		if ses.Stale {
-			note = joinNote(note, "stale price")
-		}
-		if len(ses.Notes) > 0 {
-			note = joinNote(note, strings.Join(ses.Notes, "; "))
-		}
+		note := displayNote(ses)
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			ses.Agent, ses.Phase, dash(ses.Tool), dash(ses.Model), dash(ses.PriceModel),
 			tokens(ses.Tokens.Input), tokens(ses.Tokens.Output+ses.Tokens.Reasoning),
@@ -592,21 +586,88 @@ func FormatTable(s Summary) string {
 	tw.Flush()
 	if len(s.Hints) > 0 {
 		b.WriteString("\nHints:\n")
-		for _, h := range s.Hints {
+		for _, h := range compactHints(s.Hints) {
 			b.WriteString("- " + h + "\n")
 		}
 	}
 	return b.String()
 }
 
+func displayNote(ses SessionTotal) string {
+	note := ""
+	for _, p := range noteParts(ses.PriceNote) {
+		if p == "price unknown" {
+			continue
+		}
+		note = joinNote(note, p)
+	}
+	if ses.Stale {
+		note = joinNote(note, "stale price")
+	}
+	if len(ses.Notes) > 0 {
+		note = joinNote(note, strings.Join(ses.Notes, "; "))
+	}
+	return note
+}
+
 func joinNote(a, b string) string {
-	if a == "" {
-		return b
+	parts := noteParts(a)
+	seen := make(map[string]bool, len(parts)+1)
+	out := make([]string, 0, len(parts)+1)
+	for _, p := range append(parts, noteParts(b)...) {
+		if p == "" || seen[p] {
+			continue
+		}
+		seen[p] = true
+		out = append(out, p)
 	}
-	if b == "" {
-		return a
+	return strings.Join(out, "; ")
+}
+
+func noteParts(s string) []string {
+	raw := strings.Split(s, ";")
+	out := make([]string, 0, len(raw))
+	for _, p := range raw {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
 	}
-	return a + "; " + b
+	return out
+}
+
+func compactHints(hints []string) []string {
+	if len(hints) == 0 {
+		return nil
+	}
+	type group struct {
+		msg      string
+		sessions []string
+	}
+	groups := map[string]*group{}
+	var passthrough []string
+	for _, h := range hints {
+		session, msg, ok := strings.Cut(h, ": ")
+		if !ok || !strings.Contains(session, "/") || msg == "" {
+			passthrough = append(passthrough, h)
+			continue
+		}
+		g := groups[msg]
+		if g == nil {
+			g = &group{msg: msg}
+			groups[msg] = g
+		}
+		g.sessions = appendUnique(g.sessions, session)
+	}
+	for _, g := range groups {
+		sort.Strings(g.sessions)
+		if len(g.sessions) == 1 {
+			passthrough = append(passthrough, g.sessions[0]+": "+g.msg)
+			continue
+		}
+		passthrough = append(passthrough, fmt.Sprintf("%d sessions: %s", len(g.sessions), g.msg))
+	}
+	sort.Strings(passthrough)
+	return passthrough
 }
 
 func dash(s string) string {
