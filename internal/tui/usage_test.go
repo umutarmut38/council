@@ -81,3 +81,64 @@ func TestRecordUsageInputMetersWirePrompt(t *testing.T) {
 func usageConfigOn() config.UsageConfig {
 	return config.UsageConfig{Enabled: true, Currency: "USD", Estimator: usage.EstimatorBytes4}
 }
+
+// /cost reconciliation rolls up per agent so the live header/badge can show the
+// reported cost: a priced reported session, a mixed agent (weakest tier wins),
+// and an agent whose model never priced.
+func TestRollupReconciled(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	s := usage.Summary{Sessions: []usage.SessionTotal{
+		{Agent: "claude-a", Confidence: usage.Reported, Cost: f(0.04), Currency: "USD"},
+		{Agent: "claude-a", Confidence: usage.Estimated, Cost: f(0.01), Currency: "USD"},
+		{Agent: "codex-a", Confidence: usage.Reported, Cost: nil}, // price unknown
+	}}
+	rc := rollupReconciled(s)
+	a := rc["claude-a"]
+	if !a.priced || a.cost < 0.0499 || a.cost > 0.0501 || a.confidence != usage.Estimated {
+		t.Fatalf("claude-a = %+v, want priced ~0.05 with weakest (estimated) confidence", a)
+	}
+	if c := rc["codex-a"]; c.priced || !c.someUnknown {
+		t.Fatalf("codex-a = %+v, want unpriced + someUnknown", c)
+	}
+}
+
+func TestConfidenceSuffix(t *testing.T) {
+	for conf, want := range map[string]string{
+		usage.Exact: "x", usage.Reported: "r", usage.Estimated: "e", usage.Unknown: "?", "": "?",
+	} {
+		if got := confidenceSuffix(conf); got != want {
+			t.Errorf("confidenceSuffix(%q) = %q, want %q", conf, got, want)
+		}
+	}
+}
+
+// After /cost reconciles, the pane badge shows the reported total (suffix r) and
+// the header drops the "est" qualifier — not the stale estimated floor.
+func TestBadgeAndHeaderPreferReconciled(t *testing.T) {
+	m := Model{
+		Config:     config.Config{Usage: usageConfigOn()},
+		usageTally: map[string]usage.TokenPair{"claude-a": {Input: 20}},
+		usageRate:  map[string]usage.Rate{"claude-a": {Currency: "USD", Found: true}},
+		usageReconciled: map[string]reconciledCost{
+			"claude-a": {cost: 0.04, currency: "USD", confidence: usage.Reported, priced: true},
+		},
+	}
+	if got := m.usageBorderSuffix("claude-a"); got != " | $0.04r" {
+		t.Fatalf("badge = %q, want \" | $0.04r\"", got)
+	}
+	if got := m.usageHeaderCost(); got != "Run $0.04" {
+		t.Fatalf("header = %q, want \"Run $0.04\" (reported, no est)", got)
+	}
+}
+
+func TestWeakerConfidence(t *testing.T) {
+	if weakerConfidence("", usage.Reported) != usage.Reported {
+		t.Error(`weakerConfidence("", reported) should seed with reported`)
+	}
+	if weakerConfidence(usage.Reported, usage.Estimated) != usage.Estimated {
+		t.Error("estimated is weaker than reported")
+	}
+	if weakerConfidence(usage.Exact, usage.Reported) != usage.Reported {
+		t.Error("reported is weaker than exact")
+	}
+}

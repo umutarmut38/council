@@ -69,6 +69,11 @@ type AgentStartErrorMsg struct {
 type initialPromptMsg string
 type initialAgentPromptsMsg map[string]string
 type phasePromptsMsg map[string]string
+
+// usageTickMsg drives the periodic live reconcile while agents are producing
+// output; usageReconciledMsg carries the result back to the Update goroutine.
+type usageTickMsg struct{}
+type usageReconciledMsg struct{ rollup map[string]reconciledCost }
 type pollArtifactsMsg struct{}
 type buildProgressMsg struct{}
 
@@ -208,14 +213,23 @@ type Model struct {
 	// per-agent resolved price, and the configured model label. Provider session
 	// models are recorded only through reconciliation. Read by the header/border
 	// in View.
-	usageTally   map[string]usage.TokenPair
-	usageRate    map[string]usage.Rate
-	usageModel   map[string]string
-	usagePricer  *usage.Pricer
-	buildActive  int  // cached live build activity; updated off-thread by buildProgressResultMsg
-	buildTotal   int  // cached worktree count from the same probe
-	layoutLocked bool // user adjusted rows/cols in settings: adaptive off
-	mouseOn      bool // mouse capture is active (Ctrl+W toggles it)
+	usageTally  map[string]usage.TokenPair
+	usageRate   map[string]usage.Rate
+	usageModel  map[string]string
+	usagePricer *usage.Pricer
+	// usageReconciled holds per-agent priced totals from the last reconcile
+	// (the 1s tick or /cost), so the header/badge show reported cost (real
+	// session tokens) instead of only the estimated floor. Nil until then.
+	usageReconciled map[string]reconciledCost
+	// usageDirty is set when an agent produced output since the last reconcile;
+	// the tick only reconciles when dirty, so idle panes cost no disk I/O.
+	usageDirty bool
+	// usageReconcileBusy guards against overlapping off-thread reconciles.
+	usageReconcileBusy bool
+	buildActive        int  // cached live build activity; updated off-thread by buildProgressResultMsg
+	buildTotal         int  // cached worktree count from the same probe
+	layoutLocked       bool // user adjusted rows/cols in settings: adaptive off
+	mouseOn            bool // mouse capture is active (Ctrl+W toggles it)
 	// attentionCheckPending debounces the delayed approval-prompt re-check.
 	attentionCheckPending bool
 
@@ -404,6 +418,9 @@ func (m Model) Init() tea.Cmd {
 			return initialPromptMsg(m.initialPrompt)
 		}))
 	}
+	if m.Config.Usage.Enabled {
+		cmds = append(cmds, usageTickCmd())
+	}
 	return tea.Batch(cmds...)
 }
 
@@ -430,6 +447,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if view := m.findAgentForMessage(msg.Name, msg.Session); view != nil {
 			m.appendOutput(view, string(msg.Data))
+			m.usageDirty = true // agent is doing stuff → let the tick reconcile
 			if m.noteAttentionOutput(view) {
 				return m, m.scheduleAttentionCheck()
 			}
@@ -437,6 +455,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case attentionCheckMsg:
 		return m, m.runAttentionCheck()
+	case usageTickMsg:
+		cmds := []tea.Cmd{usageTickCmd()} // always re-arm
+		if c := m.maybeReconcileCmd(); c != nil {
+			cmds = append(cmds, c)
+		}
+		return m, tea.Batch(cmds...)
+	case usageReconciledMsg:
+		m.usageReconcileBusy = false
+		if msg.rollup != nil {
+			m.usageReconciled = msg.rollup
+		}
+		return m, nil
 	case AgentExitMsg:
 		// The integrated editor closed (e.g. :q): drop back to the file tree.
 		if m.editorView != nil && msg.Session == m.editorView.Session {
@@ -459,6 +489,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Err != nil {
 				m.appendOutput(view, "exit error: "+msg.Err.Error()+"\n")
 			}
+			m.usageDirty = true // capture the agent's final session write
 		}
 		return m, nil
 	case AgentStartErrorMsg:

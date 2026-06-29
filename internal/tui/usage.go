@@ -4,11 +4,65 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/umutarmut38/council/internal/agent"
 	"github.com/umutarmut38/council/internal/config"
 	"github.com/umutarmut38/council/internal/usage"
 )
+
+// usageReconcileInterval is how often the live header/badge refresh while agents
+// are producing output. ponytail: a flat 1s poll — only fires when usageDirty,
+// so idle panes cost nothing; no staleness bookkeeping needed.
+const usageReconcileInterval = time.Second
+
+// usageTickCmd schedules the next live-usage tick.
+func usageTickCmd() tea.Cmd {
+	return tea.Tick(usageReconcileInterval, func(time.Time) tea.Msg { return usageTickMsg{} })
+}
+
+// maybeReconcileCmd returns a command that reconciles + reprices the active run
+// off-thread, but only when an agent has produced output since the last pass and
+// none is already running. It captures the run dir and the read-only pricer so
+// the closure never touches the model.
+func (m *Model) maybeReconcileCmd() tea.Cmd {
+	if !m.Config.Usage.Enabled || m.usageReconcileBusy || !m.usageDirty {
+		return nil
+	}
+	runDir := ""
+	if m.orch != nil && m.orch.Run() != nil {
+		runDir = m.orch.Run().Dir
+	} else if m.Store != nil {
+		runDir = m.Store.RunDir
+	}
+	if runDir == "" {
+		return nil
+	}
+	pricer := m.usagePricer
+	if pricer == nil {
+		pricer = m.buildPricer()
+	}
+	m.usageDirty = false
+	m.usageReconcileBusy = true
+	return reconcileRollupCmd(runDir, pricer)
+}
+
+// reconcileRollupCmd reads the run's events, reconciles provider sessions, prices
+// the result, and returns a per-agent rollup for the header/badge. Runs in a
+// tea.Cmd goroutine: it only reads the model's captured runDir + read-only pricer.
+func reconcileRollupCmd(runDir string, pricer *usage.Pricer) tea.Cmd {
+	return func() tea.Msg {
+		events, err := usage.LoadEvents(runDir)
+		if err != nil || len(events) == 0 {
+			return usageReconciledMsg{} // nil rollup → just clears the busy flag
+		}
+		events, _, _ = usage.ReconcileAndAppend(runDir, events)
+		summary := usage.Aggregate(events)
+		summary.Price(pricer)
+		return usageReconciledMsg{rollup: rollupReconciled(summary)}
+	}
+}
 
 // initUsage allocates live usage state. No-op when usage is disabled.
 func (m *Model) initUsage() {
@@ -250,9 +304,34 @@ func (m Model) usageHeaderCost() string {
 	}
 	var total float64
 	currency := ""
-	hasTokens, priced, unknown, mixed := false, false, false, false
+	hasTokens, priced, unknown, mixed, anyEstimated := false, false, false, false, false
+	addCurrency := func(c string) {
+		switch {
+		case c == "":
+		case currency == "":
+			currency = c
+		case currency != c:
+			mixed = true
+		}
+	}
+	// Agents reconciled by the last /cost use reported numbers; the rest fall
+	// back to the live estimated floor.
+	for _, rc := range m.usageReconciled {
+		hasTokens = true
+		if rc.priced {
+			total += rc.cost
+			priced = true
+			addCurrency(rc.currency)
+			if rc.confidence == usage.Estimated {
+				anyEstimated = true
+			}
+		}
+		if rc.someUnknown || !rc.priced {
+			unknown = true
+		}
+	}
 	for name, t := range m.usageTally {
-		if !t.Any() {
+		if _, done := m.usageReconciled[name]; done || !t.Any() {
 			continue
 		}
 		hasTokens = true
@@ -264,11 +343,8 @@ func (m Model) usageHeaderCost() string {
 		c, _ := r.Cost(t)
 		total += c
 		priced = true
-		if currency == "" {
-			currency = r.Currency
-		} else if currency != r.Currency {
-			mixed = true
-		}
+		anyEstimated = true
+		addCurrency(r.Currency)
 	}
 	if !hasTokens {
 		return "Run $0.00 est"
@@ -279,27 +355,98 @@ func (m Model) usageHeaderCost() string {
 	if unknown && !priced {
 		return "cost unknown"
 	}
-	label := compactCost(total, currency) + " est"
+	label := compactCost(total, currency)
+	if anyEstimated {
+		label += " est"
+	}
 	if unknown {
 		label += " + unknown"
 	}
 	return "Run " + label
 }
 
-// usageBorderSuffix is the per-agent cost shown in a pane title.
+// usageBorderSuffix is the per-agent cost shown in a pane title. Once /cost has
+// reconciled, it prefers the reported total (suffix r/x) over the estimated
+// floor (suffix e).
 func (m Model) usageBorderSuffix(name string) string {
 	if m.usageTally == nil || !m.Config.Usage.BorderCostEnabled() {
 		return ""
 	}
+	if rc, ok := m.usageReconciled[name]; ok {
+		if !rc.priced {
+			return " | $?"
+		}
+		return " | " + compactCost(rc.cost, rc.currency) + confidenceSuffix(rc.confidence)
+	}
 	t := m.usageTally[name]
 	if r, ok := m.usageRate[name]; ok && r.Found {
 		c, _ := r.Cost(t)
-		return " | " + compactCost(c, r.Currency) + "e"
+		return " | " + compactCost(c, r.Currency) + confidenceSuffix(usage.Estimated)
 	}
 	if !t.Any() {
 		return " | $0.00"
 	}
 	return " | $?"
+}
+
+// reconciledCost is a per-agent priced rollup of a /cost summary, used by the
+// live header/badge so they reflect reported numbers, not just the estimate.
+type reconciledCost struct {
+	cost        float64
+	currency    string
+	confidence  string // weakest token confidence across the agent's priced sessions
+	priced      bool   // at least one session resolved to a price
+	someUnknown bool   // at least one session had no resolvable price
+}
+
+// rollupReconciled aggregates a priced summary into per-agent totals.
+func rollupReconciled(summary usage.Summary) map[string]reconciledCost {
+	out := map[string]reconciledCost{}
+	for _, s := range summary.Sessions {
+		rc := out[s.Agent]
+		if s.Cost != nil {
+			rc.cost += *s.Cost
+			rc.priced = true
+			rc.confidence = weakerConfidence(rc.confidence, s.Confidence)
+			if rc.currency == "" {
+				rc.currency = s.Currency
+			}
+		} else {
+			rc.someUnknown = true
+		}
+		out[s.Agent] = rc
+	}
+	return out
+}
+
+var confidenceRank = map[string]int{usage.Unknown: 0, usage.Estimated: 1, usage.Reported: 2, usage.Exact: 3}
+
+// weakerConfidence returns the lower-confidence of two tiers ("" means none yet).
+func weakerConfidence(a, b string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	case confidenceRank[b] < confidenceRank[a]:
+		return b
+	default:
+		return a
+	}
+}
+
+// confidenceSuffix is the single-letter badge marker for a confidence tier.
+func confidenceSuffix(conf string) string {
+	switch conf {
+	case usage.Exact:
+		return "x"
+	case usage.Reported:
+		return "r"
+	case usage.Estimated:
+		return "e"
+	default:
+		return "?"
+	}
 }
 
 func compactCost(cost float64, currency string) string {
@@ -380,6 +527,9 @@ func (m *Model) cmdCost() {
 	}
 	summary := usage.Aggregate(events)
 	summary.Price(pricer)
+	// Fold the reconciled, priced totals back into the live state so the header
+	// and pane badges reflect reported cost instead of only the estimated floor.
+	m.usageReconciled = rollupReconciled(summary)
 	for _, note := range rec.Notes {
 		summary.Hints = append(summary.Hints, note)
 	}
