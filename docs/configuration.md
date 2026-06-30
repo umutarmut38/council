@@ -561,6 +561,8 @@ Local, provider-agnostic cost/usage ledger. Off by default; all data stays under
 | `stale_price_after_days` | int | `60` | Warn when a user price profile's `reviewed_at` is older than this. |
 | `model_aliases` | map | — | Map a model name council sees to one the price tables know. |
 | `prices` | map | — | User-reviewed price profiles (see `usage.prices.<name>`). |
+| `session_attribution` | string | `cumulative` | How reported per-pane costs are split: `cumulative` keeps panes in the shared repo and combines same-tool/same-cwd usage; `isolated` runs each pane in its own git worktree (distinct cwd) for exact per-pane costs (committed tree + auto-copied untracked-but-not-ignored files; not uncommitted edits). |
+| `isolate_copy` | list | — | Extra paths/globs (relative to the repo root) to copy into each isolated pane's worktree, for gitignored files an agent needs (e.g. `.env`). Untracked-but-not-ignored files are copied automatically. |
 
 ### `usage.prices.<name>`
 
@@ -583,4 +585,5 @@ Binds explicit usage metadata for cost tracking. Council never inspects `agents.
 | `model` | string | — | Observed model name to use for estimated pricing until a provider-session report supplies a concrete model. |
 | `price_profile` | string | — | A `usage.prices` entry; when set it wins over the price tables. |
 | `tool` | string | — | Native provider-session reader to enable for this agent, e.g. `claude`, `codex`, `copilot`, `cursor`, `opencode`. |
+| `isolate` | bool | — | Override `usage.session_attribution` for this agent: `true` gives it a private per-pane session store, `false` keeps it on the shared store, unset follows the global mode. |
 <!-- END GENERATED: config-schema -->
