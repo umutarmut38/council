@@ -51,6 +51,9 @@ func TestRecordUsageInputMetersWirePrompt(t *testing.T) {
 	cfg.Normalize()
 	store := runstore.NewDeferred(t.TempDir(), []byte("cfg"), []byte("{}"))
 	session := agent.NewSession("claude", cfg.Agents["claude"], "")
+	// ensureRun opens the session's raw log; close it (via Terminate) before the
+	// t.TempDir cleanup runs, or Windows can't delete the still-open raw/*.log.
+	defer session.Terminate()
 	m := NewModelWithConfig([]*agent.Session{session}, store, cfg, "", nil, time.Millisecond, nil, nil)
 	if err := m.ensureRun(); err != nil {
 		t.Fatal(err)
@@ -101,6 +104,9 @@ func TestInputTokensExcludeTransportBytes(t *testing.T) {
 		cfg.Normalize()
 		store := runstore.NewDeferred(t.TempDir(), nil, nil)
 		session := agent.NewSession("a", cfg.Agents["a"], "")
+		// Close the raw log opened by ensureRun before the t.TempDir cleanup, or
+		// Windows can't delete the still-open raw/*.log.
+		defer session.Terminate()
 		m := NewModelWithConfig([]*agent.Session{session}, store, cfg, "", nil, time.Millisecond, nil, nil)
 		if err := m.ensureRun(); err != nil {
 			t.Fatal(err)

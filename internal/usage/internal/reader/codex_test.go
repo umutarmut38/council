@@ -129,17 +129,15 @@ func TestCodexReaderClampsMalformedCache(t *testing.T) {
 }
 
 // parseSession skips a rollout that vanished after the walk (ErrNotExist) but
-// surfaces any other open error (perms, ENOTDIR) so reconciliation can note it.
+// surfaces any other open error so reconciliation can note it.
 func TestCodexParseSessionSurfacesRealOpenError(t *testing.T) {
 	r := codexReader{}
 	if _, ok, err := r.parseSession(filepath.Join(t.TempDir(), "gone.jsonl"), "/x"); ok || err != nil {
 		t.Fatalf("missing file: ok=%v err=%v, want false/nil", ok, err)
 	}
-	notADir := filepath.Join(t.TempDir(), "notadir")
-	if err := os.WriteFile(notADir, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := r.parseSession(filepath.Join(notADir, "s.jsonl"), "/x"); err == nil {
-		t.Fatal("a present-but-unopenable path must surface an error, got nil")
+	// A NUL byte makes os.Open fail with EINVAL (not ErrNotExist) on every OS — a
+	// portable stand-in for a real open failure.
+	if _, _, err := r.parseSession("bad\x00name.jsonl", "/x"); err == nil {
+		t.Fatal("a malformed path must surface an error, got nil")
 	}
 }

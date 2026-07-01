@@ -2,7 +2,6 @@ package reader
 
 import (
 	"database/sql"
-	"os"
 	"path/filepath"
 	"testing"
 )
@@ -63,16 +62,14 @@ func TestOpencodeMissingDB(t *testing.T) {
 	}
 }
 
-// Only a MISSING db is silently ignored; a present-but-unreadable path (here a
-// parent that is a regular file, so stat fails with ENOTDIR, not ErrNotExist)
-// must surface the error so reconciliation can explain the failure.
+// Only a MISSING db is silently ignored; any other open/stat error must surface
+// so reconciliation can explain the failure. A NUL byte makes os.Stat fail with
+// EINVAL (not ErrNotExist) on every OS — a portable stand-in for perms/corrupt
+// (unlike a "parent is a file" path, which is ENOTDIR on Unix but ErrNotExist on
+// Windows).
 func TestOpencodeSurfacesRealOpenError(t *testing.T) {
-	notADir := filepath.Join(t.TempDir(), "notadir")
-	if err := os.WriteFile(notADir, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	calls, err := Opencode(filepath.Join(notADir, "opencode.db")).ReadForCWD("/x")
+	calls, err := Opencode("bad\x00name.db").ReadForCWD("/x")
 	if err == nil {
-		t.Fatalf("a present-but-unreadable db path must surface an error, got calls=%v err=nil", calls)
+		t.Fatalf("a malformed db path must surface an error, got calls=%v err=nil", calls)
 	}
 }
