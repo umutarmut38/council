@@ -256,6 +256,22 @@ func TestOverlayAgentUsageInherits(t *testing.T) {
 	}
 }
 
+// The per-agent worktree opt-out is a *bool tri-state: an inheriting agent must
+// be able to override an inherited true back to false, and an unset child must
+// keep the base's value. Guards the overlay propagation.
+func TestOverlayAgentWorktreeOverride(t *testing.T) {
+	yes, no := true, false
+	if out := overlayAgent(AgentConfig{Worktree: &yes}, AgentConfig{Worktree: &no}); out.Worktree == nil || *out.Worktree {
+		t.Fatalf("child worktree:false override lost: %v", out.Worktree)
+	}
+	if out := overlayAgent(AgentConfig{Worktree: &yes}, AgentConfig{}); out.Worktree == nil || !*out.Worktree {
+		t.Fatalf("base worktree not inherited when child unset: %v", out.Worktree)
+	}
+	if out := overlayAgent(AgentConfig{}, AgentConfig{Worktree: &yes}); out.Worktree == nil || !*out.Worktree {
+		t.Fatalf("child worktree:true not applied over unset base: %v", out.Worktree)
+	}
+}
+
 func TestApplyLocalOverrideDeepMerges(t *testing.T) {
 	base := Default()
 	claude := base.Agents["claude"]

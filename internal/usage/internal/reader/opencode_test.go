@@ -2,6 +2,7 @@ package reader
 
 import (
 	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -59,5 +60,19 @@ func TestOpencodeMissingDB(t *testing.T) {
 	calls, err := Opencode(filepath.Join(t.TempDir(), "nope.db")).ReadForCWD("/x")
 	if err != nil || calls != nil {
 		t.Fatalf("missing db should be empty/no-error, got %v / %v", calls, err)
+	}
+}
+
+// Only a MISSING db is silently ignored; a present-but-unreadable path (here a
+// parent that is a regular file, so stat fails with ENOTDIR, not ErrNotExist)
+// must surface the error so reconciliation can explain the failure.
+func TestOpencodeSurfacesRealOpenError(t *testing.T) {
+	notADir := filepath.Join(t.TempDir(), "notadir")
+	if err := os.WriteFile(notADir, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	calls, err := Opencode(filepath.Join(notADir, "opencode.db")).ReadForCWD("/x")
+	if err == nil {
+		t.Fatalf("a present-but-unreadable db path must surface an error, got calls=%v err=nil", calls)
 	}
 }

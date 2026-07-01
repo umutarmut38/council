@@ -1232,6 +1232,9 @@ func overlayAgent(base, child AgentConfig) AgentConfig {
 	if len(child.Role) > 0 {
 		out.Role = child.Role
 	}
+	if child.Worktree != nil { // tri-state: nil inherits, non-nil overrides (incl. false)
+		out.Worktree = child.Worktree
+	}
 	out.Env = mergeEnv(base.Env, child.Env)
 	out.Terminal = overlayTerminal(base.Terminal, child.Terminal)
 	out.Orchestration = overlayOrchestration(base.Orchestration, child.Orchestration)

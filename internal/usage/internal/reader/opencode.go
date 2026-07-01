@@ -3,6 +3,7 @@ package reader
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"time"
@@ -44,7 +45,10 @@ func opencodeModelID(raw string) string {
 func (r opencodeReader) ReadForCWD(cwd string) ([]Call, error) {
 	db, err := openSQLite(r.db)
 	if err != nil {
-		return nil, nil // no db → tool unused
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil // no db → tool unused
+		}
+		return nil, err // a present-but-unreadable db (perms, corrupt) is a real failure
 	}
 	defer db.Close()
 	rows, err := db.Query(`SELECT id, model, tokens_input, tokens_output, tokens_reasoning, time_created
