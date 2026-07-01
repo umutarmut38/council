@@ -31,6 +31,11 @@ council                      # launch all enabled agents
 - `@claude do X` sends to one agent; `@spec.md` inlines a file into your message.
 - `Ctrl+S` saves transcripts; `Ctrl+X` quits.
 
+With [`usage.enabled`](configuration.md#usage) each pane border shows its running
+cost and `/cost` breaks it down; opt into
+[`worktrees.freestyle`](configuration.md#worktrees) to give each pane its own git
+worktree for file isolation and a per-pane cost split.
+
 ## The orchestrator HUD
 
 While a run is active the chrome carries its state, so you never have to
@@ -352,7 +357,10 @@ for you). See [Configuration](configuration.md#per-repo-override).
     builds/base.txt           the commit builds branched from
     transcripts/<phase>/…     cleaned pane transcripts
     raw/<phase>/…             raw PTY logs
+    usage/events.jsonl        per-run cost ledger (when usage.enabled)
   worktrees/<stamp>/<agent>/  per-run build checkouts (branch council/<agent>/<stamp>)
+  workspaces/<agent>/         persistent freestyle worktrees (when worktrees.freestyle)
+  usage/                      price cache, shared across runs
 ```
 
 The run directory is anchored to the directory you launched council from. The
@@ -360,3 +368,10 @@ The run directory is anchored to the directory you launched council from. The
 (`sessions.private`), worktrees are scoped per run so a new run can never
 build in a stale checkout, and `/artifacts` browses all of it without leaving
 the TUI. `council clean-runs --keep 10` prunes old runs.
+
+The per-run build `worktrees/<stamp>/` are disposable — a fresh run always gets a
+new checkout. The freestyle `workspaces/<agent>/` (opt-in via
+[`worktrees.freestyle`](configuration.md#worktrees)) are the opposite: persistent
+and reused across sessions, reset only by `/refresh` and removed by `/clean`. Cost
+tracking ([`usage.enabled`](configuration.md#usage)) writes an `events.jsonl`
+ledger per run and a shared price cache under `.council/usage/`.
