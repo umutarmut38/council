@@ -179,6 +179,12 @@ func launchTUIWithTranscripts(sessions []*agent.Session, store *runstore.Store, 
 
 	model := tui.NewModelWithConfig(sessions, store, cfg, initialPrompt, initialPrompts, time.Duration(cfg.UI.InitialPromptDelayMs)*time.Millisecond, launch, orch)
 	model.SetSetupStatus(setupStatus)
+	// Opt-in freestyle worktrees: only for the interactive freestyle session (a
+	// controller is present in a git repo). CLI single-phase launches pass a nil
+	// controller and never relocate their panes.
+	if cfg.Worktrees.Freestyle && orch != nil {
+		model.SetFreeWorktrees(orchestrate.NewFreeWorktrees(orch.RepoRoot(), cfg.Worktrees))
+	}
 	model.LoadTranscripts(transcripts)
 	// 120 FPS (bubbletea's max): agent PTYs stream constantly, and the default
 	// frame budget makes scrolling output feel choppy.

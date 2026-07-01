@@ -642,7 +642,7 @@ func (m Model) renderPane(index int, width int, height int) []string {
 	// actually shown (e.g. after a resize or scrollback trim).
 	bodyHeight := height - 2
 	body := view.bodyLines(bodyHeight, width-2)
-	state := m.paneBadge(view) + m.usageBorderSuffix(view.Session.Name)
+	state := m.paneBadge(view) + m.usageBorderSuffix(view.Session.Name) + m.worktreeMarker(view.Session.Name)
 	// While scrolled up the view is not live: show a marker so it's obvious new
 	// output is landing below the fold.
 	if view.ScrollOffset > 0 {

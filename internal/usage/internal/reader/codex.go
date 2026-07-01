@@ -112,9 +112,20 @@ func (r codexReader) parseSession(path, cwd string) (Call, bool) {
 		}
 		if l.Type == "event_msg" && l.Payload.Type == "token_count" {
 			u := l.Payload.Info.TotalTokenUsage
-			c.InputTokens = u.InputTokens // cumulative — last one wins
-			c.OutputTokens = u.OutputTokens
+			// codex's total_token_usage.input_tokens is the session's CUMULATIVE
+			// input and INCLUDES the cached (context-reuse) portion. Keep the
+			// cached part separate (priced at the cache-read rate) and record only
+			// the FRESH input in InputTokens — matching claude's convention where
+			// input_tokens excludes cache. Otherwise the re-sent context is
+			// double-counted: once in the Input column at the full rate and again
+			// as CacheRead, badly inflating the reported Input (the 39.9k bug).
+			c.OutputTokens = u.OutputTokens // cumulative — last one wins
 			c.CacheRead = u.CachedInputTokens
+			if fresh := u.InputTokens - u.CachedInputTokens; fresh >= 0 {
+				c.InputTokens = fresh
+			} else {
+				c.InputTokens = u.InputTokens // defensive: never go negative
+			}
 		}
 	}
 	if !matched {

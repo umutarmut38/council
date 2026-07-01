@@ -75,6 +75,17 @@ type phasePromptsMsg map[string]string
 type usageTickMsg struct{}
 type usageReconciledMsg struct{ rollup map[string]reconciledCost }
 type pollArtifactsMsg struct{}
+
+// worktreeState is a freestyle pane's cached freshness relative to repo HEAD.
+type worktreeState struct {
+	behind bool // worktree HEAD differs from repo HEAD
+	dirty  bool // uncommitted changes in the worktree
+}
+
+// worktreeStatusMsg carries on-demand (/refresh) worktree statuses back to the
+// Update loop for the pane border markers. There is no periodic probe — a timed
+// git status on a worktree froze the TUI.
+type worktreeStatusMsg struct{ status map[string]worktreeState }
 type buildProgressMsg struct{}
 
 // buildProgressResultMsg carries the result of an off-thread build-activity
@@ -208,6 +219,15 @@ type Model struct {
 	pendingAdopt *orchestrate.AdoptPlan
 	pendingClean bool
 	progress     *runProgress // cached HUD state; refreshProgress() updates it
+
+	// freeWorktrees manages opt-in per-pane freestyle worktrees
+	// (.council/workspaces/<agent>); nil unless worktrees.freestyle is on in a
+	// git repo. worktreeStatus caches each pane's stale/dirty status, refreshed
+	// off-thread on a slow tick and read by the pane border. Both are only
+	// touched on the Update goroutine (the tick's git work runs in a tea.Cmd and
+	// reports back via worktreeStatusMsg).
+	freeWorktrees  *orchestrate.FreeWorktrees
+	worktreeStatus map[string]worktreeState
 
 	// usage / cost (nil unless usage.enabled): live per-agent token tally,
 	// per-agent resolved price, and the configured model label. Provider session
@@ -401,7 +421,22 @@ func (m *Model) startAll() {
 	if m.launch == nil {
 		return
 	}
+	// Freestyle launches (m.phase == "") route each pane into its own persistent
+	// worktree when the feature is on. Phase relaunches (m.phase != "", e.g.
+	// /plan) are left untouched so orchestration keeps using the launch dir and
+	// run-stamped worktrees. This runs inside the WindowSizeMsg tea.Cmd goroutine
+	// for the initial launch, so the git I/O + Session.Config.CWD write are off
+	// the Update loop and nothing on the View path reads Config.CWD.
+	freestyle := m.phase == "" && m.freeWorktrees != nil
 	for _, v := range m.Agents {
+		// Per-agent opt-out (worktree: false) keeps a pane in the launch dir even
+		// when the feature is on — for tools that need the live tree.
+		if freestyle && m.Config.FreestyleWorktree(v.Session.Name) {
+			if path, err := m.freeWorktrees.Ensure(v.Session.Name); err == nil && path != "" {
+				v.Session.Config.CWD = path
+			}
+			// On error, fall back to the launch cwd — never leave a pane dead.
+		}
 		m.launch(v.Session)
 	}
 }
@@ -465,6 +500,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.usageReconcileBusy = false
 		if msg.rollup != nil {
 			m.usageReconciled = msg.rollup
+		}
+		return m, nil
+	case worktreeStatusMsg:
+		// Staleness is probed only on demand (/refresh), never on a timer — a
+		// periodic `git status` on a worktree froze the TUI. Merge the result so
+		// a budgeted (partial) probe still updates the panes it reached.
+		if m.worktreeStatus == nil {
+			m.worktreeStatus = map[string]worktreeState{}
+		}
+		for name, st := range msg.status {
+			m.worktreeStatus[name] = st
 		}
 		return m, nil
 	case AgentExitMsg:

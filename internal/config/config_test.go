@@ -201,6 +201,48 @@ agents:
 	}
 }
 
+// Regression: the opt-in worktrees block must survive the repo-overlay merge.
+// ApplyLocalOverride is a key-by-key switch, so without a "worktrees" case a
+// repo-local worktrees.freestyle silently vanished when a global config was
+// present and the feature never activated.
+func TestApplyLocalOverrideWorktrees(t *testing.T) {
+	base := Default() // global config has no worktrees block
+	local := []byte("worktrees:\n  freestyle: true\n  seed:\n    - .env\n")
+	merged, err := ApplyLocalOverride(base, local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !merged.Worktrees.Freestyle {
+		t.Fatalf("worktrees.freestyle dropped by overlay: %+v", merged.Worktrees)
+	}
+	if len(merged.Worktrees.Seed) != 1 || merged.Worktrees.Seed[0] != ".env" {
+		t.Fatalf("worktrees.seed dropped by overlay: %+v", merged.Worktrees.Seed)
+	}
+}
+
+// Guardrail: every top-level Config section must be reachable by
+// ApplyLocalOverride so a new section can never silently vanish from the repo
+// overlay (the worktrees bug). A section is reachable if it has a bespoke merge
+// case or is covered by the generic topLevelOverlayFields map.
+func TestApplyLocalOverrideReachesEverySection(t *testing.T) {
+	special := map[string]bool{ // sections with bespoke merge handlers
+		"agents":                 true,
+		"personalities":          true,
+		"personality_categories": true,
+	}
+	covered := topLevelOverlayFields(&Config{})
+	ct := reflect.TypeOf(Config{})
+	for i := 0; i < ct.NumField(); i++ {
+		name := strings.SplitN(ct.Field(i).Tag.Get("yaml"), ",", 2)[0]
+		if name == "" || name == "-" || special[name] {
+			continue
+		}
+		if _, ok := covered[name]; !ok {
+			t.Errorf("top-level section %q is not reachable by ApplyLocalOverride; it would silently vanish from the repo overlay", name)
+		}
+	}
+}
+
 // An inheriting agent keeps the base's usage bindings, overriding only what it sets.
 func TestOverlayAgentUsageInherits(t *testing.T) {
 	base := AgentConfig{Usage: AgentUsageConfig{Model: "gpt-5", Tool: "codex", PriceProfile: "p"}}

@@ -75,7 +75,8 @@ See [Workflows → Personalities](workflows.md#personalities-categories-and-targ
 | `/report` | Write `report.md` for the run and open it in the viewer. |
 | `/artifacts` | Browse the run's plans, votes, diffs, check logs, reviews, and transcripts in a split view: the list on the left, the selected file open in the **integrated editor** (`ui.editor`) on the right. `↑/↓` select · `Enter` opens it in the editor pane (editable) · `Tab` jumps into the pane · `F2`/`Ctrl+O` back to the list · `e` opens it in the external configured editor (`ui.editor`, else `$VISUAL`/`$EDITOR`/`vim`) instead. |
 | `/edit [path]` | **Integrated editor.** A collapsible file-tree sidebar on the left and the configured editor (`ui.editor`, e.g. `nvim`) running inside council as a PTY pane on the right. `↑/↓` move, `→`/`Enter` expand a folder or open a file, `←` collapse, `Tab` jump to the editor pane. In the pane, keystrokes (including `Esc`) go to the editor; `F2`/`Ctrl+O` returns to the tree. Selecting another file opens it in the live editor via `ui.editor_open_cmd` (default `:e {path}`, tuned for vim/nvim). With a `path` argument that file is opened immediately. |
-| `/clean` | Two-step removal: first call previews the worktrees/branches; `/clean confirm` removes them. |
+| `/clean` | Two-step removal: first call previews the run-stamped worktrees/branches **and** any persistent freestyle worktrees (`.council/workspaces`, when `worktrees.freestyle` is on); `/clean confirm` removes them. |
+| `/refresh [agent\|all] [force]` | Reset a **freestyle worktree** (`worktrees.freestyle`) to the repo HEAD and re-seed it — the only reset path for a persistent worktree. Defaults to the focused pane; `/refresh all` does every freestyle pane. Refuses when the worktree has uncommitted changes unless you append `force` (which discards them). The pane border shows a stale marker (`⟳` when behind HEAD, `*` when dirty). |
 
 ### Recovery
 

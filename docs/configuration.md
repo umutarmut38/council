@@ -406,6 +406,7 @@ A map of agent name to config; the name labels the pane and artifacts.
 | `terminal` | object | — | Rendering and prompt-delivery settings (see `agents.<name>.terminal`). |
 | `orchestration` | object | — | Per-phase behavior (see `agents.<name>.orchestration`). |
 | `usage` | object | — | Cost-tracking binding for this agent (see `agents.<name>.usage`). |
+| `worktree` | bool | — | Override `worktrees.freestyle` for this agent (tri-state). `false` keeps the agent in council's working directory even when freestyle worktrees are on — use it for tools that need the live tree (installed `node_modules`, build output, uncommitted state) that a clean detached worktree lacks (e.g. `copilot`). Unset follows `worktrees.freestyle`. |
 
 ### `agents.<name>.terminal`
 
@@ -547,6 +548,15 @@ Limits for `@path` file-reference expansion in prompts and issues.
 | `order` | int | `0` | Sort order within groupings. |
 | `prompt_prefix` | string | — | Text prepended to prompts sent to this agent. |
 
+### `worktrees`
+
+Opt-in per-pane isolation for freestyle (non-orchestration) panes. Off by default; orchestration (`/plan` and its run-stamped build worktrees) is unaffected.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `freestyle` | bool | `false` | Give each freestyle pane its own persistent, repo-local git worktree at `.council/workspaces/<agent>` (a distinct cwd — enables per-pane cost when `usage.enabled`, plus file isolation). Reused across sessions and never auto-reset; a stale marker (`⟳` behind HEAD, `*` dirty) shows drift and `/refresh` resets it. No-op outside a git repo. |
+| `seed` | list | — | Extra files/globs (relative to the repo root) copied into each worktree on create, on top of the built-in instruction-file allowlist (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `QWEN.md`, `.cursorrules`, `.github/copilot-instructions.md`, `.mcp.json`). |
+
 ### `usage`
 
 Local, provider-agnostic cost/usage ledger. Off by default; all data stays under `.council/`.
@@ -561,8 +571,6 @@ Local, provider-agnostic cost/usage ledger. Off by default; all data stays under
 | `stale_price_after_days` | int | `60` | Warn when a user price profile's `reviewed_at` is older than this. |
 | `model_aliases` | map | — | Map a model name council sees to one the price tables know. |
 | `prices` | map | — | User-reviewed price profiles (see `usage.prices.<name>`). |
-| `session_attribution` | string | `cumulative` | How reported per-pane costs are split: `cumulative` keeps panes in the shared repo and combines same-tool/same-cwd usage; `isolated` runs each pane in its own git worktree (distinct cwd) for exact per-pane costs (committed tree + auto-copied untracked-but-not-ignored files; not uncommitted edits). |
-| `isolate_copy` | list | — | Extra paths/globs (relative to the repo root) to copy into each isolated pane's worktree, for gitignored files an agent needs (e.g. `.env`). Untracked-but-not-ignored files are copied automatically. |
 
 ### `usage.prices.<name>`
 
@@ -585,5 +593,4 @@ Binds explicit usage metadata for cost tracking. Council never inspects `agents.
 | `model` | string | — | Observed model name to use for estimated pricing until a provider-session report supplies a concrete model. |
 | `price_profile` | string | — | A `usage.prices` entry; when set it wins over the price tables. |
 | `tool` | string | — | Native provider-session reader to enable for this agent, e.g. `claude`, `codex`, `copilot`, `cursor`, `opencode`. |
-| `isolate` | bool | — | Override `usage.session_attribution` for this agent: `true` gives it a private per-pane session store, `false` keeps it on the shared store, unset follows the global mode. |
 <!-- END GENERATED: config-schema -->

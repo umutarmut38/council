@@ -19,7 +19,7 @@ func mustTime(s string) time.Time {
 	return t
 }
 
-// lookup returns rd for the given tool, nil otherwise.
+// lookup returns rd for the given tool (the cumulative/global reader), nil otherwise.
 func lookup(tool string, rd reader.Reader) func(string) reader.Reader {
 	return func(t string) reader.Reader {
 		if t == tool {
@@ -53,7 +53,6 @@ func TestReconcileOnlyUsesAgentsOwnTool(t *testing.T) {
 		{Agent: "codex-a", Tool: "codex", At: "2026-06-27T10:00:00Z", CWD: "/w/a", Confidence: Estimated, InputTokens: 5},
 	}
 	claudeRd := fakeReader{calls: map[string][]reader.Call{"/w/a": {{Model: "claude", InputTokens: 100}}}}
-	// Only a claude reader exists; the agent's tool is codex → no reconcile.
 	if rep := reconcileWith(events, lookup("claude", claudeRd)).Events; len(rep) != 0 {
 		t.Fatalf("must not charge another tool's session, got %+v", rep)
 	}
@@ -91,71 +90,86 @@ func TestReconcilePerModel(t *testing.T) {
 	}
 }
 
-// Several same-tool agents sharing one cwd with no personality fingerprint can't
-// be told apart → no reconcile, estimates stand (no pane charged for another's
-// spend).
-func TestReconcileMultipleSameToolSameCWD(t *testing.T) {
+// Cumulative mode: several same-tool agents in one cwd are NOT split per pane —
+// the shared/global store can't tell them apart, so their usage is reported as
+// one combined row (labeled by tool) that replaces both estimates.
+func TestReconcileCumulativeCombinesSameTool(t *testing.T) {
 	events := []Event{
 		{Agent: "claude-a", Tool: "claude", CWD: "/repo", At: "2026-06-27T10:00:00Z", Confidence: Estimated, InputTokens: 5},
 		{Agent: "claude-b", Tool: "claude", CWD: "/repo", At: "2026-06-27T10:00:01Z", Confidence: Estimated, InputTokens: 5},
 	}
 	rd := fakeReader{calls: map[string][]reader.Call{"/repo": {
-		{Model: "m", Timestamp: mustTime("2026-06-27T10:00:05Z"), InputTokens: 100},
+		{Model: "m", Timestamp: mustTime("2026-06-27T10:00:05Z"), InputTokens: 100, OutputTokens: 10},
+		{Model: "m", Timestamp: mustTime("2026-06-27T10:00:06Z"), InputTokens: 200, OutputTokens: 20},
 	}}}
-	if rep := reconcileWith(events, lookup("claude", rd)).Events; len(rep) != 0 {
-		t.Fatalf("multiple same-tool agents must not reconcile, got %+v", rep)
+	rep := reconcileWith(events, lookup("claude", rd)).Events
+	if len(rep) != 1 || rep[0].Agent != "claude" || rep[0].InputTokens != 300 || rep[0].OutputTokens != 30 {
+		t.Fatalf("cumulative should combine same-tool into one 300/30 row, got %+v", rep)
+	}
+	if len(rep[0].Replaces) != 2 {
+		t.Fatalf("combined row should replace both pane estimates, got replaces=%v", rep[0].Replaces)
 	}
 }
 
-// Same-tool agents in one cwd are told apart by the personality prefix that
-// starts each session's first user message.
-func TestReconcileSameToolDisambiguatedByFingerprint(t *testing.T) {
+// Isolated mode: each pane runs in its OWN worktree (distinct cwd), so the same
+// (tool,cwd) grouping attributes per pane — no shared store, no fingerprint.
+func TestReconcileIsolatedDistinctCWD(t *testing.T) {
 	events := []Event{
-		{Agent: "claude-architect", Tool: "claude", CWD: "/repo", At: "2026-06-27T10:00:00Z", Confidence: Estimated, Fingerprint: "You are The Architect. Think in systems.", InputTokens: 5},
-		{Agent: "claude-skeptic", Tool: "claude", CWD: "/repo", At: "2026-06-27T10:00:01Z", Confidence: Estimated, Fingerprint: "You are The Skeptic. Question everything.", InputTokens: 5},
+		{Agent: "claude-a", Tool: "claude", CWD: "/wt/a", At: "2026-06-27T10:00:00Z", Confidence: Estimated, InputTokens: 5},
+		{Agent: "claude-b", Tool: "claude", CWD: "/wt/b", At: "2026-06-27T10:00:01Z", Confidence: Estimated, InputTokens: 5},
 	}
-	rd := fakeReader{calls: map[string][]reader.Call{"/repo": {
-		{Model: "m", UserMessage: "You are The Architect. Think in systems.\n\nDo the plan.", InputTokens: 100, OutputTokens: 10},
-		{Model: "m", UserMessage: "You are The Skeptic. Question everything.\n\nDo the plan.", InputTokens: 200, OutputTokens: 20},
-	}}}
+	rd := fakeReader{calls: map[string][]reader.Call{
+		"/wt/a": {{Model: "m", InputTokens: 100, OutputTokens: 10}},
+		"/wt/b": {{Model: "m", InputTokens: 200, OutputTokens: 20}},
+	}}
 	rep := reconcileWith(events, lookup("claude", rd)).Events
 	byAgent := map[string]Event{}
 	for _, e := range rep {
 		byAgent[e.Agent] = e
 	}
-	if byAgent["claude-architect"].InputTokens != 100 || byAgent["claude-skeptic"].InputTokens != 200 {
-		t.Fatalf("fingerprint routing wrong: %+v", rep)
+	if byAgent["claude-a"].InputTokens != 100 || byAgent["claude-b"].InputTokens != 200 {
+		t.Fatalf("distinct worktree cwds should attribute per pane, got %+v", rep)
 	}
 }
 
-func TestReconcileSharedFingerprintUsesUniquePromptMatch(t *testing.T) {
-	fp := "You are The Architect. Think in systems."
-	a := Event{Agent: "claude-a", Tool: "claude", CWD: "/repo", At: "2026-06-27T10:00:00Z", Confidence: Estimated, Fingerprint: fp, PromptPreview: fp + " Build the parser.", PromptHash: "a", InputTokens: 5}
-	b := Event{Agent: "claude-b", Tool: "claude", CWD: "/repo", At: "2026-06-27T10:00:01Z", Confidence: Estimated, Fingerprint: fp, PromptPreview: fp + " Build the UI.", PromptHash: "b", InputTokens: 5}
-	a.normalize()
-	b.normalize()
-	rd := fakeReader{calls: map[string][]reader.Call{"/repo": {
-		{Model: "m", UserMessage: fp + "\n\nBuild the UI.", InputTokens: 200},
-	}}}
-	rep := reconcileWith([]Event{a, b}, lookup("claude", rd)).Events
-	if len(rep) != 1 || rep[0].Agent != "claude-b" || rep[0].InputTokens != 200 {
-		t.Fatalf("unique prompt match should pick claude-b, got %+v", rep)
-	}
-}
-
-// Two panes with the SAME personality share a fingerprint → a session matches
-// both → ambiguous → estimate stands rather than charge the wrong pane.
-func TestReconcileSharedFingerprintStaysEstimated(t *testing.T) {
-	fp := "You are The Architect. Think in systems."
+// Codex records are per-session cumulative snapshots that the reader collapses to
+// one fresh-input Call per session (see codex reader). Reconcile then sums the
+// distinct sessions in a cwd. This proves the reconciled Input is the sum of the
+// FRESH inputs with cache kept in its own column — never folding cache back into
+// Input (the 39.9k over-count). It also documents that combining several codex
+// sessions sharing a cwd sums them (what distinct stable workspaces then split
+// into per-pane rows).
+func TestReconcileCodexInputExcludesCacheAndSumsSessions(t *testing.T) {
 	events := []Event{
-		{Agent: "claude-a", Tool: "claude", CWD: "/repo", At: "2026-06-27T10:00:00Z", Confidence: Estimated, Fingerprint: fp},
-		{Agent: "claude-b", Tool: "claude", CWD: "/repo", At: "2026-06-27T10:00:01Z", Confidence: Estimated, Fingerprint: fp},
+		{Agent: "codex-a", Tool: "codex", CWD: "/repo", At: "2026-06-27T10:00:00Z", Confidence: Estimated, InputTokens: 55},
+		{Agent: "codex-b", Tool: "codex", CWD: "/repo", At: "2026-06-27T10:00:01Z", Confidence: Estimated, InputTokens: 55},
 	}
+	// Two codex sessions in one cwd; each Call already carries FRESH input +
+	// separate cache (post-reader-fix shape): 8807 fresh + 4480 cache, 9837 + 3456.
 	rd := fakeReader{calls: map[string][]reader.Call{"/repo": {
-		{Model: "m", UserMessage: fp + "\n\nGo.", InputTokens: 100},
+		{Model: "gpt-5.4-mini", SessionID: "s1", Timestamp: mustTime("2026-06-27T10:00:05Z"), InputTokens: 8807, CacheRead: 4480, OutputTokens: 25},
+		{Model: "gpt-5.4-mini", SessionID: "s2", Timestamp: mustTime("2026-06-27T10:00:06Z"), InputTokens: 9837, CacheRead: 3456, OutputTokens: 61},
 	}}}
-	if rep := reconcileWith(events, lookup("claude", rd)).Events; len(rep) != 0 {
-		t.Fatalf("shared fingerprint must stay estimated, got %+v", rep)
+	rep := reconcileWith(events, lookup("codex", rd)).Events
+	if len(rep) != 1 {
+		t.Fatalf("want one combined codex row, got %+v", rep)
+	}
+	e := rep[0]
+	// Input is the sum of the FRESH inputs (8807+9837), NOT the cache-inflated
+	// totals (13287+13293=26580) and NOT with cache folded in.
+	if e.InputTokens != 18644 {
+		t.Fatalf("Input = %d, want 18644 (fresh 8807+9837, no cache)", e.InputTokens)
+	}
+	if e.CacheReadTokens != 7936 {
+		t.Fatalf("CacheRead = %d, want 7936 (4480+3456), tracked separately", e.CacheReadTokens)
+	}
+	if e.OutputTokens != 86 {
+		t.Fatalf("Output = %d, want 86", e.OutputTokens)
+	}
+	// The aggregated Input column must show the fresh total, never Input+cache.
+	s := Aggregate(append(events, rep...))
+	if s.Tokens.Input != 18644 {
+		t.Fatalf("aggregated Input = %d, want 18644 (cache excluded from the Input column)", s.Tokens.Input)
 	}
 }
 

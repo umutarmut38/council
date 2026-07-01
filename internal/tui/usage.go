@@ -236,7 +236,13 @@ func (m Model) recordUsageInput(s *agent.Session, phase, userText string) {
 	prompt := m.Config.PromptForAgent(s.Name, userText)
 	wire := linePayload(s.Config.Terminal, prompt)
 	est := usage.EstimatorFor(m.Config.Usage.Estimator)
-	inputTokens, inputChars := est.Estimate(wire)
+	// Estimate the input from the SEMANTIC prompt (personality prefix + user
+	// text) the model actually sees — not the wire payload. For paste-mode agents
+	// (codex/copilot) linePayload wraps the text in bracketed-paste
+	// (\x1b[200~…\x1b[201~) plus submit/before/after control bytes; counting
+	// those transport bytes under bytes4 inflated the input tokens. WireInputChars
+	// stays as a transport diagnostic.
+	inputTokens, inputChars := est.Estimate(prompt)
 	_, userChars := est.Estimate(userText)
 	_, wireChars := est.Estimate(wire)
 	a := m.Config.Agents[s.Name]

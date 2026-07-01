@@ -82,6 +82,55 @@ func usageConfigOn() config.UsageConfig {
 	return config.UsageConfig{Enabled: true, Currency: "USD", Estimator: usage.EstimatorBytes4}
 }
 
+// Regression for #3: a paste-mode agent's recorded input estimate must be the
+// SEMANTIC prompt, excluding the bracketed-paste (\x1b[200~…\x1b[201~) and
+// submit control bytes that only exist on the wire — so it equals a type-mode
+// agent's estimate for the same text. WireInputChars keeps the transport size.
+func TestInputTokensExcludeTransportBytes(t *testing.T) {
+	record := func(sendMode string) usage.Event {
+		cfg := config.Config{
+			Usage: usageConfigOn(),
+			Agents: map[string]config.AgentConfig{
+				"a": {
+					Command:  []string{"tool"},
+					Usage:    config.AgentUsageConfig{Tool: "claude"},
+					Terminal: config.TerminalConfig{SendMode: sendMode, SubmitSequence: "cr"},
+				},
+			},
+		}
+		cfg.Normalize()
+		store := runstore.NewDeferred(t.TempDir(), nil, nil)
+		session := agent.NewSession("a", cfg.Agents["a"], "")
+		m := NewModelWithConfig([]*agent.Session{session}, store, cfg, "", nil, time.Millisecond, nil, nil)
+		if err := m.ensureRun(); err != nil {
+			t.Fatal(err)
+		}
+		m.recordUsageInput(session, "plan", "Refactor the parser.")
+		events, err := usage.LoadEvents(store.RunDir)
+		if err != nil || len(events) != 1 {
+			t.Fatalf("events: %v (%d)", err, len(events))
+		}
+		return events[0]
+	}
+	paste := record("paste")
+	typed := record("type")
+
+	if paste.InputTokens != typed.InputTokens || paste.InputTokens == 0 {
+		t.Fatalf("paste input tokens (%d) should equal type-mode (%d) for the same text", paste.InputTokens, typed.InputTokens)
+	}
+	if paste.InputChars != typed.InputChars {
+		t.Fatalf("paste input chars (%d) should equal type-mode (%d)", paste.InputChars, typed.InputChars)
+	}
+	// The paste wire is strictly larger than the semantic estimate (transport
+	// bytes), and larger than the type-mode wire (bracketed-paste wrapper).
+	if paste.WireInputChars <= paste.InputChars {
+		t.Fatalf("paste WireInputChars (%d) should exceed the semantic InputChars (%d)", paste.WireInputChars, paste.InputChars)
+	}
+	if paste.WireInputChars <= typed.WireInputChars {
+		t.Fatalf("paste wire (%d) should exceed type-mode wire (%d) by the bracketed-paste bytes", paste.WireInputChars, typed.WireInputChars)
+	}
+}
+
 // /cost reconciliation rolls up per agent so the live header/badge can show the
 // reported cost: a priced reported session, a mixed agent (weakest tier wins),
 // and an agent whose model never priced.

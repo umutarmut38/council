@@ -402,6 +402,8 @@ func (m *Model) handleCommand(text string) (bool, tea.Cmd) {
 		m.cmdSetup()
 	case "clean":
 		m.cmdClean(rest)
+	case "refresh":
+		return true, m.cmdRefresh(rest)
 	case "save":
 		if err := m.saveTranscripts(); err != nil {
 			m.Status = "save failed: " + err.Error()

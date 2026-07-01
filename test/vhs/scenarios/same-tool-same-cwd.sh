@@ -44,9 +44,19 @@ JSONL
     ;;
   assert)
     events="$WORK/.council/runs/$run/usage/events.jsonl"
-    assert_grep '"agent":"claude-a".*"source":"provider.session"' "$events"
-    assert_grep '"agent":"claude-b".*"source":"provider.session"' "$events"
-    grep '"source":"provider.session"' "$events" | grep -Eo '"(agent|source|model|replaces)":"[^"]*"'
+    # Free-chat contract: two instances of the same tool in one cwd cannot be
+    # told apart, so they reconcile into ONE combined row labeled by the tool
+    # (claude), summing both sessions (100+200=300) — honest, never guessed per
+    # pane. Reconcile via `council cost` (idempotent) and assert the combine.
+    "$COUNCIL_BIN" cost "$run" >"$CASE_DIR/cost.out"
+    count="$(grep -c '"source":"provider.session"' "$events")"
+    [[ "$count" == "1" ]] || { echo "expected ONE combined provider row, got $count" >&2; cat "$CASE_DIR/cost.out" >&2; exit 1; }
+    assert_grep '"agent":"claude",.*"source":"provider.session"' "$events"       # combined, tool-labeled
+    assert_not_grep '"agent":"claude-a".*"source":"provider.session"' "$events"  # not split per pane
+    assert_not_grep '"agent":"claude-b".*"source":"provider.session"' "$events"
+    assert_grep 'claude-sonnet-4-6' "$CASE_DIR/cost.out"
+    assert_grep '300' "$CASE_DIR/cost.out"                                        # 100 + 200 summed
+    grep '"source":"provider.session"' "$events" | grep -Eo '"(agent|source|model)":"[^"]*"|"input_tokens":[0-9]*'
     pass
     ;;
 esac

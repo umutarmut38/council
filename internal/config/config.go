@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -38,6 +39,12 @@ type AgentConfig struct {
 	Terminal      TerminalConfig      `yaml:"terminal"`
 	Orchestration OrchestrationConfig `yaml:"orchestration,omitempty"`
 	Usage         AgentUsageConfig    `yaml:"usage,omitempty"`
+	// Worktree overrides the global worktrees.freestyle for this agent
+	// (tri-state): false keeps the agent in council's working directory even when
+	// freestyle worktrees are on — for tools that need the live tree (installed
+	// node_modules, build output, uncommitted state) a clean detached checkout
+	// lacks. Unset follows worktrees.freestyle.
+	Worktree *bool `yaml:"worktree,omitempty"`
 }
 
 // Orchestration roles. Roles are structural (which phase an agent joins) and are
@@ -446,11 +453,28 @@ type Config struct {
 	PersonalityCategories map[string]PersonalityCategoryConfig `yaml:"personality_categories,omitempty"`
 	Personalities         map[string]PersonalityConfig         `yaml:"personalities,omitempty"`
 	Usage                 UsageConfig                          `yaml:"usage,omitempty"`
+	Worktrees             WorktreesConfig                      `yaml:"worktrees,omitempty"`
 
 	// ExperimentalIgnored is computed by Normalize: true when env/setup were
 	// present but dropped because the experimental gate was off. Never
 	// serialized; used to surface a single warning via SelectAgents.
 	ExperimentalIgnored bool `yaml:"-"`
+}
+
+// WorktreesConfig is the opt-in freestyle-worktree feature: when Freestyle is
+// on, each freestyle (non-orchestration) pane runs in its own persistent,
+// repo-local git worktree at .council/workspaces/<agent> — a distinct cwd that
+// gives per-pane cost attribution (when usage is on) and file isolation.
+// Worktrees are reused across sessions and never auto-reset; the only reset path
+// is an explicit /refresh or /clean. Orchestration (/plan and the run-stamped
+// build worktrees) is unaffected. Off by default.
+type WorktreesConfig struct {
+	// Freestyle opts every freestyle pane into its own .council/workspaces/<agent>
+	// worktree. Off by default (all panes run in council's working directory).
+	Freestyle bool `yaml:"freestyle,omitempty"`
+	// Seed lists extra files/globs (relative to the repo root) copied into each
+	// worktree on create, on top of the built-in agent-instruction allowlist.
+	Seed []string `yaml:"seed,omitempty"`
 }
 
 // ExperimentalConfig gates opt-in, not-yet-stable features.
@@ -464,6 +488,21 @@ type ExperimentalConfig struct {
 // SetupEnvEnabled reports whether the experimental env/setup hooks are on.
 // They are off unless explicitly enabled.
 func (c Config) SetupEnvEnabled() bool { return c.Experimental.SetupEnv }
+
+// FreestyleWorktree reports whether an agent's freestyle (non-orchestration)
+// pane should run in its own persistent worktree: the global worktrees.freestyle
+// must be on, and the agent's per-agent `worktree` override (when set) wins —
+// so a tool that misbehaves in a clean checkout (e.g. copilot needing
+// node_modules) can be kept in the working directory with `worktree: false`.
+func (c Config) FreestyleWorktree(agent string) bool {
+	if !c.Worktrees.Freestyle {
+		return false
+	}
+	if a, ok := c.Agents[agent]; ok && a.Worktree != nil {
+		return *a.Worktree
+	}
+	return true
+}
 
 // SetupCommand is a command council runs before launching agents.
 type SetupCommand struct {
@@ -639,9 +678,14 @@ func sameFile(a, b string) bool {
 	return errA == nil && errB == nil && os.SameFile(fa, fb)
 }
 
-// ApplyLocalOverride merges a local config document onto cfg. Top-level sections
-// (ui, sessions, review) and each agent are deep-merged, so a local file only
-// needs to specify the keys it wants to change.
+// ApplyLocalOverride merges a local config document onto cfg. Every top-level
+// section merges automatically: the default path decodes the local node onto the
+// matching Config field (by yaml tag), and yaml.v3 already merges maps and
+// overlays only the struct fields present — so a local file only needs the keys
+// it wants to change. Only sections that need bespoke merge semantics get an
+// explicit case (agents overlay per agent; personalities and
+// personality_categories merge per entry). A new plain top-level section needs
+// no code here and can never silently vanish. See topLevelOverlayFields.
 func ApplyLocalOverride(cfg Config, raw []byte) (Config, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(raw, &doc); err != nil {
@@ -650,60 +694,12 @@ func ApplyLocalOverride(cfg Config, raw []byte) (Config, error) {
 	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
 		return cfg, nil
 	}
+	fields := topLevelOverlayFields(&cfg)
 	root := doc.Content[0]
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		key := root.Content[i].Value
 		val := root.Content[i+1]
 		switch key {
-		case "ui":
-			if err := val.Decode(&cfg.UI); err != nil {
-				return cfg, err
-			}
-		case "sessions":
-			if err := val.Decode(&cfg.Sessions); err != nil {
-				return cfg, err
-			}
-		case "review":
-			if err := val.Decode(&cfg.Review); err != nil {
-				return cfg, err
-			}
-		case "files":
-			if err := val.Decode(&cfg.Files); err != nil {
-				return cfg, err
-			}
-		case "policy":
-			if err := val.Decode(&cfg.Policy); err != nil {
-				return cfg, err
-			}
-		case "usage":
-			// Decode onto the existing usage so a repo overlay can add price
-			// profiles/aliases without dropping any set globally.
-			if err := val.Decode(&cfg.Usage); err != nil {
-				return cfg, err
-			}
-		case "experimental":
-			// A trusted local config can opt into the experimental hooks.
-			if err := val.Decode(&cfg.Experimental); err != nil {
-				return cfg, err
-			}
-		case "env":
-			// Deep-merge: local keys add to / override the global env.
-			merged := map[string]string{}
-			if err := val.Decode(&merged); err != nil {
-				return cfg, err
-			}
-			if cfg.Env == nil {
-				cfg.Env = map[string]string{}
-			}
-			for k, v := range merged {
-				cfg.Env[k] = v
-			}
-		case "setup":
-			// A local setup list replaces the global one wholesale (running
-			// both global and repo setup would be surprising).
-			if err := val.Decode(&cfg.Setup); err != nil {
-				return cfg, err
-			}
 		case "personality_categories":
 			if err := mergePersonalityCategories(&cfg, val); err != nil {
 				return cfg, err
@@ -728,9 +724,39 @@ func ApplyLocalOverride(cfg Config, raw []byte) (Config, error) {
 				}
 				cfg.Agents[name] = merged
 			}
+		default:
+			// Any other top-level section merges generically onto its Config
+			// field (yaml.v3 overlays present keys / merges maps). Unknown keys
+			// (typos, comments) are ignored, as before.
+			f, ok := fields[key]
+			if !ok {
+				continue
+			}
+			if err := val.Decode(f.Addr().Interface()); err != nil {
+				return cfg, err
+			}
 		}
 	}
 	return cfg, nil
+}
+
+// topLevelOverlayFields maps each of Config's top-level yaml keys to its
+// addressable field on cfg, so ApplyLocalOverride merges any plain section
+// generically instead of via a per-section case. Fields without a yaml tag (or
+// tagged "-") are skipped. The bespoke-merge sections (agents, personalities,
+// personality_categories) are handled explicitly and do not use this map.
+func topLevelOverlayFields(cfg *Config) map[string]reflect.Value {
+	out := map[string]reflect.Value{}
+	cv := reflect.ValueOf(cfg).Elem()
+	ct := cv.Type()
+	for i := 0; i < ct.NumField(); i++ {
+		name := strings.SplitN(ct.Field(i).Tag.Get("yaml"), ",", 2)[0]
+		if name == "" || name == "-" {
+			continue
+		}
+		out[name] = cv.Field(i)
+	}
+	return out
 }
 
 func mergePersonalityCategories(cfg *Config, val *yaml.Node) error {

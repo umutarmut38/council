@@ -162,6 +162,7 @@ var composerCommands = []Composer{
 	{Name: "cost", Args: "", Desc: "per-session usage and estimated cost"},
 	{Name: "setup", Args: "", Desc: "show pre-launch setup/env status"},
 	{Name: "clean", Args: "", Desc: "preview then remove council worktrees (confirm to remove)"},
+	{Name: "refresh", Args: "[agent|all] [force]", Desc: "reset a freestyle pane's worktree to HEAD (force discards uncommitted changes)"},
 	{Name: "help", Args: "", Desc: "list commands"},
 	{Name: "quit", Aliases: []string{"exit"}, Args: "", Desc: "quit council", Key: "Ctrl+X"},
 }
