@@ -107,3 +107,39 @@ func TestCodexReaderSkipsOtherCWD(t *testing.T) {
 		t.Fatalf("should skip non-matching cwd, got %+v", calls)
 	}
 }
+
+// A malformed record with cached_input_tokens > input_tokens must be clamped so
+// InputTokens stays >= 0 and InputTokens+CacheRead == the reported input.
+func TestCodexReaderClampsMalformedCache(t *testing.T) {
+	root := t.TempDir()
+	writeRollout(t, root, `{"type":"session_meta","timestamp":"2026-06-28T10:00:00Z","payload":{"cwd":"/work/proj","session_id":"sc"}}
+{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":5,"cached_input_tokens":999}}}}
+`)
+	calls, err := Codex(root).ReadForCWD("/work/proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("got %d calls, want 1", len(calls))
+	}
+	c := calls[0]
+	if c.InputTokens != 0 || c.CacheRead != 100 || c.InputTokens+c.CacheRead != 100 {
+		t.Fatalf("got %d in / %d cache, want 0 / 100 (cached clamped to input)", c.InputTokens, c.CacheRead)
+	}
+}
+
+// parseSession skips a rollout that vanished after the walk (ErrNotExist) but
+// surfaces any other open error (perms, ENOTDIR) so reconciliation can note it.
+func TestCodexParseSessionSurfacesRealOpenError(t *testing.T) {
+	r := codexReader{}
+	if _, ok, err := r.parseSession(filepath.Join(t.TempDir(), "gone.jsonl"), "/x"); ok || err != nil {
+		t.Fatalf("missing file: ok=%v err=%v, want false/nil", ok, err)
+	}
+	notADir := filepath.Join(t.TempDir(), "notadir")
+	if err := os.WriteFile(notADir, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := r.parseSession(filepath.Join(notADir, "s.jsonl"), "/x"); err == nil {
+		t.Fatal("a present-but-unopenable path must surface an error, got nil")
+	}
+}

@@ -3,6 +3,7 @@ package reader
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -65,13 +66,18 @@ func (r codexReader) rollouts() []string {
 	return out
 }
 
-// parseSession reads one rollout file. ok is false when its cwd != target.
-// parseSession reads cumulative total_token_usage from the last token_count
-// event; cached_input stays separate so pricing can apply cache-read rates.
-func (r codexReader) parseSession(path, cwd string) (Call, bool) {
+// parseSession reads one rollout file. ok is false when its cwd != target. A
+// non-nil error means a real read failure (perms, other FS error); a file that
+// vanished since the walk (os.ErrNotExist) is skipped without error. It reads
+// cumulative total_token_usage from the last token_count event; cached_input
+// stays separate so pricing can apply cache-read rates.
+func (r codexReader) parseSession(path, cwd string) (Call, bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return Call{}, false
+		if errors.Is(err, os.ErrNotExist) {
+			return Call{}, false, nil // raced with deletion since the walk → skip
+		}
+		return Call{}, false, err // perms / other FS error → surface
 	}
 	defer f.Close()
 	sc := bufio.NewScanner(f)
@@ -88,7 +94,7 @@ func (r codexReader) parseSession(path, cwd string) (Call, bool) {
 			first = false
 			if l.Type == "session_meta" {
 				if l.Payload.Cwd != cwd {
-					return Call{}, false // wrong project — skip without reading the rest
+					return Call{}, false, nil // wrong project — skip without reading the rest
 				}
 				matched = true
 				c.ProjectPath = l.Payload.Cwd
@@ -120,24 +126,34 @@ func (r codexReader) parseSession(path, cwd string) (Call, bool) {
 			// double-counted: once in the Input column at the full rate and again
 			// as CacheRead, badly inflating the reported Input (the 39.9k bug).
 			c.OutputTokens = u.OutputTokens // cumulative — last one wins
-			c.CacheRead = u.CachedInputTokens
-			if fresh := u.InputTokens - u.CachedInputTokens; fresh >= 0 {
-				c.InputTokens = fresh
-			} else {
-				c.InputTokens = u.InputTokens // defensive: never go negative
+			// cached is a subset of the inclusive input; clamp into [0, input] so a
+			// malformed record can't leave fresh+cache above the reported input and
+			// overcharge (fresh = input - cached stays >= 0, fresh+cache == input).
+			cached := u.CachedInputTokens
+			if cached < 0 {
+				cached = 0
 			}
+			if cached > u.InputTokens {
+				cached = u.InputTokens
+			}
+			c.CacheRead = cached
+			c.InputTokens = u.InputTokens - cached
 		}
 	}
 	if !matched {
-		return Call{}, false
+		return Call{}, false, nil
 	}
-	return c, true
+	return c, true, nil
 }
 
 func (r codexReader) ReadForCWD(cwd string) ([]Call, error) {
 	var calls []Call
 	for _, f := range r.rollouts() {
-		if c, ok := r.parseSession(f, cwd); ok {
+		c, ok, err := r.parseSession(f, cwd)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
 			calls = append(calls, c)
 		}
 	}
