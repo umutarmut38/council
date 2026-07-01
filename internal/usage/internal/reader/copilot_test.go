@@ -89,6 +89,29 @@ func TestCopilotTokenDetailsFallbackKeepsFreshInput(t *testing.T) {
 	}
 }
 
+// A malformed record where cacheRead exceeds the (cache-inclusive) input must be
+// clamped so fresh stays >= 0 and fresh+cache never exceeds the reported input.
+func TestCopilotClampsMalformedCacheRead(t *testing.T) {
+	root := t.TempDir()
+	cwd := "/work/proj"
+	writeCopilotSession(t, root, "sess1", cwd, `{"type":"session.shutdown","data":{"currentModel":"gpt-5.4-mini","modelMetrics":{"gpt-5.4-mini":{"usage":{"inputTokens":100,"outputTokens":5,"cacheReadTokens":999}}}}}
+`)
+	calls, err := Copilot(root).ReadForCWD(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("got %d calls, want 1", len(calls))
+	}
+	c := calls[0]
+	if c.InputTokens != 0 || c.CacheRead != 100 {
+		t.Fatalf("got %d in / %d cache, want 0 / 100 (cacheRead clamped to input)", c.InputTokens, c.CacheRead)
+	}
+	if c.InputTokens+c.CacheRead != 100 {
+		t.Fatalf("fresh+cache = %d, want 100 (must not exceed reported input)", c.InputTokens+c.CacheRead)
+	}
+}
+
 // A session still running (no shutdown event) reports nothing yet.
 func TestCopilotIgnoresUnfinishedSession(t *testing.T) {
 	root := t.TempDir()

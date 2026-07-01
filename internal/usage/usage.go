@@ -450,8 +450,13 @@ var confTier = map[string]int{"": 0, Unknown: 0, Estimated: 1, Reported: 2, Exac
 
 // providerSupersessions returns the set of event indices for provider.session
 // events that are superseded by a richer sweep of the same (agent, phase, tool,
-// model, cwd) group. Reconcile re-emits a group's cumulative total on every
-// sweep, so only the max-token event survives; the rest must not be summed.
+// model, cwd) group. Reconcile (see correlate.go) sums every in-window session
+// for a (tool, cwd) into exactly ONE event per model per sweep, so two provider
+// events sharing this key are always re-computations of the same cumulative
+// total — never independent additive sessions. That invariant is why no
+// session/call id is needed in the key: totals only grow, so the max-token event
+// is the latest and most complete, and the rest must not be summed. Distinct
+// models keep distinct keys, so a genuinely additive second model is preserved.
 func providerSupersessions(events []Event) map[int]bool {
 	type provKey struct{ agent, phase, tool, model, cwd string }
 	provTotal := func(e Event) int {

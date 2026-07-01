@@ -99,6 +99,41 @@ func TestAggregateReconcileKeepsRichestSweep(t *testing.T) {
 	}
 }
 
+// Supersession is per-(agent,phase,tool,model,cwd): repeated sweeps of the same
+// model collapse to the richest, but a second MODEL in the same cwd is a distinct
+// group and must be kept (additive), not collapsed. Guards the invariant that the
+// key needs no session id because reconcile emits one cumulative event per model
+// per sweep.
+func TestAggregateSupersedesPerModelKeepsDistinctModels(t *testing.T) {
+	cwd := "/repo/.council/workspaces/codex-builder"
+	mk := func(model string, in, out int, replaces ...string) Event {
+		e := Event{RunID: "r", Agent: "codex-builder", Phase: "session", Tool: "codex", CWD: cwd, Model: model, Source: SourceProvider, Confidence: Reported, InputTokens: in, OutputTokens: out, Replaces: replaces}
+		e.normalize()
+		return e
+	}
+	s := Aggregate([]Event{
+		mk("gpt-5.4-mini", 5000, 20),  // sweep 1, model A
+		mk("gpt-5.4-mini", 12000, 55), // sweep 2, model A (cumulative) — supersedes
+		mk("gpt-5.4", 800, 10),        // model B in the same cwd — additive
+	})
+	if len(s.Sessions) != 2 {
+		t.Fatalf("got %d sessions, want 2 (one per model)", len(s.Sessions))
+	}
+	byModel := map[string]SessionTotal{}
+	for _, ses := range s.Sessions {
+		byModel[ses.Model] = ses
+	}
+	if a := byModel["gpt-5.4-mini"]; a.Input != 12000 || a.Output != 55 {
+		t.Fatalf("model A = %d/%d, want 12000/55 (richest sweep, not summed)", a.Input, a.Output)
+	}
+	if b := byModel["gpt-5.4"]; b.Input != 800 {
+		t.Fatalf("model B = %d, want 800 (distinct model kept, not collapsed)", b.Input)
+	}
+	if s.Input != 12800 {
+		t.Fatalf("grand input = %d, want 12800 (12000 + 800)", s.Input)
+	}
+}
+
 func TestFormatTableCompactsRepeatedHintsAndHidesGenericRowUnknowns(t *testing.T) {
 	s := Aggregate([]Event{
 		{Agent: "claude", Phase: "session", Confidence: Estimated, InputTokens: 40},

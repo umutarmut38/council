@@ -131,11 +131,17 @@ func (r copilotReader) parseSession(dir, cwd string) []Call {
 	// cache-read rate) — matching the codex/claude convention — so re-sent context
 	// isn't double-charged at the full input rate.
 	mk := func(model string, in, out, reasoning, cacheRead int) Call {
-		fresh := in - cacheRead
-		if fresh < 0 {
-			fresh = in // defensive: never go negative
+		// cacheRead is a subset of the cache-inclusive input, so clamp it into
+		// [0, in]. A malformed record with cacheRead > in would otherwise leave
+		// fresh+cache greater than the reported input and overcharge; clamping
+		// keeps fresh (in-cacheRead) >= 0 and fresh+cache == in.
+		if cacheRead < 0 {
+			cacheRead = 0
 		}
-		return Call{Provider: "copilot", SessionID: sid, CallID: sid + ":" + model, ProjectPath: cwd, Model: model, InputTokens: fresh, CacheRead: cacheRead, OutputTokens: out, ReasoningTokens: reasoning, Timestamp: ts}
+		if cacheRead > in {
+			cacheRead = in
+		}
+		return Call{Provider: "copilot", SessionID: sid, CallID: sid + ":" + model, ProjectPath: cwd, Model: model, InputTokens: in - cacheRead, CacheRead: cacheRead, OutputTokens: out, ReasoningTokens: reasoning, Timestamp: ts}
 	}
 
 	if len(shutdown.Data.ModelMetrics) > 0 { // per-model breakdown is the most accurate
