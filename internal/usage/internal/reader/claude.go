@@ -3,6 +3,7 @@ package reader
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,7 +74,10 @@ func (r claudeReader) ReadForCWD(cwd string) ([]Call, error) {
 func (r claudeReader) scanFile(path, cwd string, bySession map[string]*Call, order *[]string) error {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil
+		if errors.Is(err, os.ErrNotExist) {
+			return nil // file raced with deletion since the glob → skip it
+		}
+		return err // perms / other FS error → surface so reconciliation can note it
 	}
 	defer f.Close()
 	sc := bufio.NewScanner(f)

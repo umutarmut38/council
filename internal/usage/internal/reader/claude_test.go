@@ -53,3 +53,21 @@ func TestClaudeReaderMissingDir(t *testing.T) {
 		t.Fatalf("missing dir: %v / %d calls", err, len(calls))
 	}
 }
+
+// scanFile silently skips a file that vanished after the glob (ErrNotExist) but
+// surfaces any other open error (perms, ENOTDIR) so reconciliation can note it.
+func TestClaudeScanFileSurfacesRealOpenError(t *testing.T) {
+	r := claudeReader{}
+	// A missing file is not an error (raced with deletion).
+	if err := r.scanFile(filepath.Join(t.TempDir(), "gone.jsonl"), "/x", map[string]*Call{}, &[]string{}); err != nil {
+		t.Fatalf("missing file should be skipped, got %v", err)
+	}
+	// A parent that is a regular file makes os.Open fail with ENOTDIR — surface it.
+	notADir := filepath.Join(t.TempDir(), "notadir")
+	if err := os.WriteFile(notADir, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.scanFile(filepath.Join(notADir, "s.jsonl"), "/x", map[string]*Call{}, &[]string{}); err == nil {
+		t.Fatal("a present-but-unopenable path must surface an error, got nil")
+	}
+}
