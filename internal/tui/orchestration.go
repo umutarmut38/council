@@ -497,11 +497,14 @@ func (m *Model) cmdClean(rest string) {
 		}
 		free := 0
 		if m.freeWorktrees != nil {
-			if freed, ferr := m.freeWorktrees.RemoveAll(); ferr == nil {
-				free = len(freed)
-			} else {
-				m.Status = "clean (freestyle): " + ferr.Error()
+			freed, ferr := m.freeWorktrees.RemoveAll()
+			if ferr != nil {
+				// Surface the failure instead of letting the success line below
+				// overwrite it — otherwise a partial cleanup looks complete.
+				m.Status = fmt.Sprintf("removed %d run worktree(s); freestyle cleanup failed: %v", len(removed), ferr)
+				return
 			}
+			free = len(freed)
 		}
 		m.Status = fmt.Sprintf("removed %d run worktree(s), %d freestyle workspace(s)", len(removed), free)
 		return
