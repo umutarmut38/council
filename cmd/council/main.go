@@ -197,7 +197,13 @@ func launchTUIWithTranscripts(sessions []*agent.Session, store *runstore.Store, 
 	}
 	program = tea.NewProgram(model, opts...)
 
-	_, err := program.Run()
+	final, err := program.Run()
+	// Some CLIs (Copilot) write their token totals only when the process exits,
+	// which the quit path just triggered by terminating the panes. Run one last
+	// reconcile so the run's persisted usage reflects the reported totals.
+	if fm, ok := final.(tui.Model); ok {
+		fm.FinalizeUsage()
+	}
 	return err
 }
 

@@ -48,6 +48,40 @@ func (m *Model) maybeReconcileCmd() tea.Cmd {
 	return reconcileRollupCmd(runDir, pricer)
 }
 
+// usageFinalizeGrace lets a CLI that flushes its usage only on exit (notably
+// Copilot, which writes token totals in session.shutdown) finish writing its
+// session file after the panes are terminated, before the final reconcile reads
+// it. Small enough to be unnoticeable on quit.
+const usageFinalizeGrace = 300 * time.Millisecond
+
+// FinalizeUsage runs one last provider-session reconciliation after the TUI has
+// exited. Copilot (and any tool that reports only at shutdown) never surfaces its
+// real input during the live loop — it writes token totals only when the process
+// exits, which happens when the panes are terminated on quit. Reconciling here
+// upgrades the run's persisted estimate (e.g. a bare "hi" showing 101) to the
+// reported total, so `council cost` and history are correct without a manual
+// re-run. Best-effort and synchronous: the app is already exiting.
+func (m Model) FinalizeUsage() {
+	if !m.Config.Usage.Enabled {
+		return
+	}
+	runDir := ""
+	if m.orch != nil && m.orch.Run() != nil {
+		runDir = m.orch.Run().Dir
+	} else if m.Store != nil {
+		runDir = m.Store.RunDir
+	}
+	if runDir == "" {
+		return
+	}
+	events, err := usage.LoadEvents(runDir)
+	if err != nil || len(events) == 0 {
+		return // nothing was ever run; no reason to wait or reconcile
+	}
+	time.Sleep(usageFinalizeGrace) // let a shutdown-only reporter finish writing
+	_, _, _ = usage.ReconcileAndAppend(runDir, events)
+}
+
 // reconcileRollupCmd reads the run's events, reconciles provider sessions, prices
 // the result, and returns a per-agent rollup for the header/badge. Runs in a
 // tea.Cmd goroutine: it only reads the model's captured runDir + read-only pricer.

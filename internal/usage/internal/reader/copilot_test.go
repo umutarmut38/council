@@ -42,6 +42,53 @@ func TestCopilotReportedTokens(t *testing.T) {
 	}
 }
 
+// Copilot's modelMetrics.inputTokens is cache-inclusive; the reader must record
+// only the fresh input (input - cacheRead) and keep the cached part separate, or
+// the re-sent context is double-charged at the full input rate. Numbers are from
+// a real session: 35310 inputTokens = 17902 fresh + 17408 cacheRead.
+func TestCopilotSeparatesCacheFromInput(t *testing.T) {
+	root := t.TempDir()
+	cwd := "/work/proj"
+	writeCopilotSession(t, root, "sess1", cwd, `{"type":"session.shutdown","data":{"currentModel":"gpt-5.4-mini","tokenDetails":{"input":{"tokenCount":17902},"cache_read":{"tokenCount":17408},"output":{"tokenCount":51}},"modelMetrics":{"gpt-5.4-mini":{"usage":{"inputTokens":35310,"outputTokens":51,"reasoningTokens":22,"cacheReadTokens":17408}}}}}
+`)
+	calls, err := Copilot(root).ReadForCWD(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("got %d calls, want 1", len(calls))
+	}
+	c := calls[0]
+	if c.InputTokens != 17902 {
+		t.Fatalf("InputTokens = %d, want 17902 (fresh = 35310 - 17408 cached)", c.InputTokens)
+	}
+	if c.CacheRead != 17408 {
+		t.Fatalf("CacheRead = %d, want 17408", c.CacheRead)
+	}
+	if c.OutputTokens != 51 || c.ReasoningTokens != 22 {
+		t.Fatalf("out/reasoning = %d/%d, want 51/22", c.OutputTokens, c.ReasoningTokens)
+	}
+}
+
+// The tokenDetails fallback (no modelMetrics) already stores fresh input; the
+// reader must not subtract cache twice.
+func TestCopilotTokenDetailsFallbackKeepsFreshInput(t *testing.T) {
+	root := t.TempDir()
+	cwd := "/work/proj"
+	writeCopilotSession(t, root, "sess1", cwd, `{"type":"session.shutdown","data":{"currentModel":"gpt-5.4-mini","tokenDetails":{"input":{"tokenCount":17902},"cache_read":{"tokenCount":17408},"output":{"tokenCount":51}}}}
+`)
+	calls, err := Copilot(root).ReadForCWD(cwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("got %d calls, want 1", len(calls))
+	}
+	if calls[0].InputTokens != 17902 || calls[0].CacheRead != 17408 {
+		t.Fatalf("got %d in / %d cache, want 17902 / 17408", calls[0].InputTokens, calls[0].CacheRead)
+	}
+}
+
 // A session still running (no shutdown event) reports nothing yet.
 func TestCopilotIgnoresUnfinishedSession(t *testing.T) {
 	root := t.TempDir()

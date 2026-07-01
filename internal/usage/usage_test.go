@@ -46,6 +46,59 @@ func TestAggregateReportedReplacesSameUsageKey(t *testing.T) {
 	}
 }
 
+// Repeated reconcile sweeps for the same (tool, cwd, model) group must not be
+// summed. Each sweep re-computes the cumulative provider total; a later sweep
+// carries a wider Replaces set (a new prompt/estimate appeared) and is persisted
+// as a distinct event. Aggregate must keep only the richest, not add them — the
+// real bug where "hi" showed ~18k input (8964+8964) instead of ~9k.
+func TestAggregateSupersedesRepeatedReconcileSweeps(t *testing.T) {
+	cwd := "/repo/.council/workspaces/codex-builder"
+	est1 := Event{RunID: "r", Agent: "codex-builder", Phase: "session", Tool: "codex", CWD: cwd, Model: UnknownValue, PromptHash: "p1", Confidence: Estimated, InputTokens: 52}
+	est1.normalize()
+	est2 := Event{RunID: "r", Agent: "codex-builder", Phase: "session", Tool: "codex", CWD: cwd, Model: UnknownValue, PromptHash: "p2", Confidence: Estimated, InputTokens: 55}
+	est2.normalize()
+
+	// Sweep 1: after the first prompt (replaces est1 only).
+	rep1 := Event{RunID: "r", Agent: "codex-builder", Phase: "session", Tool: "codex", CWD: cwd, Model: "gpt-5.4-mini", Source: SourceProvider, Confidence: Reported, InputTokens: 8964, OutputTokens: 29, Replaces: []string{est1.ReconcileKey}}
+	rep1.normalize()
+	// Sweep 2: after the second prompt (replaces est1+est2). Same cumulative
+	// session total re-read; a distinct event because Replaces grew.
+	rep2 := Event{RunID: "r", Agent: "codex-builder", Phase: "session", Tool: "codex", CWD: cwd, Model: "gpt-5.4-mini", Source: SourceProvider, Confidence: Reported, InputTokens: 8964, OutputTokens: 29, Replaces: []string{est1.ReconcileKey, est2.ReconcileKey}}
+	rep2.normalize()
+
+	s := Aggregate([]Event{est1, est2, rep1, rep2})
+	if len(s.Sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1 combined row", len(s.Sessions))
+	}
+	if s.Sessions[0].Input != 8964 || s.Sessions[0].Output != 29 {
+		t.Fatalf("got %d/%d, want 8964/29 (richest sweep, not summed)", s.Sessions[0].Input, s.Sessions[0].Output)
+	}
+	if s.Input != 8964 {
+		t.Fatalf("grand input = %d, want 8964 (sweeps must not double-count)", s.Input)
+	}
+}
+
+// When a later sweep genuinely observes more usage (e.g. a second turn added to
+// the same session), the richest sweep wins — not the stale first one and not
+// the sum.
+func TestAggregateReconcileKeepsRichestSweep(t *testing.T) {
+	cwd := "/repo/.council/workspaces/codex-planner"
+	est := Event{RunID: "r", Agent: "codex-planner", Phase: "session", Tool: "codex", CWD: cwd, Model: UnknownValue, PromptHash: "p1", Confidence: Estimated, InputTokens: 52}
+	est.normalize()
+	rep1 := Event{RunID: "r", Agent: "codex-planner", Phase: "session", Tool: "codex", CWD: cwd, Model: "gpt-5.4-mini", Source: SourceProvider, Confidence: Reported, InputTokens: 5388, OutputTokens: 32, Replaces: []string{est.ReconcileKey}}
+	rep1.normalize()
+	rep2 := Event{RunID: "r", Agent: "codex-planner", Phase: "session", Tool: "codex", CWD: cwd, Model: "gpt-5.4-mini", Source: SourceProvider, Confidence: Reported, InputTokens: 14412, OutputTokens: 68, Replaces: []string{est.ReconcileKey}}
+	rep2.normalize()
+
+	s := Aggregate([]Event{est, rep1, rep2})
+	if len(s.Sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1", len(s.Sessions))
+	}
+	if s.Sessions[0].Input != 14412 || s.Sessions[0].Output != 68 {
+		t.Fatalf("got %d/%d, want 14412/68 (richest sweep)", s.Sessions[0].Input, s.Sessions[0].Output)
+	}
+}
+
 func TestFormatTableCompactsRepeatedHintsAndHidesGenericRowUnknowns(t *testing.T) {
 	s := Aggregate([]Event{
 		{Agent: "claude", Phase: "session", Confidence: Estimated, InputTokens: 40},

@@ -47,6 +47,7 @@ type copilotUsage struct {
 	InputTokens     int `json:"inputTokens"`
 	OutputTokens    int `json:"outputTokens"`
 	ReasoningTokens int `json:"reasoningTokens"`
+	CacheReadTokens int `json:"cacheReadTokens"`
 }
 
 type copilotEvent struct {
@@ -60,6 +61,9 @@ type copilotEvent struct {
 			Input struct {
 				TokenCount int `json:"tokenCount"`
 			} `json:"input"`
+			CacheRead struct {
+				TokenCount int `json:"tokenCount"`
+			} `json:"cache_read"`
 			Output struct {
 				TokenCount int `json:"tokenCount"`
 			} `json:"output"`
@@ -121,19 +125,30 @@ func (r copilotReader) parseSession(dir, cwd string) []Call {
 		ts = fi.ModTime()
 	}
 	sid := filepath.Base(dir)
-	mk := func(model string, in, out, reasoning int) Call {
-		return Call{Provider: "copilot", SessionID: sid, CallID: sid + ":" + model, ProjectPath: cwd, Model: model, InputTokens: in, OutputTokens: out, ReasoningTokens: reasoning, Timestamp: ts}
+	// Copilot's modelMetrics.inputTokens is cache-INCLUSIVE: it equals the fresh
+	// input plus cacheReadTokens (verified: 17902 fresh + 17408 cached = 35310).
+	// Record only the fresh input and keep the cached part separate (priced at the
+	// cache-read rate) — matching the codex/claude convention — so re-sent context
+	// isn't double-charged at the full input rate.
+	mk := func(model string, in, out, reasoning, cacheRead int) Call {
+		fresh := in - cacheRead
+		if fresh < 0 {
+			fresh = in // defensive: never go negative
+		}
+		return Call{Provider: "copilot", SessionID: sid, CallID: sid + ":" + model, ProjectPath: cwd, Model: model, InputTokens: fresh, CacheRead: cacheRead, OutputTokens: out, ReasoningTokens: reasoning, Timestamp: ts}
 	}
 
 	if len(shutdown.Data.ModelMetrics) > 0 { // per-model breakdown is the most accurate
 		var calls []Call
 		for model, mm := range shutdown.Data.ModelMetrics {
-			calls = append(calls, mk(model, mm.Usage.InputTokens, mm.Usage.OutputTokens, mm.Usage.ReasoningTokens))
+			calls = append(calls, mk(model, mm.Usage.InputTokens, mm.Usage.OutputTokens, mm.Usage.ReasoningTokens, mm.Usage.CacheReadTokens))
 		}
 		return calls
 	}
+	// tokenDetails.input is already cache-EXCLUSIVE (fresh); pass it as an inclusive
+	// total plus cache_read so mk's subtraction leaves the fresh input intact.
 	td := shutdown.Data.TokenDetails
-	return []Call{mk(currentModel, td.Input.TokenCount, td.Output.TokenCount, 0)}
+	return []Call{mk(currentModel, td.Input.TokenCount+td.CacheRead.TokenCount, td.Output.TokenCount, 0, td.CacheRead.TokenCount)}
 }
 
 func (r copilotReader) ReadForCWD(cwd string) ([]Call, error) {

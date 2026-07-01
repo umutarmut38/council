@@ -448,6 +448,42 @@ type Summary struct {
 
 var confTier = map[string]int{"": 0, Unknown: 0, Estimated: 1, Reported: 2, Exact: 3}
 
+// providerSupersessions returns the set of event indices for provider.session
+// events that are superseded by a richer sweep of the same (agent, phase, tool,
+// model, cwd) group. Reconcile re-emits a group's cumulative total on every
+// sweep, so only the max-token event survives; the rest must not be summed.
+func providerSupersessions(events []Event) map[int]bool {
+	type provKey struct{ agent, phase, tool, model, cwd string }
+	provTotal := func(e Event) int {
+		return e.InputTokens + e.OutputTokens + e.ReasoningTokens +
+			e.CacheCreateTokens + e.CacheReadTokens +
+			e.FastInputTokens + e.FastOutputTokens + e.WebSearchRequests
+	}
+	best := map[provKey]int{}
+	for i, e := range events {
+		if e.Source != SourceProvider {
+			continue
+		}
+		e.normalize()
+		k := provKey{e.Agent, valueOr(e.Phase, "session"), e.Tool, e.Model, e.CWD}
+		if j, ok := best[k]; !ok || provTotal(events[i]) > provTotal(events[j]) {
+			best[k] = i
+		}
+	}
+	superseded := map[int]bool{}
+	for i, e := range events {
+		if e.Source != SourceProvider {
+			continue
+		}
+		e.normalize()
+		k := provKey{e.Agent, valueOr(e.Phase, "session"), e.Tool, e.Model, e.CWD}
+		if best[k] != i {
+			superseded[i] = true
+		}
+	}
+	return superseded
+}
+
 // Aggregate rolls events up per session using explicit replacement keys. A
 // reported event replaces only the estimated events listed in Replaces; all
 // other estimates remain part of the floor.
@@ -458,6 +494,17 @@ func Aggregate(events []Event) Summary {
 			replaced[key] = true
 		}
 	}
+
+	// Each provider reconcile sweep re-computes the CUMULATIVE reported total for
+	// a (tool, cwd, model) group from the provider's session files, so a later
+	// sweep supersedes an earlier one rather than adding to it. Its identity
+	// (reportedID) embeds the Replaces set, which grows every time a new estimate
+	// appears (a new prompt, amplified by the periodic auto-reconcile), so each
+	// sweep is persisted as a distinct event. Without collapsing them here,
+	// Aggregate would SUM N sweeps for the same group and multiply the reported
+	// Input/Output/Cost by N. Keep only the richest (max-token) provider event
+	// per group; because cumulative session totals only grow, richest == latest.
+	supersededProvider := providerSupersessions(events)
 
 	type rowKey struct {
 		agent, phase, tool, model, priceModel, priceProfile string
@@ -470,8 +517,11 @@ func Aggregate(events []Event) Summary {
 		}
 	}
 
-	for _, e := range events {
+	for i, e := range events {
 		e.normalize()
+		if e.Source == SourceProvider && supersededProvider[i] {
+			continue
+		}
 		if replaced[e.ReconcileKey] && e.Source != SourceProvider {
 			continue
 		}
