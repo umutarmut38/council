@@ -18,8 +18,9 @@ Type "cd $WORK && council --agents alpha,beta ask 'write a short haiku about the
 Enter
 # Block until the TUI has painted: the header rail always shows "Agents: …".
 Wait+Screen@30s /Agents: alpha, beta/
-# Cost is on by default, so the header rail carries the run total.
-Wait+Screen@30s /Run \$/
+# Cost is on by default, so the header rail carries the run total — "Run ~$…"
+# while estimated, "Run $…" once reconciled.
+Wait+Screen@30s /Run ~?\$/
 Sleep 3s
 Screenshot .tmp/vhs/tui-overview-main.png
 

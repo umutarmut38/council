@@ -157,18 +157,24 @@ func TestRollupReconciled(t *testing.T) {
 	}
 }
 
-func TestConfidenceSuffix(t *testing.T) {
-	for conf, want := range map[string]string{
-		usage.Exact: "x", usage.Reported: "r", usage.Estimated: "e", usage.Unknown: "?", "": "?",
+func TestCostLabel(t *testing.T) {
+	for _, tc := range []struct {
+		conf, want string
+	}{
+		{usage.Exact, "$0.04"},
+		{usage.Reported, "$0.04"},
+		{usage.Estimated, "~$0.04"},
+		{usage.Unknown, "$?"},
+		{"", "$?"},
 	} {
-		if got := confidenceSuffix(conf); got != want {
-			t.Errorf("confidenceSuffix(%q) = %q, want %q", conf, got, want)
+		if got := costLabel(0.04, "USD", tc.conf); got != tc.want {
+			t.Errorf("costLabel(0.04, USD, %q) = %q, want %q", tc.conf, got, tc.want)
 		}
 	}
 }
 
-// After /cost reconciles, the pane badge shows the reported total (suffix r) and
-// the header drops the "est" qualifier — not the stale estimated floor.
+// After /cost reconciles, the pane badge shows the reported total (plain $) and
+// the header drops the ~ estimate prefix — not the stale estimated floor.
 func TestBadgeAndHeaderPreferReconciled(t *testing.T) {
 	m := Model{
 		Config:     config.Config{Usage: usageConfigOn()},
@@ -178,11 +184,11 @@ func TestBadgeAndHeaderPreferReconciled(t *testing.T) {
 			"claude-a": {cost: 0.04, currency: "USD", confidence: usage.Reported, priced: true},
 		},
 	}
-	if got := m.usageBorderSuffix("claude-a"); got != " | $0.04r" {
-		t.Fatalf("badge = %q, want \" | $0.04r\"", got)
+	if got := m.usageBorderSuffix("claude-a"); got != " | $0.04" {
+		t.Fatalf("badge = %q, want \" | $0.04\"", got)
 	}
 	if got := m.usageHeaderCost(); got != "Run $0.04" {
-		t.Fatalf("header = %q, want \"Run $0.04\" (reported, no est)", got)
+		t.Fatalf("header = %q, want \"Run $0.04\" (reported, no ~ prefix)", got)
 	}
 }
 
