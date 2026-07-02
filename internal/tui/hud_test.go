@@ -101,10 +101,15 @@ func TestPhaseRailRendering(t *testing.T) {
 		Next: "/vote",
 	}
 	rail := p.phaseRail()
-	for _, want := range []string{"Plan 2/2 ✓", "Vote 0/2 ●", "Build ○", "Adopt ○", "Next: /vote"} {
+	// The stepper uses lowercase labels, ▸ separators, ✓ for done, and shows the
+	// count only on the active phase (done phases collapse to just ✓).
+	for _, want := range []string{"plan ✓", "vote ● 0/2", "build", "adopt", "▸", "Next: /vote"} {
 		if !strings.Contains(rail, want) {
-			t.Fatalf("rail missing %q: %q", want, rail)
+			t.Fatalf("stepper missing %q: %q", want, rail)
 		}
+	}
+	if strings.Contains(rail, "plan ✓ 2/2") || strings.Contains(rail, "○") {
+		t.Fatalf("done phase should collapse to ✓ with no count/○: %q", rail)
 	}
 }
 

@@ -38,26 +38,24 @@ func (m Model) renderHeader() string {
 			line += " | " + compressPath(m.Store.RunDir)
 		}
 	}
+	// Paging/grouping summary is docked on the right of line 2.
 	page := fmt.Sprintf("Page %d/%d · agents %s · grouped by %s", m.PageIndex+1, m.pageCount(), m.pageRangeLabel(), m.groupByLabel())
 	if filter := m.displayFilterLabel(); filter != "" {
 		page += " · showing " + filter
 	}
-	if m.ScreenMode != ScreenPanes {
-		page = strings.ToUpper(m.screenModeName()) + " · " + page
-	}
-	// Status shows as a transient toast, not a permanent header segment, so
-	// stale events don't linger between actions. Non-panes screens still show
-	// the persistent status inside the input box (see renderFooter).
-	statusText := page
-	if toast := m.toastText(); toast != "" {
-		statusText += " · " + toast
-	}
-	if cost := m.usageHeaderCost(); cost != "" {
-		statusText += " · " + cost
-	}
-	railText := ""
+	// Line 2 left: the phase stepper while a run is active, else the screen-mode
+	// name; a transient status toast rides alongside it (sticky errors flagged).
+	left2 := ""
 	if m.progress != nil {
-		railText = m.progress.phaseRail()
+		left2 = m.progress.phaseRail()
+	} else if m.ScreenMode != ScreenPanes {
+		left2 = strings.ToUpper(m.screenModeName())
+	}
+	if toast := m.toastText(); toast != "" {
+		if statusSticky(m.Status) {
+			toast = "! " + toast
+		}
+		left2 = headerJoin(left2, toast)
 	}
 
 	c := m.chrome()
@@ -65,10 +63,12 @@ func (m Model) renderHeader() string {
 		return m.renderHeaderBand(c)
 	}
 
-	header := c.title.Render(fitText(line, m.Width)) + "\n" + c.status.Render(fitText(statusText, m.Width))
-	if railText != "" {
-		header += "\n" + c.rail.Render(fitText(railText, m.Width))
-	}
+	// Line 1: brand + roster + run path, with the run cost pinned right.
+	leftFit, costFit := pinRight(line, m.usageHeaderCost(), m.Width)
+	header := c.title.Render(leftFit) + c.status.Render(costFit)
+	// Line 2: stepper/toast on the left, paging summary pinned right.
+	stepperFit, pageFit := pinRight(left2, page, m.Width)
+	header += "\n" + c.rail.Render(stepperFit) + c.status.Render(pageFit)
 	return header
 }
 
@@ -947,6 +947,41 @@ func fitText(value string, width int) string {
 		value += strings.Repeat(" ", width-visible)
 	}
 	return value
+}
+
+// pinRight lays left and right into exactly width columns with right flush to
+// the right edge, truncating left first when they can't both fit. It returns
+// the two plain segments separately so the caller can style each one — widths
+// are computed on plain text, so styling can't change the total. The returned
+// right segment carries the gap padding, so left+right always spans width.
+func pinRight(left, right string, width int) (string, string) {
+	if width <= 0 {
+		return "", ""
+	}
+	rw := lipgloss.Width(right)
+	if rw >= width {
+		return "", truncateText(right, width)
+	}
+	leftWidth := width - rw
+	left = truncateText(left, leftWidth)
+	pad := leftWidth - lipgloss.Width(left)
+	if pad < 0 {
+		pad = 0
+	}
+	return left, strings.Repeat(" ", pad) + right
+}
+
+// headerJoin joins two header segments with the standard " · " separator,
+// dropping either when empty.
+func headerJoin(a, b string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	default:
+		return a + " · " + b
+	}
 }
 
 func truncateText(value string, width int) string {

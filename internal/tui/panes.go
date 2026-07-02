@@ -10,18 +10,14 @@ func (m Model) chromeLines() int {
 	return m.headerLines() + footerHeight
 }
 
-// headerLines is the header height: the compact title/status header (plus a
-// phase-rail row while a run is active), or the taller band that docks the
-// rotating 3D head while retro mode is themed.
+// headerLines is the header height: the compact two-line title/status header
+// (the phase stepper now shares line 2 rather than adding a row), or the taller
+// band that docks the rotating 3D head while retro mode is themed.
 func (m Model) headerLines() int {
 	if m.headShown() {
 		return headerBandHeight
 	}
-	h := headerHeight
-	if m.progress != nil {
-		h++
-	}
-	return h
+	return headerHeight
 }
 
 // headShown reports whether the docked rotating 3D head is rendered in
