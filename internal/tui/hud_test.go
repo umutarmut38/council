@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/umutarmut38/council/internal/agent"
 	"github.com/umutarmut38/council/internal/command"
@@ -210,23 +211,31 @@ func TestShortAgent(t *testing.T) {
 func TestPaneBadgeStates(t *testing.T) {
 	m := hudModel(t, "codex")
 	view := m.Agents[0]
+	now := time.Now()
 
-	if got := m.paneBadge(view); got != "running" {
-		t.Fatalf("idle badge = %q, want running", got)
+	// Fresh output within the idle window → active glyph; going quiet → idle age.
+	view.lastOutputAt = now
+	if got := m.paneBadge(view, now); got != "●" {
+		t.Fatalf("active badge = %q, want ●", got)
 	}
+	view.lastOutputAt = now.Add(-2 * time.Minute)
+	if got := m.paneBadge(view, now); got != "◌ 2m" {
+		t.Fatalf("idle badge = %q, want ◌ 2m", got)
+	}
+	view.lastOutputAt = now // stay active for the phase cases
 
 	m.phase = "vote"
 	m.watching = map[string]string{"codex": "/runs/x/votes/codex.md"}
-	if got := m.paneBadge(view); got != "vote · waiting for codex.md" {
+	if got := m.paneBadge(view, now); got != "● vote · waiting for codex.md" {
 		t.Fatalf("waiting badge = %q", got)
 	}
 	view.PhaseDone = true
-	if got := m.paneBadge(view); got != "vote · wrote codex.md" {
+	if got := m.paneBadge(view, now); got != "✓ vote · wrote codex.md" {
 		t.Fatalf("done badge = %q", got)
 	}
 	view.PhaseDone = false
 	view.Attention = true
-	if got := m.paneBadge(view); got != "vote · needs input" {
+	if got := m.paneBadge(view, now); got != "! vote · needs input" {
 		t.Fatalf("attention badge = %q", got)
 	}
 
@@ -234,8 +243,20 @@ func TestPaneBadgeStates(t *testing.T) {
 	m.phase = "build"
 	m.watching = nil
 	view.Attention = false
-	if got := m.paneBadge(view); got != "build · working" {
+	if got := m.paneBadge(view, now); got != "● build · working" {
 		t.Fatalf("build badge = %q", got)
+	}
+
+	// Terminal glyphs: clean exit ✓, nonzero exit ✕.
+	m.phase = ""
+	view.Session.Done = true
+	if got := m.paneBadge(view, now); got != "✓ exited" {
+		t.Fatalf("exit badge = %q, want ✓ exited", got)
+	}
+	code := 1
+	view.Session.ExitCode = &code
+	if got := m.paneBadge(view, now); got != "✕ exit 1" {
+		t.Fatalf("nonzero exit badge = %q, want ✕ exit 1", got)
 	}
 }
 
