@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/umutarmut38/council/internal/config"
 	"github.com/umutarmut38/council/internal/orchestrate"
@@ -352,25 +353,61 @@ func (m Model) phaseReadout() string {
 	return "" // no run → nothing
 }
 
-// paneBadge builds the pane title state: process state plus, during an
-// orchestration phase, what the agent owes (waiting for PLAN.md / wrote
-// VOTE.md / needs input).
-func (m Model) paneBadge(view *agentView) string {
-	state := "running"
+// paneIdleAfter is how long a running pane can go without output before its
+// badge flips from ● (active) to ◌ with an idle age.
+const paneIdleAfter = 10 * time.Second
+
+// ageShort renders a compact idle duration for a pane badge: 5s, 2m, 1h.
+func ageShort(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	default:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+}
+
+// paneGlyphWord returns a pane's leading status glyph and its state word so the
+// title answers "which pane needs me?" at a glance: ● active, ◌ idle (with an
+// age), ✓ clean exit, ✕ failure/nonzero exit, ! needs input. word is "" for a
+// freshly active pane (the glyph stands alone).
+func (m Model) paneGlyphWord(view *agentView, now time.Time) (glyph, word string) {
 	switch {
 	case view.Session.StartError != nil:
-		state = "failed"
+		return "✕", "failed"
 	case view.Session.Done:
-		state = "exited"
 		if view.Session.ExitCode != nil && *view.Session.ExitCode != 0 {
-			state = fmt.Sprintf("exit %d", *view.Session.ExitCode)
+			return "✕", fmt.Sprintf("exit %d", *view.Session.ExitCode)
 		}
+		return "✓", "exited"
 	case view.Attention:
-		state = "needs input"
+		return "!", "needs input"
 	}
+	if view.lastOutputAt.IsZero() || now.IsZero() {
+		return "◌", "" // no output observed yet → idle, unknown age
+	}
+	if idle := now.Sub(view.lastOutputAt); idle >= paneIdleAfter {
+		return "◌", ageShort(idle)
+	}
+	return "●", ""
+}
 
+// paneBadge builds the pane title state: a leading liveness glyph plus, during
+// an orchestration phase, what the agent owes (waiting for PLAN.md / wrote
+// VOTE.md / needs input).
+func (m Model) paneBadge(view *agentView, now time.Time) string {
+	glyph, word := m.paneGlyphWord(view, now)
+	prefix := glyph
+	if word != "" {
+		prefix += " " + word
+	}
 	if m.phase == "" {
-		return state
+		return prefix
 	}
 	artifactPath, watched := m.watching[view.Session.Name]
 	if !watched {
@@ -378,22 +415,23 @@ func (m Model) paneBadge(view *agentView) string {
 		// is simply working in it.
 		if m.phase == "build" && !view.Session.Done {
 			if view.Attention {
-				return "build · needs input"
+				return "! build · needs input"
 			}
-			return "build · working"
+			return prefix + " build · working"
 		}
-		return state
+		return prefix
 	}
 	artifact := filepath.Base(artifactPath)
 	switch {
 	case view.PhaseDone:
-		return fmt.Sprintf("%s · wrote %s", m.phase, artifact)
+		// The phase task is done regardless of process liveness → force ✓.
+		return fmt.Sprintf("✓ %s · wrote %s", m.phase, artifact)
 	case view.Attention && !view.Session.Done:
-		return fmt.Sprintf("%s · needs input", m.phase)
+		return fmt.Sprintf("! %s · needs input", m.phase)
 	case view.Session.Done:
-		return fmt.Sprintf("%s · %s, no %s", m.phase, state, artifact)
+		return glyph + fmt.Sprintf(" %s · %s, no %s", m.phase, word, artifact)
 	default:
-		return fmt.Sprintf("%s · waiting for %s", m.phase, artifact)
+		return prefix + fmt.Sprintf(" %s · waiting for %s", m.phase, artifact)
 	}
 }
 
