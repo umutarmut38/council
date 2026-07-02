@@ -102,6 +102,7 @@ func (m *Model) openArtifactText(title, content string) {
 	m.artifactPath = title
 	m.artifactFile = ""
 	m.artifactIsDiff = false
+	m.artifactIsCost = false
 	m.viewerFromList = false
 	m.viewerReturnScreen = ScreenPanes
 	m.artifactTop = 0
@@ -322,6 +323,29 @@ func colorDiffLine(line string, width int, c chromeStyles) string {
 	}
 }
 
+// colorCostLine styles a line of the /cost view: the markdown heading, the
+// column header, the Total row, and the Share:/Hints: labels stand out; share
+// bars use the status color; hint and price-source lines dim. Whole-line
+// styling only, so the pager's width math is untouched.
+func colorCostLine(line string, width int, c chromeStyles) string {
+	text := fitText(line, width)
+	trimmed := strings.TrimSpace(line)
+	switch {
+	case strings.HasPrefix(trimmed, "#"),
+		strings.HasPrefix(line, "Agent"),
+		strings.HasPrefix(line, "Total"),
+		strings.HasPrefix(trimmed, "Share:"),
+		strings.HasPrefix(trimmed, "Hints:"):
+		return c.heading.Render(text)
+	case strings.ContainsRune(line, '█'), strings.ContainsRune(line, '░'):
+		return c.status.Render(text)
+	case strings.HasPrefix(trimmed, "- "), strings.HasPrefix(trimmed, "prices:"):
+		return c.faint.Render(text)
+	default:
+		return text
+	}
+}
+
 // viewingAdoptPreview reports whether the artifact viewer is showing a staged
 // adopt preview, where y/n apply or cancel it.
 func (m *Model) viewingAdoptPreview() bool {
@@ -354,8 +378,11 @@ func (m Model) renderArtifacts(bodyHeight int) []string {
 		lines = append(lines, c.heading.Render(fitText(header, m.Width)))
 		for i := top; i < len(wrapped) && len(lines) < bodyHeight; i++ {
 			line := fitText(wrapped[i], m.Width)
-			if m.artifactIsDiff {
+			switch {
+			case m.artifactIsDiff:
 				line = colorDiffLine(wrapped[i], m.Width, c)
+			case m.artifactIsCost:
+				line = colorCostLine(wrapped[i], m.Width, c)
 			}
 			lines = append(lines, line)
 		}
