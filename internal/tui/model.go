@@ -266,6 +266,15 @@ type Model struct {
 	// attentionCheckPending debounces the delayed approval-prompt re-check.
 	attentionCheckPending bool
 
+	// Toast clock: the header shows m.Status as a transient toast rather than
+	// parking it permanently. now is stamped at the top of every Update so View
+	// stays a pure function of model state; statusAt is when Status last changed;
+	// statusSeen lets the Update wrapper detect a change without touching the
+	// ~180 `m.Status =` call sites.
+	now        time.Time
+	statusAt   time.Time
+	statusSeen string
+
 	// interruptArmed holds the agent name for which a Ctrl+C interrupt is armed;
 	// a second Ctrl+C within interruptArmWindow actually sends \x03. Cleared by
 	// any other key (see handleKey). There is no timer-driven disarm: the window
@@ -466,13 +475,65 @@ func (m Model) Init() tea.Cmd {
 			return initialPromptMsg(m.initialPrompt)
 		}))
 	}
-	if m.Config.Usage.Enabled {
-		cmds = append(cmds, usageTickCmd())
-	}
+	// The 1s tick runs unconditionally: besides driving cost reconcile (which
+	// self-guards on usage.enabled), it expires status toasts and refreshes
+	// per-pane idle ages even when usage is off.
+	cmds = append(cmds, usageTickCmd())
 	return tea.Batch(cmds...)
 }
 
+// Update stamps the frame clock, delegates to update, then records toast
+// freshness. Keeping this thin wrapper means no `m.Status =` call site has to
+// change: a Status that differs from the last observed value starts a fresh
+// toast, and any keypress that leaves Status unchanged dismisses the current one
+// (so sticky error toasts persist only until the next input).
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m.now = time.Now()
+	updated, cmd := m.update(msg)
+	nm, ok := updated.(Model)
+	if !ok {
+		return updated, cmd
+	}
+	switch {
+	case nm.Status != nm.statusSeen:
+		nm.statusSeen = nm.Status
+		nm.statusAt = nm.now
+	default:
+		if _, isKey := msg.(tea.KeyMsg); isKey {
+			nm.statusAt = time.Time{}
+		}
+	}
+	return nm, cmd
+}
+
+// toastTTL is how long a transient status toast stays visible before it fades.
+// Sticky (error-like) toasts ignore it and persist until the next keypress.
+const toastTTL = 4 * time.Second
+
+// toastText is the status to show as a header toast, or "" once it has faded.
+func (m Model) toastText() string {
+	if m.Status == "" || m.statusAt.IsZero() {
+		return ""
+	}
+	if statusSticky(m.Status) || m.now.Sub(m.statusAt) < toastTTL {
+		return m.Status
+	}
+	return ""
+}
+
+// statusSticky reports whether a status reads like an error/warning that should
+// stay pinned until the user acts, rather than fading on the toast timer.
+func statusSticky(s string) bool {
+	l := strings.ToLower(s)
+	for _, kw := range []string{"error", "cannot", "can't", "failed", "unknown", "invalid", "denied", "no run"} {
+		if strings.Contains(l, kw) {
+			return true
+		}
+	}
+	return false
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.Width = msg.Width

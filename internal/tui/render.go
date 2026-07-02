@@ -45,7 +45,13 @@ func (m Model) renderHeader() string {
 	if m.ScreenMode != ScreenPanes {
 		page = strings.ToUpper(m.screenModeName()) + " · " + page
 	}
-	statusText := page + " · " + m.Status
+	// Status shows as a transient toast, not a permanent header segment, so
+	// stale events don't linger between actions. Non-panes screens still show
+	// the persistent status inside the input box (see renderFooter).
+	statusText := page
+	if toast := m.toastText(); toast != "" {
+		statusText += " · " + toast
+	}
 	if cost := m.usageHeaderCost(); cost != "" {
 		statusText += " · " + cost
 	}
