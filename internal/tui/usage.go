@@ -375,17 +375,17 @@ func (m Model) usageHeaderCost() string {
 		addCurrency(r.Currency)
 	}
 	if !hasTokens {
-		return "Run $0.00 est"
+		return "Run ~$0.00"
 	}
 	if mixed {
 		return "Run mixed currency"
 	}
 	if unknown && !priced {
-		return "cost unknown"
+		return "Run $?"
 	}
 	label := compactCost(total, currency)
 	if anyEstimated {
-		label += " est"
+		label = "~" + label
 	}
 	if unknown {
 		label += " + unknown"
@@ -394,8 +394,8 @@ func (m Model) usageHeaderCost() string {
 }
 
 // usageBorderSuffix is the per-agent cost shown in a pane title. Once /cost has
-// reconciled, it prefers the reported total (suffix r/x) over the estimated
-// floor (suffix e).
+// reconciled, it prefers the reported total (plain $) over the estimated floor
+// (~$); see costLabel for the vocabulary.
 func (m Model) usageBorderSuffix(name string) string {
 	if m.usageTally == nil || !m.Config.Usage.BorderCostEnabled() {
 		return ""
@@ -404,12 +404,12 @@ func (m Model) usageBorderSuffix(name string) string {
 		if !rc.priced {
 			return " | $?"
 		}
-		return " | " + compactCost(rc.cost, rc.currency) + confidenceSuffix(rc.confidence)
+		return " | " + costLabel(rc.cost, rc.currency, rc.confidence)
 	}
 	t := m.usageTally[name]
 	if r, ok := m.usageRate[name]; ok && r.Found {
 		c, _ := r.Cost(t)
-		return " | " + compactCost(c, r.Currency) + confidenceSuffix(usage.Estimated)
+		return " | " + costLabel(c, r.Currency, usage.Estimated)
 	}
 	if !t.Any() {
 		return " | $0.00"
@@ -483,17 +483,18 @@ func weakerConfidence(a, b string) string {
 	}
 }
 
-// confidenceSuffix is the single-letter badge marker for a confidence tier.
-func confidenceSuffix(conf string) string {
-	switch conf {
-	case usage.Exact:
-		return "x"
-	case usage.Reported:
-		return "r"
+// costLabel formats a cost in the estimate-prefix vocabulary shared by the
+// header and pane badges: ~$0.02 estimated, $0.02 reported/exact, $? unknown.
+// It replaces the old single-letter e/r/x suffixes so one glyph convention
+// covers every cost readout.
+func costLabel(cost float64, currency, confidence string) string {
+	switch confidence {
+	case usage.Reported, usage.Exact:
+		return compactCost(cost, currency)
 	case usage.Estimated:
-		return "e"
+		return "~" + compactCost(cost, currency)
 	default:
-		return "?"
+		return "$?"
 	}
 }
 
