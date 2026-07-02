@@ -30,3 +30,7 @@ node_modules/
 # 3D source model — bake input only (attribution in NOTICE). The committed,
 # decimated cloud is internal/tui/anim/mesh_data.go (see meshgen.go).
 internal/tui/anim/testdata/
+
+# Stray root build artifacts (make builds into bin/)
+/council
+/gen

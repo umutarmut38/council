@@ -17,7 +17,9 @@ mk_claude() {
   cat >"$BIN_DIR/$name" <<SH
 #!/usr/bin/env bash
 printf 'claude ready\n'
-slug="\$(pwd | tr '/.' '--')"
+# Mirrors the Go reader's slug: all non-alphanumerics -> dash (printf avoids
+# the trailing newline that tr -c would also translate).
+slug="\$(printf '%s' "\$(pwd)" | tr -c '[:alnum:]' '-')"
 dir="\$HOME/.claude/projects/\$slug"
 mkdir -p "\$dir"
 ts="\$(date -u +%Y-%m-%dT%H:%M:%SZ)"

@@ -57,13 +57,16 @@ type ModelCosts struct {
 }
 
 // UserPrice is a user-configured price profile, in per-million-token units to
-// match the config file. Converted to ModelCosts on resolve.
+// match the config file. Converted to ModelCosts on resolve. Cache rates left
+// at zero derive from the input rate, like the LiteLLM tables do.
 type UserPrice struct {
-	InputPerMillion  float64
-	OutputPerMillion float64
-	Currency         string
-	Source           string
-	ReviewedAt       string // RFC3339 date
+	InputPerMillion      float64
+	OutputPerMillion     float64
+	CacheWritePerMillion float64
+	CacheReadPerMillion  float64
+	Currency             string
+	Source               string
+	ReviewedAt           string // RFC3339 date
 }
 
 var (
@@ -160,8 +163,12 @@ func New(opts Options) *Resolver {
 	snap := loadTuples(snapshotJSON)
 	origin, at := SourceBundled, snapshotBuildDate()
 
+	now := opts.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
 	if opts.CacheDir != "" {
-		if cached, t, ok := loadCache(filepath.Join(opts.CacheDir, cacheFile)); ok {
+		if cached, t, ok := loadCache(filepath.Join(opts.CacheDir, cacheFile), now); ok {
 			for k, v := range snap { // snapshot fills gaps the cache lacks
 				if _, exists := cached[k]; !exists {
 					cached[k] = v
@@ -169,11 +176,6 @@ func New(opts Options) *Resolver {
 			}
 			snap, origin, at = cached, SourceCache, t
 		}
-	}
-
-	now := opts.Now
-	if now.IsZero() {
-		now = time.Now()
 	}
 	r := &Resolver{
 		priced:         snap,
@@ -297,8 +299,20 @@ func (r *Resolver) ResolveDetailed(model, priceProfile string) Resolution {
 			if cur == "" {
 				cur = "USD"
 			}
+			// Cache rates default to the same input-derived ratios the table path
+			// uses (write 1.25x, read 0.1x) — a $0 cache rate would silently erase
+			// most of a cache-heavy (e.g. Claude Code) session's cost.
+			in := up.InputPerMillion / 1e6
+			costs := ModelCosts{Input: in, Output: up.OutputPerMillion / 1e6,
+				CacheWrite: in * cacheWriteDefault, CacheRead: in * cacheReadDefault}
+			if up.CacheWritePerMillion > 0 {
+				costs.CacheWrite = up.CacheWritePerMillion / 1e6
+			}
+			if up.CacheReadPerMillion > 0 {
+				costs.CacheRead = up.CacheReadPerMillion / 1e6
+			}
 			return Resolution{
-				Costs:  ModelCosts{Input: up.InputPerMillion / 1e6, Output: up.OutputPerMillion / 1e6},
+				Costs:  costs,
 				Source: src, ReviewedAt: up.ReviewedAt, Stale: up.IsStale(r.now, r.staleAfterDays),
 				Found: true, PriceModel: priceProfile, Note: "user price profile " + priceProfile,
 				Currency: cur, Confidence: "exact",
@@ -450,7 +464,7 @@ func RefreshCache(ctx context.Context, dir string, now time.Time) error {
 	return os.Rename(tmp, dest)
 }
 
-func loadCache(path string) (map[string]ModelCosts, time.Time, bool) {
+func loadCache(path string, now time.Time) (map[string]ModelCosts, time.Time, bool) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, time.Time{}, false
@@ -460,7 +474,7 @@ func loadCache(path string) (map[string]ModelCosts, time.Time, bool) {
 		return nil, time.Time{}, false
 	}
 	t := time.UnixMilli(doc.Timestamp)
-	if time.Since(t) > cacheTTL {
+	if now.Sub(t) > cacheTTL {
 		return nil, time.Time{}, false
 	}
 	out := make(map[string]ModelCosts, len(doc.Data))

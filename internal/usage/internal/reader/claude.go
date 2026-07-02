@@ -27,11 +27,18 @@ func Claude(root string) Reader {
 
 func (claudeReader) Name() string { return "claude" }
 
-// claudeSlug mirrors Claude Code's project-dir sanitization (path separators and
-// dots become dashes).
+// claudeSlug mirrors Claude Code's project-dir sanitization: every character
+// outside [A-Za-z0-9] becomes a dash. Replacing only slashes and dots (the old
+// behavior) never matched paths with underscores, or Windows paths at all
+// ("C:\repo" kept its backslashes and colon) — silently disabling claude
+// reconciliation there.
 func claudeSlug(cwd string) string {
-	s := strings.ReplaceAll(cwd, "/", "-")
-	return strings.ReplaceAll(s, ".", "-")
+	return strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		return '-'
+	}, cwd)
 }
 
 type claudeLine struct {
@@ -51,27 +58,54 @@ type claudeLine struct {
 	} `json:"message"`
 }
 
+// claudeScan accumulates one Call per (session, model) — a session that
+// switched models mid-way (e.g. /model) must not price all its tokens at the
+// LAST model's rate — plus per-session metadata (activity interval, first user
+// message) shared by that session's calls.
+type claudeScan struct {
+	byKey map[string]*Call // sessionID \x00 model
+	order []string
+	meta  map[string]*claudeMeta
+}
+
+type claudeMeta struct {
+	first, last time.Time
+	userMsg     string
+	curModel    string // last real (non-synthetic) model seen in the session
+}
+
+func newClaudeScan() *claudeScan {
+	return &claudeScan{byKey: map[string]*Call{}, meta: map[string]*claudeMeta{}}
+}
+
+func (s *claudeScan) calls() []Call {
+	out := make([]Call, 0, len(s.order))
+	for _, k := range s.order {
+		c := *s.byKey[k]
+		if m := s.meta[c.SessionID]; m != nil {
+			c.Timestamp, c.LastActivity, c.UserMessage = m.first, m.last, m.userMsg
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
 func (r claudeReader) ReadForCWD(cwd string) ([]Call, error) {
 	dir := filepath.Join(r.root, claudeSlug(cwd))
 	files, err := filepath.Glob(filepath.Join(dir, "*.jsonl"))
 	if err != nil {
 		return nil, err
 	}
-	bySession := map[string]*Call{}
-	order := []string{}
+	st := newClaudeScan()
 	for _, f := range files {
-		if err := r.scanFile(f, cwd, bySession, &order); err != nil {
+		if err := r.scanFile(f, cwd, st); err != nil {
 			return nil, err
 		}
 	}
-	out := make([]Call, 0, len(order))
-	for _, id := range order {
-		out = append(out, *bySession[id])
-	}
-	return out, nil
+	return st.calls(), nil
 }
 
-func (r claudeReader) scanFile(path, cwd string, bySession map[string]*Call, order *[]string) error {
+func (r claudeReader) scanFile(path, cwd string, st *claudeScan) error {
 	f, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -91,30 +125,45 @@ func (r claudeReader) scanFile(path, cwd string, bySession map[string]*Call, ord
 		if l.CWD != "" && l.CWD != cwd {
 			continue
 		}
-		c := bySession[l.SessionID]
-		if c == nil {
-			c = &Call{Provider: "claude", SessionID: l.SessionID, CallID: l.SessionID, ProjectPath: l.CWD}
-			bySession[l.SessionID] = c
-			*order = append(*order, l.SessionID)
+		m := st.meta[l.SessionID]
+		if m == nil {
+			m = &claudeMeta{}
+			st.meta[l.SessionID] = m
 		}
 		if t, perr := time.Parse(time.RFC3339, l.Timestamp); perr == nil {
-			if c.Timestamp.IsZero() || t.Before(c.Timestamp) {
-				c.Timestamp = t
+			if m.first.IsZero() || t.Before(m.first) {
+				m.first = t
+			}
+			if t.After(m.last) {
+				m.last = t
 			}
 		}
 		switch l.Type {
 		case "assistant":
+			// "<synthetic>" is an internal placeholder, not a model change: its
+			// usage stays attributed to the session's current real model.
+			if mo := l.Message.Model; mo != "" && mo != "<synthetic>" {
+				m.curModel = mo
+			}
 			u := l.Message.Usage
+			if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheCreationInputTokens == 0 && u.CacheReadInputTokens == 0 {
+				continue
+			}
+			key := l.SessionID + "\x00" + m.curModel
+			c := st.byKey[key]
+			if c == nil {
+				c = &Call{Provider: "claude", SessionID: l.SessionID, CallID: l.SessionID + ":" + m.curModel,
+					ProjectPath: l.CWD, Model: m.curModel}
+				st.byKey[key] = c
+				st.order = append(st.order, key)
+			}
 			c.InputTokens += u.InputTokens
 			c.OutputTokens += u.OutputTokens
 			c.CacheCreate += u.CacheCreationInputTokens
 			c.CacheRead += u.CacheReadInputTokens
-			if m := l.Message.Model; m != "" && m != "<synthetic>" {
-				c.Model = m
-			}
 		case "user":
-			if c.UserMessage == "" {
-				c.UserMessage = firstText(l.Message.Content)
+			if m.userMsg == "" {
+				m.userMsg = firstText(l.Message.Content)
 			}
 		}
 	}

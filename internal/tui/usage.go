@@ -105,11 +105,10 @@ func (m *Model) initUsage() {
 	}
 	m.usageTally = map[string]usage.TokenPair{}
 	m.usageRate = map[string]usage.Rate{}
-	m.usageModel = map[string]string{}
+	m.usageOutputSeen = map[string]int{}
 	m.usagePricer = m.buildPricer()
 	for name, a := range m.Config.Agents {
 		model, _, _ := usageModel(a)
-		m.usageModel[name] = model
 		if r := m.usagePricer.Rate(model, a.Usage.PriceProfile); r.Found {
 			m.usageRate[name] = r
 		}
@@ -128,16 +127,6 @@ func usageModel(a config.AgentConfig) (model, source, confidence string) {
 		return a.Usage.Model, usage.MetaSourceConfig, usage.Exact
 	}
 	return usage.UnknownValue, usage.MetaSourceUnknown, usage.Unknown
-}
-
-// agentFingerprint is the agent's personality prompt prefix, clipped -- the
-// distinctive text council prepends to every prompt for this pane.
-func agentFingerprint(cfg config.Config, name string) string {
-	fp := cfg.AgentPromptPrefix(name)
-	if len(fp) > 160 {
-		fp = fp[:160]
-	}
-	return fp
 }
 
 // agentCWD is the agent's absolute working directory.
@@ -267,6 +256,11 @@ func (m Model) recordUsageInput(s *agent.Session, phase, userText string) {
 	if !m.Config.Usage.Enabled {
 		return
 	}
+	// A new prompt is a turn boundary: flush the previous turn's transcript
+	// delta first, so output cost accrues per turn instead of only on /save.
+	if view := m.findAgentForMessage(s.Name, s); view != nil {
+		m.recordUsageOutput(s, view.transcript())
+	}
 	prompt := m.Config.PromptForAgent(s.Name, userText)
 	wire := linePayload(s.Config.Terminal, prompt)
 	est := usage.EstimatorFor(m.Config.Usage.Estimator)
@@ -286,7 +280,7 @@ func (m Model) recordUsageInput(s *agent.Session, phase, userText string) {
 		Agent: s.Name, Phase: phase, Source: usage.SourcePrompt, Confidence: usage.Estimated,
 		Tool: tool, ToolSource: toolSource, ToolConfidence: toolConf,
 		Model: model, ModelSource: modelSource, ModelConfidence: modelConf,
-		CWD: sessionCWD(s), Fingerprint: agentFingerprint(m.Config, s.Name),
+		CWD:       sessionCWD(s),
 		Estimator: est.Name, UserInputChars: userChars, WireInputChars: wireChars,
 		InputChars: inputChars, InputTokens: inputTokens,
 		PromptHash: usage.PromptHash(prompt), PromptPreview: usage.PromptPreview(prompt),
@@ -295,25 +289,20 @@ func (m Model) recordUsageInput(s *agent.Session, phase, userText string) {
 
 // recordUsageOutput meters an agent's transcript. Transcript output is a weak
 // estimate: it is cumulative, so this records only the delta over output already
-// logged for this agent.
+// recorded by THIS process (see usageOutputSeen). Flushed at turn boundaries
+// (before each new prompt), on manual /save, and when the panes terminate — so
+// reader-less tools get an output floor without anyone pressing save.
 func (m Model) recordUsageOutput(s *agent.Session, content string) {
-	if !m.Config.Usage.Enabled || m.Store == nil || m.Store.RunDir == "" {
+	if !m.Config.Usage.Enabled || m.Store == nil || m.Store.RunDir == "" || m.usageOutputSeen == nil {
 		return
 	}
 	est := usage.EstimatorFor(m.Config.Usage.Estimator)
 	total, totalChars := est.Estimate(content)
-	existing := 0
-	if evs, err := usage.LoadEvents(m.Store.RunDir); err == nil {
-		for _, e := range evs {
-			if e.Agent == s.Name && e.Source == usage.SourceTranscript {
-				existing += e.OutputTokens
-			}
-		}
-	}
-	delta := total - existing
+	delta := total - m.usageOutputSeen[s.Name]
 	if delta <= 0 {
 		return
 	}
+	m.usageOutputSeen[s.Name] = total
 	a := m.Config.Agents[s.Name]
 	tool, toolSource, toolConf := usageTool(a)
 	model, modelSource, modelConf := usageModel(a)
@@ -332,7 +321,6 @@ func (m Model) recordUsageOutput(s *agent.Session, content string) {
 	if agentPrompt != "" {
 		ev.PromptHash = usage.PromptHash(agentPrompt)
 		ev.PromptPreview = usage.PromptPreview(agentPrompt)
-		ev.Fingerprint = agentFingerprint(m.Config, s.Name)
 	}
 	m.recordUsageEvent(ev)
 }
@@ -371,7 +359,7 @@ func (m Model) usageHeaderCost() string {
 		}
 	}
 	for name, t := range m.usageTally {
-		if _, done := m.usageReconciled[name]; done || !t.Any() {
+		if m.usageReconcileCovers(name) || !t.Any() {
 			continue
 		}
 		hasTokens = true
@@ -427,6 +415,26 @@ func (m Model) usageBorderSuffix(name string) string {
 		return " | $0.00"
 	}
 	return " | $?"
+}
+
+// usageReconcileCovers reports whether a pane's usage is already inside the
+// reconciled rollup: either under its own name, or under its TOOL label — the
+// key a combined row gets when several same-tool panes share one cwd. Without
+// the tool check the header would add the combined reported total AND each
+// pane's estimated floor.
+// ponytail: tool coverage is cwd-blind — a same-tool pane isolated in another
+// cwd with no reported row yet is briefly skipped too; carry cwd through the
+// rollup if that mixed setup ever matters.
+func (m Model) usageReconcileCovers(name string) bool {
+	if _, ok := m.usageReconciled[name]; ok {
+		return true
+	}
+	if tool := m.Config.Agents[name].Usage.Tool; tool != "" {
+		if _, ok := m.usageReconciled[tool]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // reconciledCost is a per-agent priced rollup of a /cost summary, used by the
@@ -492,15 +500,15 @@ func confidenceSuffix(conf string) string {
 func compactCost(cost float64, currency string) string {
 	switch strings.ToUpper(strings.TrimSpace(currency)) {
 	case "", "USD":
-		return fmt.Sprintf("$%.2f", cost)
+		return "$" + usage.FormatMoney(cost)
 	case "EUR":
-		return fmt.Sprintf("EUR %.2f", cost)
+		return "EUR " + usage.FormatMoney(cost)
 	case "GBP":
-		return fmt.Sprintf("GBP %.2f", cost)
+		return "GBP " + usage.FormatMoney(cost)
 	case "JPY":
 		return fmt.Sprintf("JPY %.0f", cost)
 	default:
-		return fmt.Sprintf("%.2f %s", cost, strings.ToUpper(currency))
+		return usage.FormatMoney(cost) + " " + strings.ToUpper(currency)
 	}
 }
 
@@ -525,18 +533,23 @@ func toPriceProfiles(prices map[string]config.PriceProfile) map[string]usage.Pri
 	out := make(map[string]usage.PriceProfile, len(prices))
 	for name, p := range prices {
 		out[name] = usage.PriceProfile{
-			InputPerMillion:  p.InputPerMillion,
-			OutputPerMillion: p.OutputPerMillion,
-			Currency:         p.Currency,
-			Source:           p.Source,
-			ReviewedAt:       p.ReviewedAt,
+			InputPerMillion:      p.InputPerMillion,
+			OutputPerMillion:     p.OutputPerMillion,
+			CacheWritePerMillion: p.CacheWritePerMillion,
+			CacheReadPerMillion:  p.CacheReadPerMillion,
+			Currency:             p.Currency,
+			Source:               p.Source,
+			ReviewedAt:           p.ReviewedAt,
 		}
 	}
 	return out
 }
 
-// cmdCost opens the per-session usage/cost breakdown for the active run.
-func (m *Model) cmdCost() {
+// cmdCost opens the per-session usage/cost breakdown for the active run. The
+// reconcile reads every provider session store on disk, so the work runs in a
+// tea.Cmd goroutine (synchronous reconciliation here froze the whole TUI on
+// large stores); costViewMsg carries the rendered view back to Update.
+func (m *Model) cmdCost() tea.Cmd {
 	runDir, stamp := "", ""
 	if m.orch != nil && m.orch.Run() != nil {
 		runDir, stamp = m.orch.Run().Dir, m.orch.Run().Stamp
@@ -545,41 +558,41 @@ func (m *Model) cmdCost() {
 	}
 	if runDir == "" {
 		m.Status = "cost -- no run yet (send a prompt first)"
-		return
-	}
-	events, err := usage.LoadEvents(runDir)
-	if err != nil {
-		m.Status = "cost: " + err.Error()
-		return
-	}
-	if len(events) == 0 {
-		m.Status = "cost -- no usage recorded yet"
-		return
+		return nil
 	}
 	pricer := m.usagePricer
 	if pricer == nil {
 		pricer = m.buildPricer()
 	}
-	events, rec, err := usage.ReconcileAndAppend(runDir, events)
-	if err != nil {
-		m.Status = "cost reconcile: " + err.Error()
-		return
-	}
-	summary := usage.Aggregate(events)
-	summary.Price(pricer)
-	// Fold the reconciled, priced totals back into the live state so the header
-	// and pane badges reflect reported cost instead of only the estimated floor.
-	m.usageReconciled = rollupReconciled(summary)
-	for _, note := range rec.Notes {
-		summary.Hints = append(summary.Hints, note)
-	}
+	m.usageReconcileBusy = true
+	m.Status = "cost -- reconciling..."
+	return func() tea.Msg {
+		out := costViewMsg{stamp: stamp}
+		events, err := usage.LoadEvents(runDir)
+		if err != nil {
+			out.err = err
+			return out
+		}
+		if len(events) == 0 {
+			return out // empty body → "no usage recorded yet"
+		}
+		events, rec, err := usage.ReconcileAndAppend(runDir, events)
+		if err != nil {
+			out.err = fmt.Errorf("reconcile: %w", err)
+			return out
+		}
+		summary := usage.Aggregate(events)
+		summary.Price(pricer)
+		summary.Hints = append(summary.Hints, rec.Notes...)
+		out.rollup = rollupReconciled(summary)
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "# Cost -- run %s\n\n", stamp)
-	b.WriteString(usage.FormatTable(summary))
-	if src, at := pricer.Origin(); !at.IsZero() {
-		fmt.Fprintf(&b, "\nprices: %s (%s)\n", src, at.Format("2006-01-02"))
+		var b strings.Builder
+		fmt.Fprintf(&b, "# Cost -- run %s\n\n", stamp)
+		b.WriteString(usage.FormatTable(summary))
+		if src, at := pricer.Origin(); !at.IsZero() {
+			fmt.Fprintf(&b, "\nprices: %s (%s)\n", src, at.Format("2006-01-02"))
+		}
+		out.body = b.String()
+		return out
 	}
-	m.openArtifactText("cost: "+stamp, b.String())
-	m.Status = "cost -- run " + stamp
 }

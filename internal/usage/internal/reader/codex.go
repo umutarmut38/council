@@ -51,14 +51,36 @@ type codexLine struct {
 	} `json:"payload"`
 }
 
-// rollouts lists every rollout-*.jsonl under the sessions tree.
+// codexScanDays bounds the sessions-tree walk. Reconciliation only ever looks
+// at the CURRENT run's window, so date directories older than this can never
+// match — without the bound every sweep (up to 1/s while agents stream) opens
+// every rollout file ever written.
+// ponytail: calendar prune with a generous margin; widen if a single council
+// run ever spans more than a week.
+const codexScanDays = 8
+
+// rollouts lists rollout-*.jsonl files under the sessions tree, skipping
+// YYYY/MM/DD date directories older than codexScanDays. Directories that don't
+// parse as dates are always walked.
 func (r codexReader) rollouts() []string {
+	cutoff := time.Now().UTC().AddDate(0, 0, -codexScanDays)
 	var out []string
 	_ = filepath.WalkDir(r.root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
-		if !d.IsDir() && strings.HasPrefix(d.Name(), "rollout-") && strings.HasSuffix(d.Name(), ".jsonl") {
+		if d.IsDir() {
+			if rel, rerr := filepath.Rel(r.root, path); rerr == nil {
+				parts := strings.Split(rel, string(filepath.Separator))
+				if len(parts) == 3 {
+					if t, terr := time.Parse("2006/01/02", strings.Join(parts, "/")); terr == nil && t.Before(cutoff) {
+						return filepath.SkipDir
+					}
+				}
+			}
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), "rollout-") && strings.HasSuffix(d.Name(), ".jsonl") {
 			out = append(out, path)
 		}
 		return nil
@@ -104,6 +126,11 @@ func (r codexReader) parseSession(path, cwd string) (Call, bool, error) {
 					c.Timestamp = t
 				}
 			}
+		}
+		// Any later line advances LastActivity so the reconcile window sees the
+		// session's full activity interval, not just its launch time.
+		if t, e := time.Parse(time.RFC3339, l.Timestamp); e == nil && t.After(c.LastActivity) {
+			c.LastActivity = t
 		}
 		if l.Payload.Model != "" {
 			c.Model = l.Payload.Model

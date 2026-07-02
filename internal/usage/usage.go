@@ -97,7 +97,6 @@ type Event struct {
 
 	PromptHash    string `json:"prompt_hash,omitempty"`
 	PromptPreview string `json:"prompt_preview,omitempty"`
-	Fingerprint   string `json:"fingerprint,omitempty"`
 
 	ProviderSessionID string   `json:"provider_session_id,omitempty"`
 	ProviderCallID    string   `json:"provider_call_id,omitempty"`
@@ -409,8 +408,11 @@ func LoadRunsSince(rootDir string, cutoff time.Time) ([]Event, error) {
 	return all, nil
 }
 
-// SessionTotal is one rolled-up row. Rows are phase-aware so a reported build
-// event never replaces an estimated plan event.
+// SessionTotal is one rolled-up row. Estimated rows are keyed per phase;
+// provider-reported rows carry whole-session totals (phase "session") and
+// replace exactly the estimates listed in their Replaces keys — which may span
+// several phases, because provider stores only report per-session cumulative
+// counts.
 type SessionTotal struct {
 	Agent        string
 	Phase        string
@@ -449,16 +451,23 @@ type Summary struct {
 var confTier = map[string]int{"": 0, Unknown: 0, Estimated: 1, Reported: 2, Exact: 3}
 
 // providerSupersessions returns the set of event indices for provider.session
-// events that are superseded by a richer sweep of the same (agent, phase, tool,
-// model, cwd) group. Reconcile (see correlate.go) sums every in-window session
-// for a (tool, cwd) into exactly ONE event per model per sweep, so two provider
+// events that are superseded by a richer sweep of the same (run, tool, model,
+// cwd) group. Reconcile (see correlate.go) sums every in-window session for a
+// (tool, cwd) into exactly ONE event per model per sweep, so two provider
 // events sharing this key are always re-computations of the same cumulative
 // total — never independent additive sessions. That invariant is why no
 // session/call id is needed in the key: totals only grow, so the max-token event
 // is the latest and most complete, and the rest must not be summed. Distinct
 // models keep distinct keys, so a genuinely additive second model is preserved.
+//
+// The agent label and phase are deliberately NOT part of the key: a group's
+// label flips from the pane name to the tool name when a second same-tool pane
+// joins the cwd mid-run, and older ledgers stamped provider events with the
+// first estimate's phase — keying on either would keep the stale sweep alive
+// and double-count. RunID IS in the key: the same (tool, cwd, model) group in
+// two different runs is genuinely additive when aggregating across runs.
 func providerSupersessions(events []Event) map[int]bool {
-	type provKey struct{ agent, phase, tool, model, cwd string }
+	type provKey struct{ runID, tool, model, cwd string }
 	provTotal := func(e Event) int {
 		return e.InputTokens + e.OutputTokens + e.ReasoningTokens +
 			e.CacheCreateTokens + e.CacheReadTokens +
@@ -470,7 +479,7 @@ func providerSupersessions(events []Event) map[int]bool {
 			continue
 		}
 		e.normalize()
-		k := provKey{e.Agent, valueOr(e.Phase, "session"), e.Tool, e.Model, e.CWD}
+		k := provKey{e.RunID, e.Tool, e.Model, e.CWD}
 		if j, ok := best[k]; !ok || provTotal(events[i]) > provTotal(events[j]) {
 			best[k] = i
 		}
@@ -481,7 +490,7 @@ func providerSupersessions(events []Event) map[int]bool {
 			continue
 		}
 		e.normalize()
-		k := provKey{e.Agent, valueOr(e.Phase, "session"), e.Tool, e.Model, e.CWD}
+		k := provKey{e.RunID, e.Tool, e.Model, e.CWD}
 		if best[k] != i {
 			superseded[i] = true
 		}
@@ -628,16 +637,17 @@ func runID(events []Event) string {
 func FormatTable(s Summary) string {
 	var b strings.Builder
 	tw := tabwriter.NewWriter(&b, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "Agent\tPhase\tTool\tModel\tPriceModel\tInput\tOutput\tCost\tSource\tConfidence\tNote")
+	fmt.Fprintln(tw, "Agent\tPhase\tTool\tModel\tPriceModel\tInput\tCache\tOutput\tCost\tSource\tConfidence\tNote")
 	for _, ses := range s.Sessions {
 		note := displayNote(ses)
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			ses.Agent, ses.Phase, dash(ses.Tool), dash(ses.Model), dash(ses.PriceModel),
-			tokens(ses.Tokens.Input), tokens(ses.Tokens.Output+ses.Tokens.Reasoning),
+			tokens(ses.Tokens.Input), cacheTokens(ses.Tokens), tokens(ses.Tokens.Output+ses.Tokens.Reasoning),
 			cost(ses.Cost, ses.Currency), dash(ses.PriceSource), dash(ses.PriceConf), dash(note))
 	}
-	fmt.Fprintf(tw, "Total\t\t\t\t\t%s\t%s\t%s\t\t\t%s\n",
-		tokens(s.Tokens.Input), tokens(s.Tokens.Output+s.Tokens.Reasoning), cost(s.Cost, s.Currency), dash(s.Note))
+	fmt.Fprintf(tw, "Total\t\t\t\t\t%s\t%s\t%s\t%s\t\t\t%s\n",
+		tokens(s.Tokens.Input), cacheTokens(s.Tokens), tokens(s.Tokens.Output+s.Tokens.Reasoning),
+		cost(s.Cost, s.Currency), dash(s.Note))
 	tw.Flush()
 	if len(s.Hints) > 0 {
 		b.WriteString("\nHints:\n")
@@ -739,7 +749,28 @@ func tokens(n int) string {
 	return fmt.Sprintf("%d", n)
 }
 
+// cacheTokens renders a row's cached input (read + write). The Input column is
+// FRESH input only, so without this column two sessions with identical real
+// usage but different cache hits look inexplicably different.
+func cacheTokens(t TokenTotals) string {
+	n := t.CacheRead + t.CacheCreate
+	if n == 0 {
+		return "--"
+	}
+	return tokens(n)
+}
+
 var currencySymbols = map[string]string{"USD": "$", "EUR": "EUR ", "GBP": "GBP ", "JPY": "JPY "}
+
+// FormatMoney renders an amount with two decimals, switching to four when a
+// real sub-cent cost would otherwise round to 0.00 and read as free — "never
+// silently $0" applies to rounding too.
+func FormatMoney(v float64) string {
+	if v > 0 && v < 0.005 {
+		return fmt.Sprintf("%.4f", v)
+	}
+	return fmt.Sprintf("%.2f", v)
+}
 
 func cost(c *float64, currency string) string {
 	if c == nil {
@@ -750,7 +781,7 @@ func cost(c *float64, currency string) string {
 		cur = "USD"
 	}
 	if sym, ok := currencySymbols[cur]; ok {
-		return fmt.Sprintf("%s%.2f", sym, *c)
+		return sym + FormatMoney(*c)
 	}
-	return fmt.Sprintf("%.2f %s", *c, cur)
+	return FormatMoney(*c) + " " + cur
 }

@@ -51,8 +51,9 @@ type copilotUsage struct {
 }
 
 type copilotEvent struct {
-	Type string `json:"type"`
-	Data struct {
+	Type      string `json:"type"`
+	Timestamp string `json:"timestamp"`
+	Data      struct {
 		CurrentModel string `json:"currentModel"`
 		ModelMetrics map[string]struct {
 			Usage copilotUsage `json:"usage"`
@@ -88,11 +89,22 @@ func (r copilotReader) sessionDirs() []string {
 // parseSession returns one Call per model used in the session (from the
 // session.shutdown metrics), or nil when the session isn't in cwd or hasn't
 // reported totals yet (still running → council's estimated floor covers it).
+// copilotScanDays bounds the per-sweep scan: session dirs accumulate forever,
+// and a session whose event log was last written over a week ago can never be
+// in the current run's reconcile window.
+// ponytail: one stat replaces reading workspace.yaml + events.jsonl per stale
+// dir; widen if a single council run ever spans more than a week.
+const copilotScanDays = 8
+
 func (r copilotReader) parseSession(dir, cwd string) []Call {
+	path := filepath.Join(dir, "events.jsonl")
+	fi, err := os.Stat(path)
+	if err != nil || time.Since(fi.ModTime()) > copilotScanDays*24*time.Hour {
+		return nil
+	}
 	if copilotCWD(dir) != cwd {
 		return nil
 	}
-	path := filepath.Join(dir, "events.jsonl")
 	f, err := os.Open(path)
 	if err != nil {
 		return nil
@@ -101,12 +113,18 @@ func (r copilotReader) parseSession(dir, cwd string) []Call {
 
 	var shutdown *copilotEvent
 	currentModel := ""
+	var start time.Time
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 64*1024), 16<<20)
 	for sc.Scan() {
 		var e copilotEvent
 		if json.Unmarshal(sc.Bytes(), &e) != nil {
 			continue
+		}
+		if start.IsZero() {
+			if t, perr := time.Parse(time.RFC3339, e.Timestamp); perr == nil {
+				start = t
+			}
 		}
 		if e.Data.CurrentModel != "" {
 			currentModel = e.Data.CurrentModel
@@ -120,9 +138,15 @@ func (r copilotReader) parseSession(dir, cwd string) []Call {
 		return nil
 	}
 
-	var ts time.Time
+	// The session's interval is [first event, file mtime]: copilot reports totals
+	// only at shutdown, so mtime is effectively the session end. Older files
+	// without per-event timestamps collapse to [mtime, mtime].
+	var end time.Time
 	if fi, e := os.Stat(path); e == nil {
-		ts = fi.ModTime()
+		end = fi.ModTime()
+	}
+	if start.IsZero() {
+		start = end
 	}
 	sid := filepath.Base(dir)
 	// Copilot's modelMetrics.inputTokens is cache-INCLUSIVE: it equals the fresh
@@ -141,7 +165,7 @@ func (r copilotReader) parseSession(dir, cwd string) []Call {
 		if cacheRead > in {
 			cacheRead = in
 		}
-		return Call{Provider: "copilot", SessionID: sid, CallID: sid + ":" + model, ProjectPath: cwd, Model: model, InputTokens: in - cacheRead, CacheRead: cacheRead, OutputTokens: out, ReasoningTokens: reasoning, Timestamp: ts}
+		return Call{Provider: "copilot", SessionID: sid, CallID: sid + ":" + model, ProjectPath: cwd, Model: model, InputTokens: in - cacheRead, CacheRead: cacheRead, OutputTokens: out, ReasoningTokens: reasoning, Timestamp: start, LastActivity: end}
 	}
 
 	if len(shutdown.Data.ModelMetrics) > 0 { // per-model breakdown is the most accurate

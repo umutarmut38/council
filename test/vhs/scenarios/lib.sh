@@ -94,8 +94,10 @@ pass() {
   printf 'PASS %s\n' "$SCENARIO"
 }
 
+# claude_slug mirrors the Go reader's slug (claude.go): every character outside
+# [A-Za-z0-9] becomes a dash. printf (no newline) keeps tr -c from adding one.
 claude_slug() {
-  printf '%s' "$1" | tr '/.' '--'
+  printf '%s' "$1" | tr -c '[:alnum:]' '-'
 }
 
 require_mode() {

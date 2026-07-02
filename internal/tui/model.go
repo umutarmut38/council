@@ -74,6 +74,15 @@ type phasePromptsMsg map[string]string
 // output; usageReconciledMsg carries the result back to the Update goroutine.
 type usageTickMsg struct{}
 type usageReconciledMsg struct{ rollup map[string]reconciledCost }
+
+// costViewMsg is the /cost view rendered off-thread (empty body = no usage yet).
+type costViewMsg struct {
+	stamp  string
+	body   string
+	rollup map[string]reconciledCost
+	err    error
+}
+
 type pollArtifactsMsg struct{}
 
 // worktreeState is a freestyle pane's cached freshness relative to repo HEAD.
@@ -233,10 +242,14 @@ type Model struct {
 	// per-agent resolved price, and the configured model label. Provider session
 	// models are recorded only through reconciliation. Read by the header/border
 	// in View.
-	usageTally  map[string]usage.TokenPair
-	usageRate   map[string]usage.Rate
-	usageModel  map[string]string
-	usagePricer *usage.Pricer
+	usageTally map[string]usage.TokenPair
+	usageRate  map[string]usage.Rate
+	// usageOutputSeen is the transcript-token total already recorded per agent,
+	// so each flush appends only the delta. In-memory only: every TUI process
+	// starts with fresh PTY transcripts, so its deltas are relative to its own
+	// recorded output.
+	usageOutputSeen map[string]int
+	usagePricer     *usage.Pricer
 	// usageReconciled holds per-agent priced totals from the last reconcile
 	// (the 1s tick or /cost), so the header/badge show reported cost (real
 	// session tokens) instead of only the estimated floor. Nil until then.
@@ -500,6 +513,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.usageReconcileBusy = false
 		if msg.rollup != nil {
 			m.usageReconciled = msg.rollup
+		}
+		return m, nil
+	case costViewMsg:
+		m.usageReconcileBusy = false
+		switch {
+		case msg.err != nil:
+			m.Status = "cost: " + msg.err.Error()
+		case msg.body == "":
+			m.Status = "cost -- no usage recorded yet"
+		default:
+			if msg.rollup != nil {
+				m.usageReconciled = msg.rollup
+			}
+			m.openArtifactText("cost: "+msg.stamp, msg.body)
+			m.Status = "cost -- run " + msg.stamp
 		}
 		return m, nil
 	case worktreeStatusMsg:
@@ -928,6 +956,10 @@ func (v *agentView) transcript() string {
 
 func (m Model) terminateAgents() {
 	for _, view := range m.Agents {
+		// Flush the final transcript delta before the pane dies so exit-time
+		// output isn't lost — reader-less tools have no provider store for
+		// FinalizeUsage to recover it from.
+		m.recordUsageOutput(view.Session, view.transcript())
 		_ = view.Session.Terminate()
 	}
 	// The integrated editor session is not in m.Agents; tear it down too so no

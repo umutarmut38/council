@@ -14,7 +14,11 @@ import (
 )
 
 // Call is one tool-reported unit of usage. The non-token fields (SessionID,
-// ProjectPath, Timestamp, UserMessage) are correlation keys.
+// ProjectPath, Timestamp, UserMessage) are correlation keys. Timestamp is the
+// session's START; LastActivity (zero = unknown) is its most recent activity —
+// together they give the reconcile window an interval to overlap against, so a
+// session launched before the run's first prompt (council starts panes at
+// launch, prompts come later) still counts while it stays active.
 type Call struct {
 	Provider          string
 	Model             string
@@ -23,6 +27,7 @@ type Call struct {
 	ProjectPath       string
 	UserMessage       string
 	Timestamp         time.Time
+	LastActivity      time.Time
 	InputTokens       int
 	OutputTokens      int
 	ReasoningTokens   int
@@ -57,6 +62,17 @@ func For(tool string) Reader {
 		return f()
 	}
 	return nil
+}
+
+// Keys returns every registered tool key, sorted — the set of valid
+// `agents.<name>.usage.tool` values.
+func Keys() []string {
+	keys := make([]string, 0, len(registry))
+	for k := range registry {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // All returns one instance of each distinct reader (deduped by Name, ordered by

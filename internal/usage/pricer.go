@@ -12,13 +12,16 @@ import (
 // never import the pricing package directly.
 type Pricer struct{ r *pricing.Resolver }
 
-// PriceProfile is a user-configured price, in per-million-token units.
+// PriceProfile is a user-configured price, in per-million-token units. Unset
+// cache rates derive from the input rate (write 1.25x, read 0.1x).
 type PriceProfile struct {
-	InputPerMillion  float64
-	OutputPerMillion float64
-	Currency         string
-	Source           string
-	ReviewedAt       string
+	InputPerMillion      float64
+	OutputPerMillion     float64
+	CacheWritePerMillion float64
+	CacheReadPerMillion  float64
+	Currency             string
+	Source               string
+	ReviewedAt           string
 }
 
 // PricerOptions configure a Pricer.
@@ -36,11 +39,13 @@ func NewPricer(o PricerOptions) *Pricer {
 	up := make(map[string]pricing.UserPrice, len(o.Prices))
 	for k, p := range o.Prices {
 		up[k] = pricing.UserPrice{
-			InputPerMillion:  p.InputPerMillion,
-			OutputPerMillion: p.OutputPerMillion,
-			Currency:         p.Currency,
-			Source:           p.Source,
-			ReviewedAt:       p.ReviewedAt,
+			InputPerMillion:      p.InputPerMillion,
+			OutputPerMillion:     p.OutputPerMillion,
+			CacheWritePerMillion: p.CacheWritePerMillion,
+			CacheReadPerMillion:  p.CacheReadPerMillion,
+			Currency:             p.Currency,
+			Source:               p.Source,
+			ReviewedAt:           p.ReviewedAt,
 		}
 	}
 	return &Pricer{r: pricing.New(pricing.Options{

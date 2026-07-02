@@ -101,6 +101,21 @@ func TestUserPriceProfileWins(t *testing.T) {
 	if !approx(costs.Input, 2e-06) || !approx(costs.Output, 1e-05) {
 		t.Fatalf("profile rates = %v/%v, want 2e-06/1e-05", costs.Input, costs.Output)
 	}
+	// Unset cache rates derive from the input rate (write 1.25x, read 0.1x) —
+	// never $0, which would erase most of a cache-heavy session's cost.
+	if !approx(costs.CacheWrite, 2.5e-06) || !approx(costs.CacheRead, 2e-07) {
+		t.Fatalf("derived cache rates = %v/%v, want 2.5e-06/2e-07", costs.CacheWrite, costs.CacheRead)
+	}
+}
+
+func TestUserPriceProfileExplicitCacheRates(t *testing.T) {
+	r := New(Options{UserPrices: map[string]UserPrice{
+		"p": {InputPerMillion: 2, OutputPerMillion: 10, CacheWritePerMillion: 4, CacheReadPerMillion: 0.5},
+	}})
+	costs, _, ok := r.Resolve("gpt-5", "p")
+	if !ok || !approx(costs.CacheWrite, 4e-06) || !approx(costs.CacheRead, 5e-07) {
+		t.Fatalf("explicit cache rates = %v/%v (ok=%v), want 4e-06/5e-07", costs.CacheWrite, costs.CacheRead, ok)
+	}
 }
 
 func TestFastMultiplier(t *testing.T) {

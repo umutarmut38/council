@@ -192,7 +192,6 @@ func Schema() []SchemaSection {
 			Intro: "Local, provider-agnostic cost/usage ledger. Off by default; all data stays under `.council/`.",
 			Fields: []SchemaField{
 				{"enabled", "bool", "`false`", "Record usage and show the cost UI (header total, pane-border cost, `/cost`)."},
-				{"currency", "string", "`USD`", "Currency label for displayed costs."},
 				{"estimator", "string", "`bytes4`", "Local token estimator: `bytes4` (UTF-8 bytes / 4) or `runes4` (Unicode code points / 4)."},
 				{"show_total_in_header", "bool", "`true`", "Show a compact run cost total in the top status line (on by default when usage is enabled; set `false` to hide)."},
 				{"show_agent_cost_in_border", "bool", "`true`", "Show each session's cost in its pane border (on by default when usage is enabled; set `false` to hide)."},
@@ -207,6 +206,8 @@ func Schema() []SchemaSection {
 			Fields: []SchemaField{
 				{"input_per_million", "float", "`0`", "Input price per 1M tokens."},
 				{"output_per_million", "float", "`0`", "Output price per 1M tokens."},
+				{"cache_write_per_million", "float", "input × 1.25", "Cache-write price per 1M tokens; derives from the input rate when unset."},
+				{"cache_read_per_million", "float", "input × 0.1", "Cache-read price per 1M tokens; derives from the input rate when unset."},
 				{"currency", "string", "—", "Currency for this profile (informational)."},
 				{"source", "string", "—", "Where the price came from (informational, e.g. `user`)."},
 				{"reviewed_at", "string", "—", "Date (`YYYY-MM-DD`) the price was last reviewed; drives the stale warning."},

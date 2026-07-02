@@ -683,3 +683,19 @@ setup:
 		t.Fatalf("Label() = %q, want proxy", sc.Label())
 	}
 }
+
+// A usage.tool value without a native reader can never reconcile, so a typo
+// (e.g. "claude-code") must fail validation instead of silently doing nothing.
+func TestValidateUsageRejectsUnknownTool(t *testing.T) {
+	c := Config{
+		Usage:  UsageConfig{Enabled: true},
+		Agents: map[string]AgentConfig{"a": {Usage: AgentUsageConfig{Tool: "claude-code"}}},
+	}
+	if err := c.validateUsage(); err == nil {
+		t.Fatal("unknown usage.tool must fail validation")
+	}
+	c.Agents["a"] = AgentConfig{Usage: AgentUsageConfig{Tool: "claude"}}
+	if err := c.validateUsage(); err != nil {
+		t.Fatalf("known usage.tool rejected: %v", err)
+	}
+}

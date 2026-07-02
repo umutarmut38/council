@@ -2,7 +2,11 @@ package config
 
 import (
 	"fmt"
+	"slices"
 	"sort"
+	"strings"
+
+	"github.com/umutarmut38/council/internal/usage"
 )
 
 // UsageConfig configures council's local cost/usage ledger. Off by default:
@@ -10,8 +14,6 @@ import (
 type UsageConfig struct {
 	// Enabled turns on the ledger, the header/border cost, and the /cost view.
 	Enabled bool `yaml:"enabled,omitempty"`
-	// Currency labels displayed costs (default USD).
-	Currency string `yaml:"currency,omitempty"`
 	// Estimator names the local token estimator: "bytes4" or "runes4".
 	Estimator string `yaml:"estimator,omitempty"`
 	// ShowTotalInHeader shows a compact run total in the top status line.
@@ -29,13 +31,17 @@ type UsageConfig struct {
 	Prices map[string]PriceProfile `yaml:"prices,omitempty"`
 }
 
-// PriceProfile is a user-configured price, in per-million-token units.
+// PriceProfile is a user-configured price, in per-million-token units. Cache
+// rates left unset derive from the input rate (write 1.25x, read 0.1x) so
+// cache-heavy sessions are never silently priced at $0.
 type PriceProfile struct {
-	InputPerMillion  float64 `yaml:"input_per_million"`
-	OutputPerMillion float64 `yaml:"output_per_million"`
-	Currency         string  `yaml:"currency,omitempty"`
-	Source           string  `yaml:"source,omitempty"`
-	ReviewedAt       string  `yaml:"reviewed_at,omitempty"`
+	InputPerMillion      float64 `yaml:"input_per_million"`
+	OutputPerMillion     float64 `yaml:"output_per_million"`
+	CacheWritePerMillion float64 `yaml:"cache_write_per_million,omitempty"`
+	CacheReadPerMillion  float64 `yaml:"cache_read_per_million,omitempty"`
+	Currency             string  `yaml:"currency,omitempty"`
+	Source               string  `yaml:"source,omitempty"`
+	ReviewedAt           string  `yaml:"reviewed_at,omitempty"`
 }
 
 // AgentUsageConfig is the per-agent cost binding.
@@ -66,9 +72,6 @@ func (c *Config) normalizeUsage() {
 	if !c.Usage.Enabled {
 		return
 	}
-	if c.Usage.Currency == "" {
-		c.Usage.Currency = "USD"
-	}
 	if c.Usage.Estimator == "" {
 		c.Usage.Estimator = "bytes4"
 	}
@@ -90,7 +93,7 @@ func (c Config) validateUsage() error {
 	profiles := make([]string, 0, len(c.Usage.Prices))
 	for name, p := range c.Usage.Prices {
 		profiles = append(profiles, name)
-		if p.InputPerMillion < 0 || p.OutputPerMillion < 0 {
+		if p.InputPerMillion < 0 || p.OutputPerMillion < 0 || p.CacheWritePerMillion < 0 || p.CacheReadPerMillion < 0 {
 			return fmt.Errorf("usage.prices.%s has a negative rate", name)
 		}
 	}
@@ -102,12 +105,18 @@ func (c Config) validateUsage() error {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		pp := c.Agents[name].Usage.PriceProfile
-		if pp == "" {
-			continue
+		au := c.Agents[name].Usage
+		if pp := au.PriceProfile; pp != "" {
+			if _, ok := c.Usage.Prices[pp]; !ok {
+				return fmt.Errorf("agent %q references unknown usage.price_profile %q", name, pp)
+			}
 		}
-		if _, ok := c.Usage.Prices[pp]; !ok {
-			return fmt.Errorf("agent %q references unknown usage.price_profile %q", name, pp)
+		// The tool's only job is selecting a provider-session reader, so an
+		// unknown value can never work — a typo would just disable
+		// reconciliation silently. Reject it up front.
+		if tool := au.Tool; tool != "" && !slices.Contains(usage.KnownTools(), tool) {
+			return fmt.Errorf("agent %q has unknown usage.tool %q (known: %s)",
+				name, tool, strings.Join(usage.KnownTools(), ", "))
 		}
 	}
 	return nil

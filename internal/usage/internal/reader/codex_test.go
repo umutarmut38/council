@@ -4,17 +4,40 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func writeRollout(t *testing.T, root, content string) {
 	t.Helper()
-	dir := filepath.Join(root, "2026", "06", "28")
+	// The walk prunes date dirs older than codexScanDays, so fixtures live
+	// under today's date (file-content timestamps are independent of the path).
+	dir := filepath.Join(root, filepath.FromSlash(time.Now().UTC().Format("2006/01/02")))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	f := filepath.Join(dir, "rollout-2026-06-28T10-00-00-abc.jsonl")
 	if err := os.WriteFile(f, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Rollouts under a date directory older than codexScanDays are never opened —
+// the walk prunes them wholesale.
+func TestCodexWalkPrunesOldDateDirs(t *testing.T) {
+	root := t.TempDir()
+	old := filepath.Join(root, "2020", "01", "01")
+	if err := os.MkdirAll(old, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stale := `{"type":"session_meta","timestamp":"2020-01-01T10:00:00Z","payload":{"cwd":"/work/proj","session_id":"old"}}
+{"type":"event_msg","timestamp":"2020-01-01T10:00:05Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":999,"output_tokens":9}}}}
+`
+	if err := os.WriteFile(filepath.Join(old, "rollout-old.jsonl"), []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	calls, err := Codex(root).ReadForCWD("/work/proj")
+	if err != nil || len(calls) != 0 {
+		t.Fatalf("stale date dir must be pruned, got %v / %+v", err, calls)
 	}
 }
 

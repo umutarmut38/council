@@ -29,8 +29,11 @@ EOF
     cat >"$WORK/.council/runs/$run/usage/events.jsonl" <<JSONL
 {"schema_version":1,"at":"2026-06-28T10:00:00Z","run_id":"$run","agent":"codex-a","phase":"plan","source":"council.prompt","confidence":"estimated","tool":"codex","tool_source":"config","tool_confidence":"exact","model":"unknown","model_source":"unknown","model_confidence":"unknown","estimator":"bytes4","cwd":"$WORK","prompt_hash":"p1","prompt_preview":"You are The Minimalist. Less is more. Build it.","fingerprint":"You are The Minimalist. Less is more.","input_tokens":5,"reconcile_key":"estimate-codex"}
 JSONL
-    mkdir -p "$HOME/.codex/sessions/2026/06/28"
-    cat >"$HOME/.codex/sessions/2026/06/28/rollout-2026-06-28T10-00-00-cx1.jsonl" <<JSONL
+    # The codex reader prunes date dirs older than ~a week, so the fixture must
+    # live under today's date (file-content timestamps are independent of it).
+    day="$(date -u +%Y/%m/%d)"
+    mkdir -p "$HOME/.codex/sessions/$day"
+    cat >"$HOME/.codex/sessions/$day/rollout-2026-06-28T10-00-00-cx1.jsonl" <<JSONL
 {"type":"session_meta","timestamp":"2026-06-28T10:00:01Z","payload":{"cwd":"$WORK","session_id":"cx1"}}
 {"type":"turn_context","payload":{"type":"turn_context","model":"gpt-5.4-mini"}}
 {"type":"event_msg","payload":{"type":"user_message","message":"You are The Minimalist. Less is more. Build it."}}

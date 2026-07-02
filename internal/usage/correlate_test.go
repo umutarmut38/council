@@ -226,10 +226,37 @@ func TestReconcileIgnoresOutOfWindowCalls(t *testing.T) {
 		{Agent: "claude-a", Tool: "claude", CWD: "/w/a", At: "2026-06-27T10:00:00Z", Confidence: Estimated, InputTokens: 5},
 	}
 	rd := fakeReader{calls: map[string][]reader.Call{
-		"/w/a": {{Timestamp: mustTime("2020-01-01T00:00:00Z"), InputTokens: 999}},
+		"/w/a": {
+			// Session over long before the run.
+			{Timestamp: mustTime("2020-01-01T00:00:00Z"), LastActivity: mustTime("2020-01-01T01:00:00Z"), InputTokens: 999},
+			// Session started long after the run's window.
+			{Timestamp: mustTime("2026-06-27T11:00:00Z"), InputTokens: 999},
+		},
 	}}
 	if rep := reconcileWith(events, lookup("claude", rd)).Events; len(rep) != 0 {
-		t.Fatalf("stale call must be ignored, got %+v", rep)
+		t.Fatalf("out-of-window calls must be ignored, got %+v", rep)
+	}
+}
+
+// Council launches panes at startup, so a session can START long before the
+// first prompt. As long as it was still ACTIVE inside the run window, its
+// reported totals count — a point-in-time start check would drop it (the
+// "codex reconcile silently dead after 60s of idle" bug).
+func TestReconcileIncludesSessionStartedBeforeWindow(t *testing.T) {
+	events := []Event{
+		{Agent: "codex-a", Tool: "codex", CWD: "/w/a", At: "2026-06-27T10:00:00Z", Confidence: Estimated, InputTokens: 5},
+	}
+	rd := fakeReader{calls: map[string][]reader.Call{
+		"/w/a": {{
+			Model:        "gpt-5",
+			Timestamp:    mustTime("2026-06-27T09:30:00Z"), // pane launched, user idled 30m
+			LastActivity: mustTime("2026-06-27T10:00:20Z"), // then worked during the run
+			InputTokens:  100, OutputTokens: 10,
+		}},
+	}}
+	rep := reconcileWith(events, lookup("codex", rd)).Events
+	if len(rep) != 1 || rep[0].InputTokens != 100 {
+		t.Fatalf("active-in-window session must reconcile despite early start, got %+v", rep)
 	}
 }
 
@@ -264,5 +291,63 @@ func TestReconcileAndAppendIdempotent(t *testing.T) {
 	loaded, _ := LoadEvents(runDir)
 	if len(loaded) != 2 {
 		t.Fatalf("ledger events = %d, want estimate + one report", len(loaded))
+	}
+}
+
+// A (tool, cwd) group whose label flips from the pane name (single agent) to
+// the tool name (combined) between two sweeps must not keep the stale
+// single-agent sweep alive: both events re-compute the same cumulative store
+// total, so Aggregate keeps only the richest.
+func TestSingleToCombinedFlipSupersedes(t *testing.T) {
+	runDir := t.TempDir()
+	estA := Event{RunID: "r", Agent: "claude-a", Tool: "claude", Phase: "plan",
+		At: "2026-06-27T10:00:00Z", CWD: "/repo", Confidence: Estimated, InputTokens: 5}
+	if err := Append(runDir, estA); err != nil {
+		t.Fatal(err)
+	}
+	events, _ := LoadEvents(runDir)
+	rd1 := fakeReader{calls: map[string][]reader.Call{"/repo": {
+		{Model: "m", Timestamp: mustTime("2026-06-27T10:00:03Z"), InputTokens: 100, OutputTokens: 10},
+	}}}
+	events, _, err := reconcileAndAppendWith(runDir, events, lookup("claude", rd1))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A second same-tool pane sends its first prompt; the store now has both.
+	estB := Event{RunID: "r", Agent: "claude-b", Tool: "claude", Phase: "plan",
+		At: "2026-06-27T10:00:05Z", CWD: "/repo", Confidence: Estimated, InputTokens: 5}
+	if err := Append(runDir, estB); err != nil {
+		t.Fatal(err)
+	}
+	events, _ = LoadEvents(runDir)
+	rd2 := fakeReader{calls: map[string][]reader.Call{"/repo": {
+		{Model: "m", Timestamp: mustTime("2026-06-27T10:00:03Z"), InputTokens: 100, OutputTokens: 10},
+		{Model: "m", Timestamp: mustTime("2026-06-27T10:00:08Z"), InputTokens: 200, OutputTokens: 20},
+	}}}
+	events, _, err = reconcileAndAppendWith(runDir, events, lookup("claude", rd2))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := Aggregate(events)
+	if s.Tokens.Input != 300 || s.Tokens.Output != 30 {
+		t.Fatalf("total = %d/%d, want 300/30 (stale single-agent sweep must be superseded); sessions: %+v",
+			s.Tokens.Input, s.Tokens.Output, s.Sessions)
+	}
+}
+
+// Provider events from DIFFERENT runs are independent totals: supersession is
+// scoped per run, so a cross-run aggregation (council cost --since) sums them.
+func TestProviderSupersessionScopedPerRun(t *testing.T) {
+	mk := func(runID string, in int) Event {
+		e := Event{RunID: runID, Agent: "claude", Tool: "claude", Model: "m", CWD: "/repo",
+			Source: SourceProvider, Confidence: Reported, InputTokens: in}
+		e.normalize()
+		return e
+	}
+	s := Aggregate([]Event{mk("run1", 100), mk("run2", 200)})
+	if s.Tokens.Input != 300 {
+		t.Fatalf("cross-run total = %d, want 300 (runs are additive, not superseded)", s.Tokens.Input)
 	}
 }

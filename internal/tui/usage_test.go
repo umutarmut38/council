@@ -82,7 +82,7 @@ func TestRecordUsageInputMetersWirePrompt(t *testing.T) {
 }
 
 func usageConfigOn() config.UsageConfig {
-	return config.UsageConfig{Enabled: true, Currency: "USD", Estimator: usage.EstimatorBytes4}
+	return config.UsageConfig{Enabled: true, Estimator: usage.EstimatorBytes4}
 }
 
 // Regression for #3: a paste-mode agent's recorded input estimate must be the
@@ -183,6 +183,33 @@ func TestBadgeAndHeaderPreferReconciled(t *testing.T) {
 	}
 	if got := m.usageHeaderCost(); got != "Run $0.04" {
 		t.Fatalf("header = %q, want \"Run $0.04\" (reported, no est)", got)
+	}
+}
+
+// Cumulative mode: two same-tool panes sharing a cwd reconcile to ONE combined
+// row keyed by the TOOL label ("claude"), not any pane name. The header must
+// treat both panes as covered by that row — not add their estimated floors on
+// top of the combined reported total.
+func TestHeaderSkipsEstimatesCoveredByCombinedToolRow(t *testing.T) {
+	cfg := config.Config{Usage: usageConfigOn(), Agents: map[string]config.AgentConfig{
+		"claude-a": {Usage: config.AgentUsageConfig{Tool: "claude"}},
+		"claude-b": {Usage: config.AgentUsageConfig{Tool: "claude"}},
+	}}
+	m := Model{
+		Config: cfg,
+		usageTally: map[string]usage.TokenPair{
+			"claude-a": {Input: 1000}, "claude-b": {Input: 1000},
+		},
+		usageRate: map[string]usage.Rate{
+			"claude-a": {InputPerToken: 0.001, Currency: "USD", Found: true},
+			"claude-b": {InputPerToken: 0.001, Currency: "USD", Found: true},
+		},
+		usageReconciled: map[string]reconciledCost{
+			"claude": {cost: 3.00, currency: "USD", confidence: usage.Reported, priced: true},
+		},
+	}
+	if got := m.usageHeaderCost(); got != "Run $3.00" {
+		t.Fatalf("header = %q, want \"Run $3.00\" (combined row covers both panes)", got)
 	}
 }
 

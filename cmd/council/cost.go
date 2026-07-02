@@ -140,11 +140,13 @@ func toPriceProfiles(prices map[string]config.PriceProfile) map[string]usage.Pri
 	out := make(map[string]usage.PriceProfile, len(prices))
 	for name, p := range prices {
 		out[name] = usage.PriceProfile{
-			InputPerMillion:  p.InputPerMillion,
-			OutputPerMillion: p.OutputPerMillion,
-			Currency:         p.Currency,
-			Source:           p.Source,
-			ReviewedAt:       p.ReviewedAt,
+			InputPerMillion:      p.InputPerMillion,
+			OutputPerMillion:     p.OutputPerMillion,
+			CacheWritePerMillion: p.CacheWritePerMillion,
+			CacheReadPerMillion:  p.CacheReadPerMillion,
+			Currency:             p.Currency,
+			Source:               p.Source,
+			ReviewedAt:           p.ReviewedAt,
 		}
 	}
 	return out

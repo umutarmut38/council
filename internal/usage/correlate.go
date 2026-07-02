@@ -15,6 +15,11 @@ type ReconcileResult struct {
 	Notes  []string
 }
 
+// KnownTools returns the tool keys that have a native provider-session reader —
+// the valid values for `agents.<name>.usage.tool`. A typo here used to disable
+// reconciliation silently; config validation now rejects it up front.
+func KnownTools() []string { return reader.Keys() }
+
 // Reconcile reads tool session files for the agents seen in events and returns
 // reported events that can upgrade council's estimates. It is pure; use
 // ReconcileAndAppend to persist new reported events idempotently.
@@ -77,7 +82,6 @@ type reconGroup struct {
 	tool, cwd string
 	agents    map[string]bool
 	keys      []string // estimate ReconcileKeys this group replaces
-	phase     string
 }
 
 func reconcileWith(events []Event, readerFor func(string) reader.Reader) ReconcileResult {
@@ -112,7 +116,7 @@ func reconcileWith(events []Event, readerFor func(string) reader.Reader) Reconci
 		gk := e.Tool + "\x00" + e.CWD
 		g := groups[gk]
 		if g == nil {
-			g = &reconGroup{tool: e.Tool, cwd: e.CWD, agents: map[string]bool{}, phase: e.Phase}
+			g = &reconGroup{tool: e.Tool, cwd: e.CWD, agents: map[string]bool{}}
 			groups[gk] = g
 			order = append(order, gk)
 		}
@@ -124,11 +128,21 @@ func reconcileWith(events []Event, readerFor func(string) reader.Reader) Reconci
 		g.keys = append(g.keys, key)
 	}
 
-	inWindow := func(t time.Time) bool {
-		if minT.IsZero() || t.IsZero() {
+	// A call is in-window when its ACTIVITY INTERVAL [start, last] overlaps the
+	// run's estimate window (with margins) — not when its start falls inside it.
+	// Council launches panes at startup, so a session's start can precede the
+	// first prompt by any amount of idle time; what matters is whether the
+	// session was still active during the run.
+	inWindow := func(c reader.Call) bool {
+		if minT.IsZero() || c.Timestamp.IsZero() {
 			return true
 		}
-		return !t.Before(minT.Add(-time.Minute)) && !t.After(maxT.Add(10*time.Minute))
+		end := c.LastActivity
+		if end.IsZero() {
+			end = c.Timestamp
+		}
+		lo, hi := minT.Add(-time.Minute), maxT.Add(10*time.Minute)
+		return !c.Timestamp.After(hi) && !end.Before(lo)
 	}
 
 	var out []Event
@@ -149,7 +163,7 @@ func reconcileWith(events []Event, readerFor func(string) reader.Reader) Reconci
 		// a single-agent group (isolated, or one agent in a cwd) keeps its name.
 		perModel := map[string]*TokenTotals{}
 		for _, call := range calls {
-			if !inWindow(call.Timestamp) {
+			if !inWindow(call) {
 				continue
 			}
 			model := call.Model
@@ -188,8 +202,11 @@ func reconcileWith(events []Event, readerFor func(string) reader.Reader) Reconci
 			if !t.Any() {
 				continue
 			}
+			// Phase is "session": provider stores report cumulative whole-session
+			// totals that span every phase the group's estimates came from, so
+			// pinning them to the first estimate's phase would misattribute cost.
 			ev := Event{
-				RunID: runID, Agent: agent, Phase: g.phase, Source: SourceProvider, Confidence: Reported,
+				RunID: runID, Agent: agent, Phase: "session", Source: SourceProvider, Confidence: Reported,
 				Tool: g.tool, ToolSource: MetaSourceProvider, ToolConfidence: Reported,
 				Model: model, ModelSource: MetaSourceProvider, ModelConfidence: Reported,
 				PriceModel: UnknownValue, PriceSource: Unknown, PriceConfidence: Unknown,
