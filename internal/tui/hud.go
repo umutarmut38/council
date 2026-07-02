@@ -97,6 +97,11 @@ func (m *Model) progressFromSummary(summary orchestrate.RunSummary) *runProgress
 	planExpected := m.phaseExpected("plan", config.PhasePlan, len(summary.Plans))
 	voteExpected := m.phaseExpected("vote", config.PhaseVote, len(summary.Votes))
 	buildExpected := m.phaseExpected("build", config.PhaseBuild, buildDone)
+	// Surface the cached worktree count so the build stepper reads "build ● k/n"
+	// instead of hiding the total the build-progress probe already knows.
+	if m.phase == "build" && m.buildTotal > buildExpected {
+		buildExpected = m.buildTotal
+	}
 	reviewExpected := m.phaseExpected("review", config.PhaseReview, len(summary.Reviews))
 
 	plan := phaseInfo{Label: "Plan", Done: len(summary.Plans), Expected: planExpected, Counted: true}
@@ -208,20 +213,20 @@ func (p *runProgress) phaseRail() string {
 	}
 	parts := make([]string, 0, len(p.Phases))
 	for _, ph := range p.Phases {
-		seg := ph.Label
-		if ph.Counted && ph.Expected > 0 {
-			seg += fmt.Sprintf(" %d/%d", ph.Done, ph.Expected)
-		}
+		seg := strings.ToLower(ph.Label)
 		switch ph.State {
 		case phaseDone:
 			seg += " ✓"
 		case phaseActive:
+			// The count rides the active segment (the one still in flight); done
+			// phases just show ✓ and pending phases stay bare for a compact stepper.
 			seg += " ●"
-		default:
-			seg += " ○"
+			if ph.Counted && ph.Expected > 0 {
+				seg += fmt.Sprintf(" %d/%d", ph.Done, ph.Expected)
+			}
 		}
-		// Pin the outcome to the rail so the winner survives across phases. On a
-		// narrow terminal fitText drops this tail first, which is acceptable.
+		// Pin the outcome to the stepper so the winner survives across phases. On a
+		// narrow terminal pinRight drops this tail first, which is acceptable.
 		if ph.State == phaseDone {
 			switch ph.Label {
 			case "Vote":
@@ -240,7 +245,7 @@ func (p *runProgress) phaseRail() string {
 		}
 		parts = append(parts, seg)
 	}
-	rail := strings.Join(parts, "  ")
+	rail := strings.Join(parts, " ▸ ")
 	if p.Next != "" {
 		rail += " · Next: " + p.Next
 	}
