@@ -68,6 +68,16 @@ type Session struct {
 // stops once full rather than evicting them.
 const maxRawBuffer = 1 << 20 // 1 MiB
 
+// maxCoalesceBytes caps how much PTY output the forwarder merges into a single
+// onOutput call. The TUI processes one message at a time and pays a large fixed
+// cost per AgentOutputMsg (regex transcript-clean + terminal emulation + a Model
+// copy, ~15–30µs and ~130 allocs each), so a flooding agent that emits many
+// small reads saturates the Update loop and starves keystrokes. Coalescing turns
+// a burst of reads into far fewer messages; the cap keeps any one merged message
+// small enough (~a few ms to process) that a queued keystroke is never stuck
+// behind a huge chunk. See internal/tui benchmarks for the measured effect.
+const maxCoalesceBytes = 64 << 10 // 64 KiB
+
 func NewSession(name string, cfg config.AgentConfig, rawLogPath string) *Session {
 	return &Session{
 		Name:       name,
@@ -303,6 +313,7 @@ func (s *Session) Terminate() error {
 func (s *Session) run(onOutput OutputFunc, onExit ExitFunc) {
 	readDone := make(chan struct{})
 	procDone := make(chan struct{})
+	fwdDone := make(chan struct{})
 
 	var (
 		exitCode    *int
@@ -310,10 +321,26 @@ func (s *Session) run(onOutput OutputFunc, onExit ExitFunc) {
 		lastReadErr error
 	)
 
+	// chunks decouples the PTY reader from the TUI: the reader is never blocked
+	// by a slow Update loop (up to the buffer), and the forwarder coalesces
+	// whatever has piled up into one onOutput call, so a flood becomes few
+	// messages instead of one per read. The raw log is still written per read in
+	// the reader (order preserved), so coalescing only affects the TUI stream.
+	chunks := make(chan []byte, 512)
+
+	// Forwarder: merge-and-emit. Runs onOutput off the reader goroutine.
+	go func() {
+		defer close(fwdDone)
+		coalesceOutput(chunks, maxCoalesceBytes, func(b []byte) {
+			if onOutput != nil {
+				onOutput(s.Name, b)
+			}
+		})
+	}()
+
+	// Reader: raw-log per read, then hand the chunk to the forwarder.
 	go func() {
 		defer close(readDone)
-		// A larger read buffer coalesces bursty PTY output into fewer messages,
-		// which keeps the TUI smooth while agents stream.
 		buf := make([]byte, 32768)
 		for {
 			n, err := s.conn.Read(buf)
@@ -324,9 +351,7 @@ func (s *Session) run(onOutput OutputFunc, onExit ExitFunc) {
 				} else {
 					s.bufferRawOutput(chunk)
 				}
-				if onOutput != nil {
-					onOutput(s.Name, chunk)
-				}
+				chunks <- chunk
 			}
 			if err != nil {
 				lastReadErr = err
@@ -343,6 +368,10 @@ func (s *Session) run(onOutput OutputFunc, onExit ExitFunc) {
 
 	<-procDone
 	<-readDone
+	// No more reads: let the forwarder flush any coalesced tail before we report
+	// the exit, so all output is delivered to the TUI ahead of the exit message.
+	close(chunks)
+	<-fwdDone
 
 	finalErr := normalizeReadExitError(lastReadErr, waitErr)
 	_ = s.conn.Close()
@@ -352,6 +381,32 @@ func (s *Session) run(onOutput OutputFunc, onExit ExitFunc) {
 	}
 	if onExit != nil {
 		onExit(s.Name, exitCode, finalErr)
+	}
+}
+
+// coalesceOutput drains chunks from in, merging everything immediately available
+// (bounded by maxBytes per emit) into a single emit call. A burst of PTY reads
+// becomes far fewer TUI messages, without delaying sparse output (when nothing
+// else is queued the first chunk is emitted at once) and without reordering
+// bytes (concatenation is exactly what the terminal would have received). It
+// returns once in is closed, after emitting any final merged bytes.
+func coalesceOutput(in <-chan []byte, maxBytes int, emit func([]byte)) {
+	for first := range in {
+		merged := first
+	drain:
+		for len(merged) < maxBytes {
+			select {
+			case more, ok := <-in:
+				if !ok {
+					emit(merged)
+					return
+				}
+				merged = append(merged, more...)
+			default:
+				break drain
+			}
+		}
+		emit(merged)
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"github.com/umutarmut38/council/internal/setup"
 	"github.com/umutarmut38/council/internal/theme"
 	"github.com/umutarmut38/council/internal/tui/anim"
+	"github.com/umutarmut38/council/internal/usage"
 )
 
 type TargetMode int
@@ -68,7 +69,32 @@ type AgentStartErrorMsg struct {
 type initialPromptMsg string
 type initialAgentPromptsMsg map[string]string
 type phasePromptsMsg map[string]string
+
+// usageTickMsg drives the periodic live reconcile while agents are producing
+// output; usageReconciledMsg carries the result back to the Update goroutine.
+type usageTickMsg struct{}
+type usageReconciledMsg struct{ rollup map[string]reconciledCost }
+
+// costViewMsg is the /cost view rendered off-thread (empty body = no usage yet).
+type costViewMsg struct {
+	stamp  string
+	body   string
+	rollup map[string]reconciledCost
+	err    error
+}
+
 type pollArtifactsMsg struct{}
+
+// worktreeState is a freestyle pane's cached freshness relative to repo HEAD.
+type worktreeState struct {
+	behind bool // worktree HEAD differs from repo HEAD
+	dirty  bool // uncommitted changes in the worktree
+}
+
+// worktreeStatusMsg carries on-demand (/refresh) worktree statuses back to the
+// Update loop for the pane border markers. There is no periodic probe — a timed
+// git status on a worktree froze the TUI.
+type worktreeStatusMsg struct{ status map[string]worktreeState }
 type buildProgressMsg struct{}
 
 // buildProgressResultMsg carries the result of an off-thread build-activity
@@ -202,10 +228,41 @@ type Model struct {
 	pendingAdopt *orchestrate.AdoptPlan
 	pendingClean bool
 	progress     *runProgress // cached HUD state; refreshProgress() updates it
-	buildActive  int          // cached live build activity; updated off-thread by buildProgressResultMsg
-	buildTotal   int          // cached worktree count from the same probe
-	layoutLocked bool         // user adjusted rows/cols in settings: adaptive off
-	mouseOn      bool         // mouse capture is active (Ctrl+W toggles it)
+
+	// freeWorktrees manages opt-in per-pane freestyle worktrees
+	// (.council/workspaces/<agent>); nil unless worktrees.freestyle is on in a
+	// git repo. worktreeStatus caches each pane's stale/dirty status, refreshed
+	// off-thread on a slow tick and read by the pane border. Both are only
+	// touched on the Update goroutine (the tick's git work runs in a tea.Cmd and
+	// reports back via worktreeStatusMsg).
+	freeWorktrees  *orchestrate.FreeWorktrees
+	worktreeStatus map[string]worktreeState
+
+	// usage / cost (nil unless usage.enabled): live per-agent token tally,
+	// per-agent resolved price, and the configured model label. Provider session
+	// models are recorded only through reconciliation. Read by the header/border
+	// in View.
+	usageTally map[string]usage.TokenPair
+	usageRate  map[string]usage.Rate
+	// usageOutputSeen is the transcript-token total already recorded per agent,
+	// so each flush appends only the delta. In-memory only: every TUI process
+	// starts with fresh PTY transcripts, so its deltas are relative to its own
+	// recorded output.
+	usageOutputSeen map[string]int
+	usagePricer     *usage.Pricer
+	// usageReconciled holds per-agent priced totals from the last reconcile
+	// (the 1s tick or /cost), so the header/badge show reported cost (real
+	// session tokens) instead of only the estimated floor. Nil until then.
+	usageReconciled map[string]reconciledCost
+	// usageDirty is set when an agent produced output since the last reconcile;
+	// the tick only reconciles when dirty, so idle panes cost no disk I/O.
+	usageDirty bool
+	// usageReconcileBusy guards against overlapping off-thread reconciles.
+	usageReconcileBusy bool
+	buildActive        int  // cached live build activity; updated off-thread by buildProgressResultMsg
+	buildTotal         int  // cached worktree count from the same probe
+	layoutLocked       bool // user adjusted rows/cols in settings: adaptive off
+	mouseOn            bool // mouse capture is active (Ctrl+W toggles it)
 	// attentionCheckPending debounces the delayed approval-prompt re-check.
 	attentionCheckPending bool
 
@@ -369,6 +426,7 @@ func NewModelWithConfig(sessions []*agent.Session, store *runstore.Store, cfg co
 	base := themeToChrome(theme.Resolve(cfg.UI.Theme, cfg.UI.Themes))
 	model.baseChrome = &base
 	model.sortAgents()
+	model.initUsage()
 	return model
 }
 
@@ -376,7 +434,22 @@ func (m *Model) startAll() {
 	if m.launch == nil {
 		return
 	}
+	// Freestyle launches (m.phase == "") route each pane into its own persistent
+	// worktree when the feature is on. Phase relaunches (m.phase != "", e.g.
+	// /plan) are left untouched so orchestration keeps using the launch dir and
+	// run-stamped worktrees. This runs inside the WindowSizeMsg tea.Cmd goroutine
+	// for the initial launch, so the git I/O + Session.Config.CWD write are off
+	// the Update loop and nothing on the View path reads Config.CWD.
+	freestyle := m.phase == "" && m.freeWorktrees != nil
 	for _, v := range m.Agents {
+		// Per-agent opt-out (worktree: false) keeps a pane in the launch dir even
+		// when the feature is on — for tools that need the live tree.
+		if freestyle && m.Config.FreestyleWorktree(v.Session.Name) {
+			if path, err := m.freeWorktrees.Ensure(v.Session.Name); err == nil && path != "" {
+				v.Session.Config.CWD = path
+			}
+			// On error, fall back to the launch cwd — never leave a pane dead.
+		}
 		m.launch(v.Session)
 	}
 }
@@ -392,6 +465,9 @@ func (m Model) Init() tea.Cmd {
 		cmds = append(cmds, tea.Tick(m.initialPromptDelay, func(time.Time) tea.Msg {
 			return initialPromptMsg(m.initialPrompt)
 		}))
+	}
+	if m.Config.Usage.Enabled {
+		cmds = append(cmds, usageTickCmd())
 	}
 	return tea.Batch(cmds...)
 }
@@ -419,6 +495,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if view := m.findAgentForMessage(msg.Name, msg.Session); view != nil {
 			m.appendOutput(view, string(msg.Data))
+			m.usageDirty = true // agent is doing stuff → let the tick reconcile
 			if m.noteAttentionOutput(view) {
 				return m, m.scheduleAttentionCheck()
 			}
@@ -426,6 +503,44 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case attentionCheckMsg:
 		return m, m.runAttentionCheck()
+	case usageTickMsg:
+		cmds := []tea.Cmd{usageTickCmd()} // always re-arm
+		if c := m.maybeReconcileCmd(); c != nil {
+			cmds = append(cmds, c)
+		}
+		return m, tea.Batch(cmds...)
+	case usageReconciledMsg:
+		m.usageReconcileBusy = false
+		if msg.rollup != nil {
+			m.usageReconciled = msg.rollup
+		}
+		return m, nil
+	case costViewMsg:
+		m.usageReconcileBusy = false
+		switch {
+		case msg.err != nil:
+			m.Status = "cost: " + msg.err.Error()
+		case msg.body == "":
+			m.Status = "cost -- no usage recorded yet"
+		default:
+			if msg.rollup != nil {
+				m.usageReconciled = msg.rollup
+			}
+			m.openArtifactText("cost: "+msg.stamp, msg.body)
+			m.Status = "cost -- run " + msg.stamp
+		}
+		return m, nil
+	case worktreeStatusMsg:
+		// Staleness is probed only on demand (/refresh), never on a timer — a
+		// periodic `git status` on a worktree froze the TUI. Merge the result so
+		// a budgeted (partial) probe still updates the panes it reached.
+		if m.worktreeStatus == nil {
+			m.worktreeStatus = map[string]worktreeState{}
+		}
+		for name, st := range msg.status {
+			m.worktreeStatus[name] = st
+		}
+		return m, nil
 	case AgentExitMsg:
 		// The integrated editor closed (e.g. :q): drop back to the file tree.
 		if m.editorView != nil && msg.Session == m.editorView.Session {
@@ -448,6 +563,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Err != nil {
 				m.appendOutput(view, "exit error: "+msg.Err.Error()+"\n")
 			}
+			m.usageDirty = true // capture the agent's final session write
 		}
 		return m, nil
 	case AgentStartErrorMsg:
@@ -474,6 +590,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.Status = "cannot start run: " + err.Error()
 				return m, nil
 			}
+			m.recordPhaseInputs(map[string]string(msg)) // meter on the Update goroutine
 			m.sendPrompts(map[string]string(msg))
 			m.initialPromptSent = true
 			m.Status = "sent initial prompts"
@@ -488,6 +605,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Remember what was sent so /resend can repeat it per agent.
 		m.phasePrompts = copyPrompts(prompts)
+		// Meter here, on the Update goroutine — the send below runs in a tea.Cmd
+		// and must not touch the usage maps that View reads.
+		m.recordPhaseInputs(prompts)
 		m.Status = m.phase + " prompt sent — agents working"
 		return m, func() tea.Msg {
 			m.sendPrompts(prompts)
@@ -820,6 +940,7 @@ func (m Model) saveTranscripts() error {
 		if err := m.Store.SaveTranscript(view.Session.Name, content); err != nil {
 			return err
 		}
+		m.recordUsageOutput(view.Session, content)
 	}
 	return nil
 }
@@ -835,6 +956,10 @@ func (v *agentView) transcript() string {
 
 func (m Model) terminateAgents() {
 	for _, view := range m.Agents {
+		// Flush the final transcript delta before the pane dies so exit-time
+		// output isn't lost — reader-less tools have no provider store for
+		// FinalizeUsage to recover it from.
+		m.recordUsageOutput(view.Session, view.transcript())
 		_ = view.Session.Terminate()
 	}
 	// The integrated editor session is not in m.Agents; tear it down too so no

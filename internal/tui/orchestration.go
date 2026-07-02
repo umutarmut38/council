@@ -495,7 +495,18 @@ func (m *Model) cmdClean(rest string) {
 			m.Status = "clean: " + err.Error()
 			return
 		}
-		m.Status = fmt.Sprintf("removed %d worktree(s)", len(removed))
+		free := 0
+		if m.freeWorktrees != nil {
+			freed, ferr := m.freeWorktrees.RemoveAll()
+			if ferr != nil {
+				// Surface the failure instead of letting the success line below
+				// overwrite it — otherwise a partial cleanup looks complete.
+				m.Status = fmt.Sprintf("removed %d run worktree(s); freestyle cleanup failed: %v", len(removed), ferr)
+				return
+			}
+			free = len(freed)
+		}
+		m.Status = fmt.Sprintf("removed %d run worktree(s), %d freestyle workspace(s)", len(removed), free)
 		return
 	}
 
@@ -504,19 +515,32 @@ func (m *Model) cmdClean(rest string) {
 		m.Status = "clean: " + err.Error()
 		return
 	}
-	if len(worktrees) == 0 {
+	var free []orchestrate.Worktree
+	if m.freeWorktrees != nil {
+		free = m.freeWorktrees.List()
+	}
+	if len(worktrees) == 0 && len(free) == 0 {
 		m.Status = "no council worktrees to remove"
 		return
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "# /clean would remove %d worktree(s)\n\n", len(worktrees))
+	fmt.Fprintf(&b, "# /clean would remove %d run-stamped worktree(s)\n\n", len(worktrees))
 	for _, wt := range worktrees {
 		fmt.Fprintf(&b, "- %s\n  branch %s\n", wt.Path, wt.Branch)
+	}
+	if len(worktrees) == 0 {
+		b.WriteString("(none)\n")
+	}
+	if len(free) > 0 {
+		fmt.Fprintf(&b, "\n## Freestyle worktrees (.council/workspaces — persistent, reused across sessions)\n\n")
+		for _, wt := range free {
+			fmt.Fprintf(&b, "- %s\n", wt.Path)
+		}
 	}
 	b.WriteString("\nRun /clean confirm to remove them.\n")
 	m.pendingClean = true
 	m.openArtifactText("clean preview", b.String())
-	m.Status = fmt.Sprintf("%d worktree(s) would be removed — /clean confirm", len(worktrees))
+	m.Status = fmt.Sprintf("%d run worktree(s), %d freestyle workspace(s) — /clean confirm", len(worktrees), len(free))
 }
 
 func (m *Model) cmdRuns() {

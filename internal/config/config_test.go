@@ -166,6 +166,112 @@ func TestFindLocalConfigWalksUpToGitRoot(t *testing.T) {
 	}
 }
 
+// Regression: the top-level usage block (and per-agent usage) must survive the
+// repo-overlay merge. ApplyLocalOverride is a key-by-key switch, so a new
+// top-level section silently vanishes unless it has a case.
+func TestApplyLocalOverrideUsage(t *testing.T) {
+	base := Default()
+	local := []byte(`
+usage:
+  enabled: true
+  show_total_in_header: true
+  prices:
+    gpt5-user:
+      input_per_million: 1.25
+      output_per_million: 10.0
+      reviewed_at: "2026-06-20"
+agents:
+  claude:
+    usage:
+      model: claude-sonnet-4-6
+      price_profile: gpt5-user
+`)
+	merged, err := ApplyLocalOverride(base, local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !merged.Usage.Enabled || !merged.Usage.HeaderTotalEnabled() {
+		t.Fatalf("usage block dropped: %+v", merged.Usage)
+	}
+	if p, ok := merged.Usage.Prices["gpt5-user"]; !ok || p.InputPerMillion != 1.25 {
+		t.Fatalf("price profile not merged: %+v", merged.Usage.Prices)
+	}
+	if merged.Agents["claude"].Usage.Model != "claude-sonnet-4-6" {
+		t.Fatalf("per-agent usage dropped: %+v", merged.Agents["claude"].Usage)
+	}
+}
+
+// Regression: the opt-in worktrees block must survive the repo-overlay merge.
+// ApplyLocalOverride is a key-by-key switch, so without a "worktrees" case a
+// repo-local worktrees.freestyle silently vanished when a global config was
+// present and the feature never activated.
+func TestApplyLocalOverrideWorktrees(t *testing.T) {
+	base := Default() // global config has no worktrees block
+	local := []byte("worktrees:\n  freestyle: true\n  seed:\n    - .env\n")
+	merged, err := ApplyLocalOverride(base, local)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !merged.Worktrees.Freestyle {
+		t.Fatalf("worktrees.freestyle dropped by overlay: %+v", merged.Worktrees)
+	}
+	if len(merged.Worktrees.Seed) != 1 || merged.Worktrees.Seed[0] != ".env" {
+		t.Fatalf("worktrees.seed dropped by overlay: %+v", merged.Worktrees.Seed)
+	}
+}
+
+// Guardrail: every top-level Config section must be reachable by
+// ApplyLocalOverride so a new section can never silently vanish from the repo
+// overlay (the worktrees bug). A section is reachable if it has a bespoke merge
+// case or is covered by the generic topLevelOverlayFields map.
+func TestApplyLocalOverrideReachesEverySection(t *testing.T) {
+	special := map[string]bool{ // sections with bespoke merge handlers
+		"agents":                 true,
+		"personalities":          true,
+		"personality_categories": true,
+	}
+	covered := topLevelOverlayFields(&Config{})
+	ct := reflect.TypeOf(Config{})
+	for i := 0; i < ct.NumField(); i++ {
+		name := strings.SplitN(ct.Field(i).Tag.Get("yaml"), ",", 2)[0]
+		if name == "" || name == "-" || special[name] {
+			continue
+		}
+		if _, ok := covered[name]; !ok {
+			t.Errorf("top-level section %q is not reachable by ApplyLocalOverride; it would silently vanish from the repo overlay", name)
+		}
+	}
+}
+
+// An inheriting agent keeps the base's usage bindings, overriding only what it sets.
+func TestOverlayAgentUsageInherits(t *testing.T) {
+	base := AgentConfig{Usage: AgentUsageConfig{Model: "gpt-5", Tool: "codex", PriceProfile: "p"}}
+	child := AgentConfig{Usage: AgentUsageConfig{Model: "claude-opus-4-6"}} // override model only
+	out := overlayAgent(base, child)
+	if out.Usage.Model != "claude-opus-4-6" {
+		t.Fatalf("child model override lost: %+v", out.Usage)
+	}
+	if out.Usage.Tool != "codex" || out.Usage.PriceProfile != "p" {
+		t.Fatalf("base tool/profile not inherited: %+v", out.Usage)
+	}
+}
+
+// The per-agent worktree opt-out is a *bool tri-state: an inheriting agent must
+// be able to override an inherited true back to false, and an unset child must
+// keep the base's value. Guards the overlay propagation.
+func TestOverlayAgentWorktreeOverride(t *testing.T) {
+	yes, no := true, false
+	if out := overlayAgent(AgentConfig{Worktree: &yes}, AgentConfig{Worktree: &no}); out.Worktree == nil || *out.Worktree {
+		t.Fatalf("child worktree:false override lost: %v", out.Worktree)
+	}
+	if out := overlayAgent(AgentConfig{Worktree: &yes}, AgentConfig{}); out.Worktree == nil || !*out.Worktree {
+		t.Fatalf("base worktree not inherited when child unset: %v", out.Worktree)
+	}
+	if out := overlayAgent(AgentConfig{}, AgentConfig{Worktree: &yes}); out.Worktree == nil || !*out.Worktree {
+		t.Fatalf("child worktree:true not applied over unset base: %v", out.Worktree)
+	}
+}
+
 func TestApplyLocalOverrideDeepMerges(t *testing.T) {
 	base := Default()
 	claude := base.Agents["claude"]
@@ -575,5 +681,21 @@ setup:
 	}
 	if sc.Label() != "proxy" {
 		t.Fatalf("Label() = %q, want proxy", sc.Label())
+	}
+}
+
+// A usage.tool value without a native reader can never reconcile, so a typo
+// (e.g. "claude-code") must fail validation instead of silently doing nothing.
+func TestValidateUsageRejectsUnknownTool(t *testing.T) {
+	c := Config{
+		Usage:  UsageConfig{Enabled: true},
+		Agents: map[string]AgentConfig{"a": {Usage: AgentUsageConfig{Tool: "claude-code"}}},
+	}
+	if err := c.validateUsage(); err == nil {
+		t.Fatal("unknown usage.tool must fail validation")
+	}
+	c.Agents["a"] = AgentConfig{Usage: AgentUsageConfig{Tool: "claude"}}
+	if err := c.validateUsage(); err != nil {
+		t.Fatalf("known usage.tool rejected: %v", err)
 	}
 }

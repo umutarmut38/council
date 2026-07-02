@@ -105,6 +105,10 @@ func (c *Controller) AgentsForPhase(phase config.Phase) []string {
 
 func (c *Controller) Run() *Run { return c.run }
 
+// RepoRoot is the git repository root council was launched in. Used to build the
+// freestyle-worktree manager without re-detecting the repo.
+func (c *Controller) RepoRoot() string { return c.repoRoot }
+
 // EnsureManager initializes the build-worktree manager on the calling goroutine
 // and caches it on the controller. UI-thread callers invoke it before starting
 // an off-thread probe (e.g. BuildProgress) so that probe only ever reads

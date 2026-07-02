@@ -236,6 +236,7 @@ func (m *Model) submitInput() tea.Cmd {
 		return nil
 	default:
 		if session := m.focusedSession(); session != nil {
+			m.recordUsageInput(session, m.phase, text)
 			if err := sendLine(session, m.Config.PromptForAgent(session.Name, text)); err != nil {
 				m.Status = err.Error()
 				return nil
@@ -395,10 +396,14 @@ func (m *Model) handleCommand(text string) (bool, tea.Cmd) {
 		m.finishPhase()
 	case "status":
 		m.cmdStatus()
+	case "cost":
+		return true, m.cmdCost()
 	case "setup":
 		m.cmdSetup()
 	case "clean":
 		m.cmdClean(rest)
+	case "refresh":
+		return true, m.cmdRefresh(rest)
 	case "save":
 		if err := m.saveTranscripts(); err != nil {
 			m.Status = "save failed: " + err.Error()
@@ -471,6 +476,7 @@ func (m *Model) cmdResend(rest string) {
 			m.Status = "no phase prompt was sent to " + view.Session.Name
 			return
 		}
+		m.recordUsageInput(view.Session, m.phase, prompt)
 		_ = sendLine(view.Session, m.Config.PromptForAgent(view.Session.Name, prompt))
 		m.Status = "resent " + m.phase + " prompt to " + view.Session.Name
 		return
@@ -481,6 +487,7 @@ func (m *Model) cmdResend(rest string) {
 			continue
 		}
 		if prompt := m.phasePrompts[view.Session.Name]; prompt != "" {
+			m.recordUsageInput(view.Session, m.phase, prompt)
 			_ = sendLine(view.Session, m.Config.PromptForAgent(view.Session.Name, prompt))
 			count++
 		}
@@ -580,6 +587,7 @@ func (m *Model) sendNamed(name string, message string) {
 	}
 	for _, view := range m.Agents {
 		if strings.EqualFold(view.Session.Name, name) {
+			m.recordUsageInput(view.Session, m.phase, message)
 			if err := sendLine(view.Session, m.Config.PromptForAgent(view.Session.Name, message)); err != nil {
 				m.Status = err.Error()
 				return
@@ -597,6 +605,7 @@ func (m *Model) sendAll(message string) {
 		if view.Session.Done {
 			continue
 		}
+		m.recordUsageInput(view.Session, m.phase, message)
 		_ = sendLine(view.Session, m.Config.PromptForAgent(view.Session.Name, message))
 	}
 }
@@ -604,6 +613,7 @@ func (m *Model) sendAll(message string) {
 func (m *Model) sendPersonality(personality string, message string) int {
 	count := 0
 	for _, view := range m.recipientViewsForPersonality(personality) {
+		m.recordUsageInput(view.Session, m.phase, message)
 		_ = sendLine(view.Session, m.Config.PromptForAgent(view.Session.Name, message))
 		count++
 	}
@@ -613,6 +623,7 @@ func (m *Model) sendPersonality(personality string, message string) int {
 func (m *Model) sendCategory(category string, message string) int {
 	count := 0
 	for _, view := range m.recipientViewsForCategory(category) {
+		m.recordUsageInput(view.Session, m.phase, message)
 		_ = sendLine(view.Session, m.Config.PromptForAgent(view.Session.Name, message))
 		count++
 	}

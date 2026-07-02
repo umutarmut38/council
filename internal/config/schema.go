@@ -41,6 +41,8 @@ func Schema() []SchemaSection {
 				{"env", "map", "—", "Extra environment for this agent, merged over the top-level `env` (this wins). Experimental: requires `experimental.setup_env`."},
 				{"terminal", "object", "—", "Rendering and prompt-delivery settings (see `agents.<name>.terminal`)."},
 				{"orchestration", "object", "—", "Per-phase behavior (see `agents.<name>.orchestration`)."},
+				{"usage", "object", "—", "Cost-tracking binding for this agent (see `agents.<name>.usage`)."},
+				{"worktree", "bool", "—", "Override `worktrees.freestyle` for this agent (tri-state). `false` keeps the agent in council's working directory even when freestyle worktrees are on — use it for tools that need the live tree (installed `node_modules`, build output, uncommitted state) that a clean detached worktree lacks (e.g. `copilot`). Unset follows `worktrees.freestyle`."},
 			},
 		},
 		{
@@ -175,6 +177,49 @@ func Schema() []SchemaSection {
 				{"color", "string", "—", "Optional 256-color code."},
 				{"order", "int", "`0`", "Sort order within groupings."},
 				{"prompt_prefix", "string", "—", "Text prepended to prompts sent to this agent."},
+			},
+		},
+		{
+			Title: "worktrees",
+			Intro: "Opt-in per-pane isolation for freestyle (non-orchestration) panes. Off by default; orchestration (`/plan` and its run-stamped build worktrees) is unaffected.",
+			Fields: []SchemaField{
+				{"freestyle", "bool", "`false`", "Give each freestyle pane its own persistent, repo-local git worktree at `.council/workspaces/<agent>` (a distinct cwd — enables per-pane cost when `usage.enabled`, plus file isolation). Reused across sessions and never auto-reset; a stale marker (`⟳` behind HEAD, `*` dirty) shows drift and `/refresh` resets it. No-op outside a git repo."},
+				{"seed", "list", "—", "Extra files/globs (relative to the repo root) copied into each worktree on create, on top of the built-in instruction-file allowlist (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `QWEN.md`, `.cursorrules`, `.github/copilot-instructions.md`, `.mcp.json`)."},
+			},
+		},
+		{
+			Title: "usage",
+			Intro: "Local, provider-agnostic cost/usage ledger. Off by default; all data stays under `.council/`.",
+			Fields: []SchemaField{
+				{"enabled", "bool", "`false`", "Record usage and show the cost UI (header total, pane-border cost, `/cost`)."},
+				{"estimator", "string", "`bytes4`", "Local token estimator: `bytes4` (UTF-8 bytes / 4) or `runes4` (Unicode code points / 4)."},
+				{"show_total_in_header", "bool", "`true`", "Show a compact run cost total in the top status line (on by default when usage is enabled; set `false` to hide)."},
+				{"show_agent_cost_in_border", "bool", "`true`", "Show each session's cost in its pane border (on by default when usage is enabled; set `false` to hide)."},
+				{"stale_price_after_days", "int", "`60`", "Warn when a user price profile's `reviewed_at` is older than this."},
+				{"model_aliases", "map", "—", "Map a model name council sees to one the price tables know."},
+				{"prices", "map", "—", "User-reviewed price profiles (see `usage.prices.<name>`)."},
+			},
+		},
+		{
+			Title: "usage.prices.<name>",
+			Intro: "A user-defined price profile, in per-million-token units. Wins over the bundled/cached price tables.",
+			Fields: []SchemaField{
+				{"input_per_million", "float", "`0`", "Input price per 1M tokens."},
+				{"output_per_million", "float", "`0`", "Output price per 1M tokens."},
+				{"cache_write_per_million", "float", "input × 1.25", "Cache-write price per 1M tokens; derives from the input rate when unset."},
+				{"cache_read_per_million", "float", "input × 0.1", "Cache-read price per 1M tokens; derives from the input rate when unset."},
+				{"currency", "string", "—", "Currency for this profile (informational)."},
+				{"source", "string", "—", "Where the price came from (informational, e.g. `user`)."},
+				{"reviewed_at", "string", "—", "Date (`YYYY-MM-DD`) the price was last reviewed; drives the stale warning."},
+			},
+		},
+		{
+			Title: "agents.<name>.usage",
+			Intro: "Binds explicit usage metadata for cost tracking. Council never inspects `agents.<name>.command` for tool or model inference.",
+			Fields: []SchemaField{
+				{"model", "string", "—", "Observed model name to use for estimated pricing until a provider-session report supplies a concrete model."},
+				{"price_profile", "string", "—", "A `usage.prices` entry; when set it wins over the price tables."},
+				{"tool", "string", "—", "Native provider-session reader to enable for this agent, e.g. `claude`, `codex`, `copilot`, `cursor`, `opencode`."},
 			},
 		},
 	}

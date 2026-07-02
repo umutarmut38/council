@@ -288,6 +288,107 @@ Old runs accumulate; prune them with `council clean-runs --keep 10`.
 
 ---
 
+## `worktrees`
+
+Opt-in per-pane isolation for **freestyle** panes — the agents you chat with
+directly, outside the orchestrated workflow. Off by default. Orchestration is
+never affected: `/plan`, `/build`, and `/review` always use their own
+run-stamped worktrees under `.council/worktrees/<stamp>/`.
+
+```yaml
+worktrees:
+  freestyle: true          # each freestyle pane gets its own worktree
+  seed:                    # extra files copied in, on top of the built-in allowlist
+    - .env.example
+    - config/*.yaml
+```
+
+With `freestyle: true`, each freestyle pane runs in its own **persistent,
+repo-local** git worktree at `.council/workspaces/<agent>`, created on first use
+as a detached checkout (no `council/<agent>` branch spam). This buys two things:
+
+- **Per-pane cost.** Same-tool panes get distinct working directories, so
+  provider-session [reconciliation](#usage) can attribute usage to each pane
+  instead of collapsing several into one combined row.
+- **File isolation.** Panes editing the same files no longer stomp each other.
+
+Worktrees are **reused across sessions and never auto-reset**, so a pane keeps its
+work between runs. The pane border shows a staleness marker — `⟳` when the
+worktree is behind the repo HEAD, `*` when it has uncommitted changes.
+[`/refresh`](commands.md) resets a worktree to HEAD and re-seeds it (it refuses
+when the worktree is dirty unless you append `force`); [`/clean`](commands.md)
+lists and removes them. Staleness is probed on demand, never on a timer.
+
+`seed` copies additional files/globs (relative to the repo root) into each
+worktree when it is created, on top of the built-in instruction-file allowlist:
+`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `QWEN.md`, `.cursorrules`,
+`.github/copilot-instructions.md`, and `.mcp.json`. Use it for git-ignored files
+an agent still needs (a local `.env`, machine config). Nothing is seeded that you
+don't list, beyond that allowlist.
+
+Some tools can't run in a clean detached checkout because they rely on the live
+working tree (an installed `node_modules`, build output, uncommitted state). Keep
+those in council's launch directory with a per-agent override:
+
+```yaml
+agents:
+  copilot:
+    worktree: false        # stay in the launch directory even when freestyle is on
+```
+
+Freestyle worktrees are a no-op outside a git repository.
+
+---
+
+## `usage`
+
+A local, provider-agnostic cost ledger. Off by default; everything it records
+stays under `.council/`. Turn it on to see a run-cost total in the header, a
+per-pane cost in each pane border, and the `/cost` breakdown:
+
+```yaml
+usage:
+  enabled: true
+agents:
+  codex:
+    enabled: true
+    usage:
+      tool: codex          # provider-session reader: claude|codex|copilot|cursor|opencode
+      model: gpt-5-codex   # model for estimated pricing until a report supplies one
+```
+
+Cost is built in two layers:
+
+1. **Estimated floor.** council counts prompt/output bytes with a local estimator
+   (`bytes4` or `runes4`) and prices them — a live lower bound, shown instantly.
+2. **Reported totals.** When an agent declares a `usage.tool`, council reads that
+   CLI's own session files and reconciles the real token counts over the estimate
+   (shown as *reported*/*exact*). Cached/reused context is priced at the
+   cache-read rate, not double-charged as fresh input.
+
+council never guesses an agent's tool or model from its `command` — set
+`usage.tool` and `usage.model` explicitly, or the row stays an estimate.
+
+**Reconciliation** matches an estimate to a reported session by `(tool, cwd)`. Two
+same-tool panes sharing one directory can't be told apart, so they report as a
+single combined row; give them distinct directories with
+[`worktrees.freestyle`](#worktrees) for a per-pane breakdown. A few CLIs (notably
+Copilot) only write their totals when the process exits, so their input shows the
+estimate live and upgrades to the reported number once the pane — or council —
+exits.
+
+**Pricing** comes from bundled LiteLLM tables; refresh the cache with `council
+cost prices refresh`. Override or add prices with `usage.prices` (and map unusual
+model names with `usage.model_aliases`); a user price older than
+`stale_price_after_days` raises a warning.
+
+View costs with `/cost` in the TUI, or `council cost [run]` / `council cost --since
+30d` from the CLI. `council cost --source codeburn` relays machine-wide totals
+from the optional `codeburn` CLI (`npm i -g codeburn`) for tools council doesn't
+launch itself.
+
+---
+
 ## `files`
 
 Limits for `@path` file-reference expansion in prompts and issues.
@@ -405,6 +506,8 @@ A map of agent name to config; the name labels the pane and artifacts.
 | `env` | map | — | Extra environment for this agent, merged over the top-level `env` (this wins). Experimental: requires `experimental.setup_env`. |
 | `terminal` | object | — | Rendering and prompt-delivery settings (see `agents.<name>.terminal`). |
 | `orchestration` | object | — | Per-phase behavior (see `agents.<name>.orchestration`). |
+| `usage` | object | — | Cost-tracking binding for this agent (see `agents.<name>.usage`). |
+| `worktree` | bool | — | Override `worktrees.freestyle` for this agent (tri-state). `false` keeps the agent in council's working directory even when freestyle worktrees are on — use it for tools that need the live tree (installed `node_modules`, build output, uncommitted state) that a clean detached worktree lacks (e.g. `copilot`). Unset follows `worktrees.freestyle`. |
 
 ### `agents.<name>.terminal`
 
@@ -545,4 +648,51 @@ Limits for `@path` file-reference expansion in prompts and issues.
 | `color` | string | — | Optional 256-color code. |
 | `order` | int | `0` | Sort order within groupings. |
 | `prompt_prefix` | string | — | Text prepended to prompts sent to this agent. |
+
+### `worktrees`
+
+Opt-in per-pane isolation for freestyle (non-orchestration) panes. Off by default; orchestration (`/plan` and its run-stamped build worktrees) is unaffected.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `freestyle` | bool | `false` | Give each freestyle pane its own persistent, repo-local git worktree at `.council/workspaces/<agent>` (a distinct cwd — enables per-pane cost when `usage.enabled`, plus file isolation). Reused across sessions and never auto-reset; a stale marker (`⟳` behind HEAD, `*` dirty) shows drift and `/refresh` resets it. No-op outside a git repo. |
+| `seed` | list | — | Extra files/globs (relative to the repo root) copied into each worktree on create, on top of the built-in instruction-file allowlist (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `QWEN.md`, `.cursorrules`, `.github/copilot-instructions.md`, `.mcp.json`). |
+
+### `usage`
+
+Local, provider-agnostic cost/usage ledger. Off by default; all data stays under `.council/`.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `false` | Record usage and show the cost UI (header total, pane-border cost, `/cost`). |
+| `estimator` | string | `bytes4` | Local token estimator: `bytes4` (UTF-8 bytes / 4) or `runes4` (Unicode code points / 4). |
+| `show_total_in_header` | bool | `true` | Show a compact run cost total in the top status line (on by default when usage is enabled; set `false` to hide). |
+| `show_agent_cost_in_border` | bool | `true` | Show each session's cost in its pane border (on by default when usage is enabled; set `false` to hide). |
+| `stale_price_after_days` | int | `60` | Warn when a user price profile's `reviewed_at` is older than this. |
+| `model_aliases` | map | — | Map a model name council sees to one the price tables know. |
+| `prices` | map | — | User-reviewed price profiles (see `usage.prices.<name>`). |
+
+### `usage.prices.<name>`
+
+A user-defined price profile, in per-million-token units. Wins over the bundled/cached price tables.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `input_per_million` | float | `0` | Input price per 1M tokens. |
+| `output_per_million` | float | `0` | Output price per 1M tokens. |
+| `cache_write_per_million` | float | input × 1.25 | Cache-write price per 1M tokens; derives from the input rate when unset. |
+| `cache_read_per_million` | float | input × 0.1 | Cache-read price per 1M tokens; derives from the input rate when unset. |
+| `currency` | string | — | Currency for this profile (informational). |
+| `source` | string | — | Where the price came from (informational, e.g. `user`). |
+| `reviewed_at` | string | — | Date (`YYYY-MM-DD`) the price was last reviewed; drives the stale warning. |
+
+### `agents.<name>.usage`
+
+Binds explicit usage metadata for cost tracking. Council never inspects `agents.<name>.command` for tool or model inference.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `model` | string | — | Observed model name to use for estimated pricing until a provider-session report supplies a concrete model. |
+| `price_profile` | string | — | A `usage.prices` entry; when set it wins over the price tables. |
+| `tool` | string | — | Native provider-session reader to enable for this agent, e.g. `claude`, `codex`, `copilot`, `cursor`, `opencode`. |
 <!-- END GENERATED: config-schema -->

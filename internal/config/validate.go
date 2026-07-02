@@ -47,6 +47,9 @@ func (c Config) Validate() error {
 	if err := validateUITheme(c); err != nil {
 		return err
 	}
+	if err := c.validateUsage(); err != nil {
+		return err
+	}
 	return nil
 }
 

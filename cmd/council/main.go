@@ -157,9 +157,19 @@ func launchTUI(sessions []*agent.Session, store *runstore.Store, cfg config.Conf
 }
 
 func launchTUIWithTranscripts(sessions []*agent.Session, store *runstore.Store, cfg config.Config, initialPrompt string, initialPrompts map[string]string, transcripts map[string]string, orch *orchestrate.Controller) error {
+	// On any exit (a quit key or a panic) terminate the panes FIRST so a
+	// shutdown-only reporter (Copilot writes its token totals only in
+	// session.shutdown, on process exit) flushes its session file, THEN run the
+	// final reconcile that reads it. Ordering matters: reconciling before
+	// termination would miss exactly the exit-only totals FinalizeUsage exists to
+	// capture. Both live in one defer so the order holds on every return path.
+	var final tea.Model
 	defer func() {
 		for _, session := range sessions {
 			_ = session.Terminate()
+		}
+		if fm, ok := final.(tui.Model); ok {
+			fm.FinalizeUsage()
 		}
 	}()
 
@@ -179,6 +189,12 @@ func launchTUIWithTranscripts(sessions []*agent.Session, store *runstore.Store, 
 
 	model := tui.NewModelWithConfig(sessions, store, cfg, initialPrompt, initialPrompts, time.Duration(cfg.UI.InitialPromptDelayMs)*time.Millisecond, launch, orch)
 	model.SetSetupStatus(setupStatus)
+	// Opt-in freestyle worktrees: only for the interactive freestyle session (a
+	// controller is present in a git repo). CLI single-phase launches pass a nil
+	// controller and never relocate their panes.
+	if cfg.Worktrees.Freestyle && orch != nil {
+		model.SetFreeWorktrees(orchestrate.NewFreeWorktrees(orch.RepoRoot(), cfg.Worktrees))
+	}
 	model.LoadTranscripts(transcripts)
 	// 120 FPS (bubbletea's max): agent PTYs stream constantly, and the default
 	// frame budget makes scrolling output feel choppy.
@@ -191,7 +207,8 @@ func launchTUIWithTranscripts(sessions []*agent.Session, store *runstore.Store, 
 	}
 	program = tea.NewProgram(model, opts...)
 
-	_, err := program.Run()
+	var err error
+	final, err = program.Run()
 	return err
 }
 
