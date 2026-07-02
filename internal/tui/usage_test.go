@@ -173,6 +173,26 @@ func TestCostLabel(t *testing.T) {
 	}
 }
 
+func TestComposerTokenLabel(t *testing.T) {
+	m := Model{Config: config.Config{Usage: usageConfigOn()}}
+	m.PromptInput = "hello world foo bar" // 19 bytes, bytes4 → ~4 tokens
+	if got := m.composerTokenLabel(); got != " · ~4 tok" {
+		t.Fatalf("token label = %q, want \" · ~4 tok\"", got)
+	}
+	m.PromptInput = "/cost" // slash-commands show nothing
+	if got := m.composerTokenLabel(); got != "" {
+		t.Fatalf("slash command token label = %q, want empty", got)
+	}
+	m.PromptInput = ""
+	if got := m.composerTokenLabel(); got != "" {
+		t.Fatalf("empty input token label = %q, want empty", got)
+	}
+	off := Model{Config: config.Config{}, PromptInput: "hello"} // usage disabled
+	if got := off.composerTokenLabel(); got != "" {
+		t.Fatalf("usage-off token label = %q, want empty", got)
+	}
+}
+
 func TestCostShareSection(t *testing.T) {
 	rollup := map[string]reconciledCost{
 		"alpha": {cost: 0.75, currency: "USD", confidence: usage.Reported, priced: true},

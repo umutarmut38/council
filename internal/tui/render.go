@@ -281,7 +281,7 @@ func (m Model) renderFooter() string {
 		}
 		return strings.Join([]string{
 			c.suggest.Render(fitText(hint, m.Width)),
-			inputBoxTop(m.screenModeName(), m.Width, c.border, retro),
+			inputBoxTop(m.screenModeName(), m.Width, c.border, c.suggest, retro),
 			inputBoxContent(m.Status, m.Width, c.border, c.input, retro),
 			inputBoxBottom(m.Width, c.border, retro),
 		}, "\n")
@@ -291,12 +291,20 @@ func (m Model) renderFooter() string {
 		hint := c.suggest.Render(fitText("DIRECT MODE — keystrokes go straight to the pane (Esc included). F2/Ctrl+O to exit.", m.Width))
 		label := "direct: " + m.focusedName()
 		content := "keys → " + m.focusedName()
-		return strings.Join([]string{hint, inputBoxTop(label, m.Width, c.border, retro), inputBoxContent(content, m.Width, c.border, c.input, retro), inputBoxBottom(m.Width, c.border, retro)}, "\n")
+		return strings.Join([]string{hint, inputBoxTop(label, m.Width, c.border, c.warn, retro), inputBoxContent(content, m.Width, c.border, c.input, retro), inputBoxBottom(m.Width, c.border, retro)}, "\n")
 	}
 
 	label := m.targetLabel()
 	if m.Zoomed {
 		label = "[zoom] " + label
+	}
+	label += m.composerTokenLabel()
+	// A one-agent target is the highest-stakes bit of state (a wrong-agent send
+	// is the costly mistake), so give the chip the focus color; broadcast stays
+	// neutral.
+	accent := c.suggest
+	if m.Target != TargetAll {
+		accent = c.focus
 	}
 
 	prompt := m.targetPrompt()
@@ -304,7 +312,7 @@ func (m Model) renderFooter() string {
 
 	lines := m.suggestionBlock(c)
 	lines = append(lines,
-		inputBoxTop(label, m.Width, c.border, retro),
+		inputBoxTop(label, m.Width, c.border, accent, retro),
 		inputBoxContent(content, m.Width, c.border, c.input, retro),
 		inputBoxBottom(m.Width, c.border, retro),
 	)
@@ -355,7 +363,8 @@ func (m Model) suggestionLine(c chromeStyles) string {
 		return c.suggest.Render(fitText(hint, m.Width))
 	}
 
-	help := "Enter send | Ctrl+G overview | F2 direct | Ctrl+B target | Ctrl+F zoom | Ctrl+N/P page | Tab focus | Ctrl+W mouse | @file"
+	// A short, high-value set; the rest are discoverable via the command palette.
+	help := "Enter send · F2 direct · Ctrl+G overview · Tab focus · @file · / commands"
 	return c.faint.Render(fitText(help, m.Width))
 }
 
@@ -385,7 +394,11 @@ func (m Model) targetPrompt() string {
 	}
 }
 
-func inputBoxTop(label string, width int, border lipgloss.Style, retro bool) string {
+// inputBoxTop draws the composer's top border with the label as an accented
+// chip: the ` label ` segment takes the accent style (e.g. the target color)
+// while the bars stay in the border color. Widths are computed on plain text so
+// the styling can't change the total.
+func inputBoxTop(label string, width int, border, accent lipgloss.Style, retro bool) string {
 	tl, tr, hbar := "╭", "╮", "─"
 	if retro {
 		tl, tr, hbar = "┏", "┓", "━"
@@ -394,16 +407,16 @@ func inputBoxTop(label string, width int, border lipgloss.Style, retro bool) str
 		return border.Render(strings.Repeat(hbar, max0(width)))
 	}
 	inner := width - 2
-	lbl := ""
-	if label != "" {
-		lbl = hbar + " " + label + " "
+	if label == "" {
+		return border.Render(tl + strings.Repeat(hbar, inner) + tr)
 	}
-	lbl = truncateText(lbl, inner)
-	pad := inner - lipgloss.Width(lbl)
+	chip := " " + label + " "
+	chip = truncateText(chip, max0(inner-1)) // leave the leading hbar its cell
+	pad := inner - 1 - lipgloss.Width(chip)
 	if pad < 0 {
 		pad = 0
 	}
-	return border.Render(tl + lbl + strings.Repeat(hbar, pad) + tr)
+	return border.Render(tl+hbar) + accent.Render(chip) + border.Render(strings.Repeat(hbar, pad)+tr)
 }
 
 func inputBoxBottom(width int, border lipgloss.Style, retro bool) string {

@@ -555,6 +555,19 @@ func compactCost(cost float64, currency string) string {
 	}
 }
 
+// composerTokenLabel is the live ~token estimate appended to the composer box
+// label as the user types, connecting cost to the moment before a fan-out send.
+// Empty for slash-commands and when usage is off. It counts the typed text only
+// (@file expansion happens at send); the estimator is O(len), so recomputing it
+// per render is negligible.
+func (m Model) composerTokenLabel() string {
+	if !m.Config.Usage.Enabled || m.PromptInput == "" || strings.HasPrefix(m.PromptInput, "/") {
+		return ""
+	}
+	tok, _ := usage.EstimatorFor(m.Config.Usage.Estimator).Estimate(m.PromptInput)
+	return fmt.Sprintf(" · ~%d tok", tok)
+}
+
 // buildPricer constructs a Pricer from the active config + on-disk price cache.
 func (m Model) buildPricer() *usage.Pricer {
 	cacheDir := ""
