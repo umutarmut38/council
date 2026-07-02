@@ -173,6 +173,32 @@ func TestCostLabel(t *testing.T) {
 	}
 }
 
+func TestCostShareSection(t *testing.T) {
+	rollup := map[string]reconciledCost{
+		"alpha": {cost: 0.75, currency: "USD", confidence: usage.Reported, priced: true},
+		"beta":  {cost: 0.25, currency: "USD", confidence: usage.Estimated, priced: true},
+		"gamma": {someUnknown: true}, // unpriced → excluded from shares
+	}
+	out := costShareSection(rollup)
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 3 || lines[0] != "Share:" {
+		t.Fatalf("want 'Share:' header + 2 rows, got %d lines: %q", len(lines), out)
+	}
+	// Sorted by cost desc: alpha (75%, reported $) before beta (25%, estimated ~$).
+	if !strings.Contains(lines[1], "75%") || !strings.Contains(lines[1], "$0.75") || strings.Contains(lines[1], "~$0.75") {
+		t.Fatalf("alpha row wrong: %q", lines[1])
+	}
+	if !strings.Contains(lines[2], "25%") || !strings.Contains(lines[2], "~$0.25") {
+		t.Fatalf("beta row (estimated) wrong: %q", lines[2])
+	}
+	if cells := strings.Count(lines[1], "█") + strings.Count(lines[1], "░"); cells != 20 {
+		t.Fatalf("bar width = %d, want 20: %q", cells, lines[1])
+	}
+	if costShareSection(nil) != "" || costShareSection(map[string]reconciledCost{"x": {someUnknown: true}}) != "" {
+		t.Fatal("no priced agents should produce no section")
+	}
+}
+
 // After /cost reconciles, the pane badge shows the reported total (plain $) and
 // the header drops the ~ estimate prefix — not the stale estimated floor.
 func TestBadgeAndHeaderPreferReconciled(t *testing.T) {

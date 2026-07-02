@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -467,6 +468,47 @@ func rollupReconciled(summary usage.Summary) map[string]reconciledCost {
 	return out
 }
 
+// costShareSection renders per-agent cost share bars from a priced rollup,
+// sorted by cost descending, so the /cost view shows who is burning the budget
+// at a glance. It returns "" when nothing is priced. Plain text (~50 cols) so
+// the pager's rune wrap leaves it intact; colorCostLine styles it at render.
+func costShareSection(rollup map[string]reconciledCost) string {
+	type row struct {
+		name string
+		rc   reconciledCost
+	}
+	var rows []row
+	total := 0.0
+	for name, rc := range rollup {
+		if rc.priced {
+			rows = append(rows, row{name, rc})
+			total += rc.cost
+		}
+	}
+	if len(rows) == 0 || total <= 0 {
+		return ""
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].rc.cost != rows[j].rc.cost {
+			return rows[i].rc.cost > rows[j].rc.cost
+		}
+		return rows[i].name < rows[j].name
+	})
+	const barW = 20
+	var b strings.Builder
+	b.WriteString("\nShare:\n")
+	for _, r := range rows {
+		frac := r.rc.cost / total
+		filled := int(frac*barW + 0.5)
+		if filled > barW {
+			filled = barW
+		}
+		bar := strings.Repeat("█", filled) + strings.Repeat("░", barW-filled)
+		fmt.Fprintf(&b, "%-14.14s %s %3.0f%%  %s\n", r.name, bar, frac*100, costLabel(r.rc.cost, r.rc.currency, r.rc.confidence))
+	}
+	return b.String()
+}
+
 var confidenceRank = map[string]int{usage.Unknown: 0, usage.Estimated: 1, usage.Reported: 2, usage.Exact: 3}
 
 // weakerConfidence returns the lower-confidence of two tiers ("" means none yet).
@@ -590,6 +632,7 @@ func (m *Model) cmdCost() tea.Cmd {
 		var b strings.Builder
 		fmt.Fprintf(&b, "# Cost -- run %s\n\n", stamp)
 		b.WriteString(usage.FormatTable(summary))
+		b.WriteString(costShareSection(out.rollup))
 		if src, at := pricer.Origin(); !at.IsZero() {
 			fmt.Fprintf(&b, "\nprices: %s (%s)\n", src, at.Format("2006-01-02"))
 		}

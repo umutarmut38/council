@@ -315,6 +315,7 @@ type Model struct {
 	artifactPath       string // viewer title (a path, or a synthetic label)
 	artifactFile       string // real file behind the view, for `e` (editor); "" = none
 	artifactIsDiff     bool   // colorize +/-/@@ lines git-style
+	artifactIsCost     bool   // colorize the /cost table + share bars
 	viewerFromList     bool   // opened from the /artifacts list (Esc returns there)
 	viewerReturnScreen ScreenMode
 	artifactWrap       []string
@@ -588,6 +589,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.usageReconciled = msg.rollup
 			}
 			m.openArtifactText("cost: "+msg.stamp, msg.body)
+			m.artifactIsCost = true // style the table + share bars in the viewer
 			m.Status = "cost -- run " + msg.stamp
 		}
 		return m, nil
