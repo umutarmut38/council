@@ -777,8 +777,10 @@ var currencySymbols = map[string]string{"USD": "$", "EUR": "EUR ", "GBP": "GBP "
 // makes several small rows visibly disagree with their total — three $0.006 rows
 // each round to $0.01 (reads as $0.03) but truly sum to $0.02. Four decimals
 // under $0.10 lets small rows and their small total reconcile.
-// ponytail: at or above a dime, 2-decimal rows can still be a cent off from a
-// many-row total; that's inherent to cent display and not the confusing case.
+//
+// Note: at or above a dime, 2-decimal rows can still be a cent off from a
+// many-row total; that is inherent to cent display and not the confusing case
+// this addresses.
 func FormatMoney(v float64) string {
 	if v > 0 && v < 0.10 {
 		return fmt.Sprintf("%.4f", v)
@@ -791,9 +793,9 @@ func FormatMoney(v float64) string {
 // table's Confidence column is *price* confidence, so without this an exit-only
 // reporter like Copilot mid-run — priced "exact" but not yet reported — reads as
 // final even though its tokens are only the estimated floor.
-func costCell(c *float64, currency, confidence string) string {
+func costCell(c *float64, currency, tokenConfidence string) string {
 	s := cost(c, currency)
-	if c != nil && confidence == Estimated {
+	if c != nil && tokenConfidence == Estimated {
 		return "~" + s
 	}
 	return s
