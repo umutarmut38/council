@@ -161,14 +161,14 @@ func TestCostLabel(t *testing.T) {
 	for _, tc := range []struct {
 		conf, want string
 	}{
-		{usage.Exact, "$0.04"},
-		{usage.Reported, "$0.04"},
-		{usage.Estimated, "~$0.04"},
+		{usage.Exact, "$0.42"},
+		{usage.Reported, "$0.42"},
+		{usage.Estimated, "~$0.42"},
 		{usage.Unknown, "$?"},
 		{"", "$?"},
 	} {
-		if got := costLabel(0.04, "USD", tc.conf); got != tc.want {
-			t.Errorf("costLabel(0.04, USD, %q) = %q, want %q", tc.conf, got, tc.want)
+		if got := costLabel(0.42, "USD", tc.conf); got != tc.want {
+			t.Errorf("costLabel(0.42, USD, %q) = %q, want %q", tc.conf, got, tc.want)
 		}
 	}
 }
@@ -235,14 +235,14 @@ func TestBadgeAndHeaderPreferReconciled(t *testing.T) {
 		usageTally: map[string]usage.TokenPair{"claude-a": {Input: 20}},
 		usageRate:  map[string]usage.Rate{"claude-a": {Currency: "USD", Found: true}},
 		usageReconciled: map[string]reconciledCost{
-			"claude-a": {cost: 0.04, currency: "USD", confidence: usage.Reported, priced: true},
+			"claude-a": {cost: 0.42, currency: "USD", confidence: usage.Reported, priced: true},
 		},
 	}
-	if got := m.usageBorderSuffix("claude-a"); got != " | $0.04" {
-		t.Fatalf("badge = %q, want \" | $0.04\"", got)
+	if got := m.usageBorderSuffix("claude-a"); got != " | $0.42" {
+		t.Fatalf("badge = %q, want \" | $0.42\"", got)
 	}
-	if got := m.usageHeaderCost(); got != "Run $0.04" {
-		t.Fatalf("header = %q, want \"Run $0.04\" (reported, no ~ prefix)", got)
+	if got := m.usageHeaderCost(); got != "Run $0.42" {
+		t.Fatalf("header = %q, want \"Run $0.42\" (reported, no ~ prefix)", got)
 	}
 }
 
