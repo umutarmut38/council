@@ -32,6 +32,18 @@ func TestFormatMoneyPrecision(t *testing.T) {
 	}
 }
 
+// Yen has no minor unit, so the /cost table must not print fractional yen —
+// including under the new sub-dime 4-decimal rule.
+func TestCostJPYNoDecimals(t *testing.T) {
+	big, small := 1234.0, 0.06
+	if got := cost(&big, "JPY"); got != "JPY 1234" {
+		t.Errorf("cost(1234, JPY) = %q, want %q", got, "JPY 1234")
+	}
+	if got := cost(&small, "JPY"); got != "JPY 0" {
+		t.Errorf("cost(0.06, JPY) = %q, want %q (no fractional yen)", got, "JPY 0")
+	}
+}
+
 // The /cost table Cost column carries the ~ estimate prefix for a still-estimated
 // row (e.g. Copilot before it reports on exit); the Total is estimated whenever
 // any session is.

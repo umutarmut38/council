@@ -641,6 +641,9 @@ func FormatTable(s Summary) string {
 	anyEstimated := false
 	for _, ses := range s.Sessions {
 		note := displayNote(ses)
+		// Only a *priced* estimate makes the summed Total an estimate: an unpriced
+		// session adds no cost to s.Cost, so it can't turn the figure into one
+		// (it surfaces as a "--" row and a hint). Matches the header's logic.
 		if ses.Cost != nil && ses.Confidence == Estimated {
 			anyEstimated = true
 		}
@@ -649,8 +652,9 @@ func FormatTable(s Summary) string {
 			tokens(ses.Tokens.Input), cacheTokens(ses.Tokens), tokens(ses.Tokens.Output+ses.Tokens.Reasoning),
 			costCell(ses.Cost, ses.Currency, ses.Confidence), dash(ses.PriceSource), dash(ses.PriceConf), dash(note))
 	}
-	// The Total is estimated (a lower bound that grows) whenever any session
-	// still is — e.g. Copilot, which only reports its tokens on exit.
+	// The Total cost carries ~ when it includes an estimate-derived component —
+	// any priced session whose tokens are still estimated (e.g. Copilot mid-run,
+	// which only reports on exit), so the figure reads as the lower bound it is.
 	totalConf := Reported
 	if anyEstimated {
 		totalConf = Estimated
@@ -808,6 +812,10 @@ func cost(c *float64, currency string) string {
 	cur := strings.ToUpper(strings.TrimSpace(currency))
 	if cur == "" {
 		cur = "USD"
+	}
+	// Yen has no minor unit — never show decimals (matches the TUI's compactCost).
+	if cur == "JPY" {
+		return currencySymbols[cur] + fmt.Sprintf("%.0f", *c)
 	}
 	if sym, ok := currencySymbols[cur]; ok {
 		return sym + FormatMoney(*c)
