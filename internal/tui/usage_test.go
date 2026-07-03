@@ -157,18 +157,78 @@ func TestRollupReconciled(t *testing.T) {
 	}
 }
 
-func TestConfidenceSuffix(t *testing.T) {
-	for conf, want := range map[string]string{
-		usage.Exact: "x", usage.Reported: "r", usage.Estimated: "e", usage.Unknown: "?", "": "?",
+func TestCostLabel(t *testing.T) {
+	for _, tc := range []struct {
+		conf, want string
+	}{
+		{usage.Exact, "$0.04"},
+		{usage.Reported, "$0.04"},
+		{usage.Estimated, "~$0.04"},
+		{usage.Unknown, "$?"},
+		{"", "$?"},
 	} {
-		if got := confidenceSuffix(conf); got != want {
-			t.Errorf("confidenceSuffix(%q) = %q, want %q", conf, got, want)
+		if got := costLabel(0.04, "USD", tc.conf); got != tc.want {
+			t.Errorf("costLabel(0.04, USD, %q) = %q, want %q", tc.conf, got, tc.want)
 		}
 	}
 }
 
-// After /cost reconciles, the pane badge shows the reported total (suffix r) and
-// the header drops the "est" qualifier — not the stale estimated floor.
+func TestComposerTokenLabel(t *testing.T) {
+	m := Model{Config: config.Config{Usage: usageConfigOn()}}
+	m.PromptInput = "hello world foo bar" // 19 bytes, bytes4 → ~4 tokens
+	if got := m.composerTokenLabel(); got != " · ~4 tok" {
+		t.Fatalf("token label = %q, want \" · ~4 tok\"", got)
+	}
+	m.PromptInput = "/cost" // slash-commands show nothing
+	if got := m.composerTokenLabel(); got != "" {
+		t.Fatalf("slash command token label = %q, want empty", got)
+	}
+	m.PromptInput = ""
+	if got := m.composerTokenLabel(); got != "" {
+		t.Fatalf("empty input token label = %q, want empty", got)
+	}
+	off := Model{Config: config.Config{}, PromptInput: "hello"} // usage disabled
+	if got := off.composerTokenLabel(); got != "" {
+		t.Fatalf("usage-off token label = %q, want empty", got)
+	}
+}
+
+func TestCostShareSection(t *testing.T) {
+	rollup := map[string]reconciledCost{
+		"alpha": {cost: 0.75, currency: "USD", confidence: usage.Reported, priced: true},
+		"beta":  {cost: 0.25, currency: "USD", confidence: usage.Estimated, priced: true},
+		"gamma": {someUnknown: true}, // unpriced → excluded from shares
+	}
+	out := costShareSection(rollup)
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 3 || lines[0] != "Share:" {
+		t.Fatalf("want 'Share:' header + 2 rows, got %d lines: %q", len(lines), out)
+	}
+	// Sorted by cost desc: alpha (75%, reported $) before beta (25%, estimated ~$).
+	if !strings.Contains(lines[1], "75%") || !strings.Contains(lines[1], "$0.75") || strings.Contains(lines[1], "~$0.75") {
+		t.Fatalf("alpha row wrong: %q", lines[1])
+	}
+	if !strings.Contains(lines[2], "25%") || !strings.Contains(lines[2], "~$0.25") {
+		t.Fatalf("beta row (estimated) wrong: %q", lines[2])
+	}
+	if cells := strings.Count(lines[1], "█") + strings.Count(lines[1], "░"); cells != 20 {
+		t.Fatalf("bar width = %d, want 20: %q", cells, lines[1])
+	}
+	if costShareSection(nil) != "" || costShareSection(map[string]reconciledCost{"x": {someUnknown: true}}) != "" {
+		t.Fatal("no priced agents should produce no section")
+	}
+	// Mixed currencies make summed shares meaningless → suppress the section.
+	mixed := map[string]reconciledCost{
+		"usd": {cost: 1, currency: "USD", confidence: usage.Reported, priced: true},
+		"eur": {cost: 1, currency: "EUR", confidence: usage.Reported, priced: true},
+	}
+	if got := costShareSection(mixed); got != "" {
+		t.Fatalf("mixed-currency shares should be suppressed, got %q", got)
+	}
+}
+
+// After /cost reconciles, the pane badge shows the reported total (plain $) and
+// the header drops the ~ estimate prefix — not the stale estimated floor.
 func TestBadgeAndHeaderPreferReconciled(t *testing.T) {
 	m := Model{
 		Config:     config.Config{Usage: usageConfigOn()},
@@ -178,11 +238,11 @@ func TestBadgeAndHeaderPreferReconciled(t *testing.T) {
 			"claude-a": {cost: 0.04, currency: "USD", confidence: usage.Reported, priced: true},
 		},
 	}
-	if got := m.usageBorderSuffix("claude-a"); got != " | $0.04r" {
-		t.Fatalf("badge = %q, want \" | $0.04r\"", got)
+	if got := m.usageBorderSuffix("claude-a"); got != " | $0.04" {
+		t.Fatalf("badge = %q, want \" | $0.04\"", got)
 	}
 	if got := m.usageHeaderCost(); got != "Run $0.04" {
-		t.Fatalf("header = %q, want \"Run $0.04\" (reported, no est)", got)
+		t.Fatalf("header = %q, want \"Run $0.04\" (reported, no ~ prefix)", got)
 	}
 }
 

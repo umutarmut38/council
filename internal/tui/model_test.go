@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -16,6 +17,68 @@ import (
 )
 
 var ansiRE = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
+
+func TestToastText(t *testing.T) {
+	now := time.Now()
+	cases := []struct {
+		name         string
+		status       string
+		age          time.Duration
+		statusAtZero bool
+		want         string
+	}{
+		{"fresh non-sticky shows", "saved transcripts", time.Second, false, "saved transcripts"},
+		{"expired non-sticky hides", "saved transcripts", 5 * time.Second, false, ""},
+		{"sticky persists past TTL", "cost reconcile failed", 30 * time.Second, false, "cost reconcile failed"},
+		{"empty status hides", "", time.Second, false, ""},
+		{"never-stamped hides", "saved transcripts", 0, true, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := Model{Status: tc.status, now: now}
+			if !tc.statusAtZero {
+				m.statusAt = now.Add(-tc.age)
+			}
+			if got := m.toastText(); got != tc.want {
+				t.Fatalf("toastText() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestStatusSticky(t *testing.T) {
+	for s, want := range map[string]bool{
+		"start error: boom":       true,
+		"cannot start run":        true,
+		"save failed: disk full":  true,
+		"price unknown for model": true,
+		"saved transcripts":       false,
+		"sent to all agents":      false,
+	} {
+		if got := statusSticky(s); got != want {
+			t.Errorf("statusSticky(%q) = %v, want %v", s, got, want)
+		}
+	}
+}
+
+// The Update wrapper stamps statusAt when Status changes (detected via
+// statusSeen) and leaves it alone when an identical tick repeats.
+func TestUpdateStampsToastOnStatusChange(t *testing.T) {
+	m := Model{Status: "sent to all agents"} // set before the wrapper observes it
+	updated, _ := m.Update(usageTickMsg{})
+	nm := updated.(Model)
+	if nm.statusAt.IsZero() || nm.statusSeen != "sent to all agents" {
+		t.Fatalf("first tick should stamp toast: statusAt=%v seen=%q", nm.statusAt, nm.statusSeen)
+	}
+	if nm.toastText() != "sent to all agents" {
+		t.Fatalf("fresh toast should render, got %q", nm.toastText())
+	}
+	firstAt := nm.statusAt
+	updated2, _ := nm.Update(usageTickMsg{})
+	if nm2 := updated2.(Model); nm2.statusAt != firstAt {
+		t.Fatalf("identical status should not re-stamp: %v vs %v", nm2.statusAt, firstAt)
+	}
+}
 
 func keyMsg(s string) tea.KeyMsg {
 	switch s {

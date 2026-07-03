@@ -32,7 +32,8 @@ council                      # launch all enabled agents
 - `Ctrl+S` saves transcripts; `Ctrl+X` quits.
 
 With [`usage.enabled`](configuration.md#usage) each pane border shows its running
-cost and `/cost` breaks it down; opt into
+cost (`~$` estimated, `$` reported) and `/cost` breaks it down into a per-session
+table plus a share bar of where the run's spend went; opt into
 [`worktrees.freestyle`](configuration.md#worktrees) to give each pane its own git
 worktree for file isolation and a per-pane cost split.
 
@@ -41,11 +42,21 @@ worktree for file isolation and a per-pane cost split.
 While a run is active the chrome carries its state, so you never have to
 reconstruct the workflow from memory:
 
-- **Phase rail** (third header line):
-  `Plan 2/2 ✓  Vote 0/2 ●  Build ○ … · Next: /vote` — artifact counts, the
-  active phase, and the recommended next command.
-- **Pane badges** show what each agent owes: `vote · waiting for VOTE.md`,
-  `vote · wrote VOTE.md`, `build · working`, `needs input`.
+- **Header** — line 1 is the brand, agent roster, and run path, with the run
+  cost pinned to the right (`~$0.02` estimated, `$0.02` reported). Line 2 is the
+  phase stepper with the paging/grouping summary pinned right; transient status
+  (`saved transcripts`, errors) appears here as a toast that fades after a few
+  seconds.
+- **Phase stepper** (header line 2 while a run is active):
+  `plan ✓ ▸ vote ● 0/2 ▸ build ▸ review ▸ adopt · Next: /vote` — done phases
+  collapse to `✓`, the active phase carries its `k/n` artifact count, and the
+  recommended next command trails.
+- **Pane badges** lead with a liveness glyph so you can see which pane needs you
+  at a glance: `●` active, `◌ 2m` idle (with how long it's been quiet),
+  `✓ exited`, `✕ exit 1`, `! needs input`. During a run the glyph carries what
+  the agent owes: `● build · working`, `◌ 1m vote · waiting for VOTE.md`,
+  `✓ vote · wrote VOTE.md`. A cost badge (`| ~$0.02`) rides alongside when
+  [`usage`](configuration.md#usage) is on.
 - **Blocked panes** turn the border orange and put a recovery hint in the
   footer. Auto-detection is **experimental**: it fires only when an
   approval-looking prompt (`[y/N]`, "Do you want to proceed", trust dialogs)

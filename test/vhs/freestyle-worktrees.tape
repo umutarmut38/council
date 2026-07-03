@@ -23,8 +23,9 @@ Screenshot .tmp/vhs/freestyle-worktrees-boot.png
 Type "Build it."
 Enter
 Wait+Screen@30s /sent to all agents/
-# Distinct worktree cwds → each pane's badge upgrades to its own reported cost.
-Wait+Screen@30s /\$[0-9]+\.[0-9]+r/
+# Distinct worktree cwds → each pane's badge upgrades to its own reported cost
+# (plain "| $…", not the estimated "| ~$…").
+Wait+Screen@30s /\| \$[0-9]/
 # The fakes dirtied their worktrees; wait for the slow status tick to mark them.
 Sleep 7s
 Screenshot .tmp/vhs/freestyle-worktrees-stale.png

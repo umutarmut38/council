@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -375,17 +376,17 @@ func (m Model) usageHeaderCost() string {
 		addCurrency(r.Currency)
 	}
 	if !hasTokens {
-		return "Run $0.00 est"
+		return "Run ~$0.00"
 	}
 	if mixed {
 		return "Run mixed currency"
 	}
 	if unknown && !priced {
-		return "cost unknown"
+		return "Run $?"
 	}
 	label := compactCost(total, currency)
 	if anyEstimated {
-		label += " est"
+		label = "~" + label
 	}
 	if unknown {
 		label += " + unknown"
@@ -394,8 +395,8 @@ func (m Model) usageHeaderCost() string {
 }
 
 // usageBorderSuffix is the per-agent cost shown in a pane title. Once /cost has
-// reconciled, it prefers the reported total (suffix r/x) over the estimated
-// floor (suffix e).
+// reconciled, it prefers the reported total (plain $) over the estimated floor
+// (~$); see costLabel for the vocabulary.
 func (m Model) usageBorderSuffix(name string) string {
 	if m.usageTally == nil || !m.Config.Usage.BorderCostEnabled() {
 		return ""
@@ -404,12 +405,12 @@ func (m Model) usageBorderSuffix(name string) string {
 		if !rc.priced {
 			return " | $?"
 		}
-		return " | " + compactCost(rc.cost, rc.currency) + confidenceSuffix(rc.confidence)
+		return " | " + costLabel(rc.cost, rc.currency, rc.confidence)
 	}
 	t := m.usageTally[name]
 	if r, ok := m.usageRate[name]; ok && r.Found {
 		c, _ := r.Cost(t)
-		return " | " + compactCost(c, r.Currency) + confidenceSuffix(usage.Estimated)
+		return " | " + costLabel(c, r.Currency, usage.Estimated)
 	}
 	if !t.Any() {
 		return " | $0.00"
@@ -467,6 +468,57 @@ func rollupReconciled(summary usage.Summary) map[string]reconciledCost {
 	return out
 }
 
+// costShareSection renders per-agent cost share bars from a priced rollup,
+// sorted by cost descending, so the /cost view shows who is burning the budget
+// at a glance. It returns "" when nothing is priced. Plain text (~50 cols) so
+// the pager's rune wrap leaves it intact; colorCostLine styles it at render.
+func costShareSection(rollup map[string]reconciledCost) string {
+	type row struct {
+		name string
+		rc   reconciledCost
+	}
+	var rows []row
+	total := 0.0
+	currency := ""
+	for name, rc := range rollup {
+		if rc.priced {
+			// Summing costs across currencies would make the percentages
+			// meaningless, so bail out of shares on a mixed-currency run (the
+			// header already shows "mixed currency" for the same reason).
+			if rc.currency != "" && currency != "" && rc.currency != currency {
+				return ""
+			}
+			if rc.currency != "" {
+				currency = rc.currency
+			}
+			rows = append(rows, row{name, rc})
+			total += rc.cost
+		}
+	}
+	if len(rows) == 0 || total <= 0 {
+		return ""
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].rc.cost != rows[j].rc.cost {
+			return rows[i].rc.cost > rows[j].rc.cost
+		}
+		return rows[i].name < rows[j].name
+	})
+	const barW = 20
+	var b strings.Builder
+	b.WriteString("\nShare:\n")
+	for _, r := range rows {
+		frac := r.rc.cost / total
+		filled := int(frac*barW + 0.5)
+		if filled > barW {
+			filled = barW
+		}
+		bar := strings.Repeat("█", filled) + strings.Repeat("░", barW-filled)
+		fmt.Fprintf(&b, "%-14.14s %s %3.0f%%  %s\n", r.name, bar, frac*100, costLabel(r.rc.cost, r.rc.currency, r.rc.confidence))
+	}
+	return b.String()
+}
+
 var confidenceRank = map[string]int{usage.Unknown: 0, usage.Estimated: 1, usage.Reported: 2, usage.Exact: 3}
 
 // weakerConfidence returns the lower-confidence of two tiers ("" means none yet).
@@ -483,17 +535,18 @@ func weakerConfidence(a, b string) string {
 	}
 }
 
-// confidenceSuffix is the single-letter badge marker for a confidence tier.
-func confidenceSuffix(conf string) string {
-	switch conf {
-	case usage.Exact:
-		return "x"
-	case usage.Reported:
-		return "r"
+// costLabel formats a cost in the estimate-prefix vocabulary shared by the
+// header and pane badges: ~$0.02 estimated, $0.02 reported/exact, $? unknown.
+// It replaces the old single-letter e/r/x suffixes so one glyph convention
+// covers every cost readout.
+func costLabel(cost float64, currency, confidence string) string {
+	switch confidence {
+	case usage.Reported, usage.Exact:
+		return compactCost(cost, currency)
 	case usage.Estimated:
-		return "e"
+		return "~" + compactCost(cost, currency)
 	default:
-		return "?"
+		return "$?"
 	}
 }
 
@@ -510,6 +563,19 @@ func compactCost(cost float64, currency string) string {
 	default:
 		return usage.FormatMoney(cost) + " " + strings.ToUpper(currency)
 	}
+}
+
+// composerTokenLabel is the live ~token estimate appended to the composer box
+// label as the user types, connecting cost to the moment before a fan-out send.
+// Empty for slash-commands and when usage is off. It counts the typed text only
+// (@file expansion happens at send); the estimator is O(len), so recomputing it
+// per render is negligible.
+func (m Model) composerTokenLabel() string {
+	if !m.Config.Usage.Enabled || m.PromptInput == "" || strings.HasPrefix(m.PromptInput, "/") {
+		return ""
+	}
+	tok, _ := usage.EstimatorFor(m.Config.Usage.Estimator).Estimate(m.PromptInput)
+	return fmt.Sprintf(" · ~%d tok", tok)
 }
 
 // buildPricer constructs a Pricer from the active config + on-disk price cache.
@@ -589,6 +655,7 @@ func (m *Model) cmdCost() tea.Cmd {
 		var b strings.Builder
 		fmt.Fprintf(&b, "# Cost -- run %s\n\n", stamp)
 		b.WriteString(usage.FormatTable(summary))
+		b.WriteString(costShareSection(out.rollup))
 		if src, at := pricer.Origin(); !at.IsZero() {
 			fmt.Fprintf(&b, "\nprices: %s (%s)\n", src, at.Format("2006-01-02"))
 		}

@@ -38,20 +38,24 @@ func (m Model) renderHeader() string {
 			line += " | " + compressPath(m.Store.RunDir)
 		}
 	}
+	// Paging/grouping summary is docked on the right of line 2.
 	page := fmt.Sprintf("Page %d/%d · agents %s · grouped by %s", m.PageIndex+1, m.pageCount(), m.pageRangeLabel(), m.groupByLabel())
 	if filter := m.displayFilterLabel(); filter != "" {
 		page += " · showing " + filter
 	}
-	if m.ScreenMode != ScreenPanes {
-		page = strings.ToUpper(m.screenModeName()) + " · " + page
-	}
-	statusText := page + " · " + m.Status
-	if cost := m.usageHeaderCost(); cost != "" {
-		statusText += " · " + cost
-	}
-	railText := ""
+	// Line 2 left: the phase stepper while a run is active, else the screen-mode
+	// name; a transient status toast rides alongside it (sticky errors flagged).
+	left2 := ""
 	if m.progress != nil {
-		railText = m.progress.phaseRail()
+		left2 = m.progress.phaseRail()
+	} else if m.ScreenMode != ScreenPanes {
+		left2 = strings.ToUpper(m.screenModeName())
+	}
+	if toast := m.toastText(); toast != "" {
+		if statusSticky(m.Status) {
+			toast = "! " + toast
+		}
+		left2 = headerJoin(left2, toast)
 	}
 
 	c := m.chrome()
@@ -59,10 +63,12 @@ func (m Model) renderHeader() string {
 		return m.renderHeaderBand(c)
 	}
 
-	header := c.title.Render(fitText(line, m.Width)) + "\n" + c.status.Render(fitText(statusText, m.Width))
-	if railText != "" {
-		header += "\n" + c.rail.Render(fitText(railText, m.Width))
-	}
+	// Line 1: brand + roster + run path, with the run cost pinned right.
+	leftFit, costFit := pinRight(line, m.usageHeaderCost(), m.Width)
+	header := c.title.Render(leftFit) + c.status.Render(costFit)
+	// Line 2: stepper/toast on the left, paging summary pinned right.
+	stepperFit, pageFit := pinRight(left2, page, m.Width)
+	header += "\n" + c.rail.Render(stepperFit) + c.status.Render(pageFit)
 	return header
 }
 
@@ -275,7 +281,7 @@ func (m Model) renderFooter() string {
 		}
 		return strings.Join([]string{
 			c.suggest.Render(fitText(hint, m.Width)),
-			inputBoxTop(m.screenModeName(), m.Width, c.border, retro),
+			inputBoxTop(m.screenModeName(), m.Width, c.border, c.suggest, retro),
 			inputBoxContent(m.Status, m.Width, c.border, c.input, retro),
 			inputBoxBottom(m.Width, c.border, retro),
 		}, "\n")
@@ -285,12 +291,20 @@ func (m Model) renderFooter() string {
 		hint := c.suggest.Render(fitText("DIRECT MODE — keystrokes go straight to the pane (Esc included). F2/Ctrl+O to exit.", m.Width))
 		label := "direct: " + m.focusedName()
 		content := "keys → " + m.focusedName()
-		return strings.Join([]string{hint, inputBoxTop(label, m.Width, c.border, retro), inputBoxContent(content, m.Width, c.border, c.input, retro), inputBoxBottom(m.Width, c.border, retro)}, "\n")
+		return strings.Join([]string{hint, inputBoxTop(label, m.Width, c.border, c.warn, retro), inputBoxContent(content, m.Width, c.border, c.input, retro), inputBoxBottom(m.Width, c.border, retro)}, "\n")
 	}
 
 	label := m.targetLabel()
 	if m.Zoomed {
 		label = "[zoom] " + label
+	}
+	label += m.composerTokenLabel()
+	// A one-agent target is the highest-stakes bit of state (a wrong-agent send
+	// is the costly mistake), so give the chip the focus color; broadcast stays
+	// neutral.
+	accent := c.suggest
+	if m.Target != TargetAll {
+		accent = c.focus
 	}
 
 	prompt := m.targetPrompt()
@@ -298,7 +312,7 @@ func (m Model) renderFooter() string {
 
 	lines := m.suggestionBlock(c)
 	lines = append(lines,
-		inputBoxTop(label, m.Width, c.border, retro),
+		inputBoxTop(label, m.Width, c.border, accent, retro),
 		inputBoxContent(content, m.Width, c.border, c.input, retro),
 		inputBoxBottom(m.Width, c.border, retro),
 	)
@@ -349,7 +363,8 @@ func (m Model) suggestionLine(c chromeStyles) string {
 		return c.suggest.Render(fitText(hint, m.Width))
 	}
 
-	help := "Enter send | Ctrl+G overview | F2 direct | Ctrl+B target | Ctrl+F zoom | Ctrl+N/P page | Tab focus | Ctrl+W mouse | @file"
+	// A short, high-value set; the rest are discoverable via the command palette.
+	help := "Enter send · F2 direct · Ctrl+G overview · Tab focus · @file · / commands"
 	return c.faint.Render(fitText(help, m.Width))
 }
 
@@ -379,7 +394,11 @@ func (m Model) targetPrompt() string {
 	}
 }
 
-func inputBoxTop(label string, width int, border lipgloss.Style, retro bool) string {
+// inputBoxTop draws the composer's top border with the label as an accented
+// chip: the ` label ` segment takes the accent style (e.g. the target color)
+// while the bars stay in the border color. Widths are computed on plain text so
+// the styling can't change the total.
+func inputBoxTop(label string, width int, border, accent lipgloss.Style, retro bool) string {
 	tl, tr, hbar := "╭", "╮", "─"
 	if retro {
 		tl, tr, hbar = "┏", "┓", "━"
@@ -388,16 +407,16 @@ func inputBoxTop(label string, width int, border lipgloss.Style, retro bool) str
 		return border.Render(strings.Repeat(hbar, max0(width)))
 	}
 	inner := width - 2
-	lbl := ""
-	if label != "" {
-		lbl = hbar + " " + label + " "
+	if label == "" {
+		return border.Render(tl + strings.Repeat(hbar, inner) + tr)
 	}
-	lbl = truncateText(lbl, inner)
-	pad := inner - lipgloss.Width(lbl)
+	chip := " " + label + " "
+	chip = truncateText(chip, max0(inner-1)) // leave the leading hbar its cell
+	pad := inner - 1 - lipgloss.Width(chip)
 	if pad < 0 {
 		pad = 0
 	}
-	return border.Render(tl + lbl + strings.Repeat(hbar, pad) + tr)
+	return border.Render(tl+hbar) + accent.Render(chip) + border.Render(strings.Repeat(hbar, pad)+tr)
 }
 
 func inputBoxBottom(width int, border lipgloss.Style, retro bool) string {
@@ -543,7 +562,7 @@ func (m Model) renderOverview(bodyHeight int) []string {
 		page := m.pageForIndex(idx) + 1
 		label := fmt.Sprintf("%s %s · %s · %s · %s · page %d · %s",
 			marker, view.Session.Name, m.agentRoleLabel(view.Session.Name),
-			m.agentPersonalityLabel(view.Session.Name), visibility, page, m.paneBadge(view))
+			m.agentPersonalityLabel(view.Session.Name), visibility, page, m.paneBadge(view, m.now))
 		line := fitText(label, m.Width)
 		if view.Attention && !view.Session.Done {
 			line = c.warn.Render(line)
@@ -642,7 +661,7 @@ func (m Model) renderPane(index int, width int, height int) []string {
 	// actually shown (e.g. after a resize or scrollback trim).
 	bodyHeight := height - 2
 	body := view.bodyLines(bodyHeight, width-2)
-	state := m.paneBadge(view) + m.usageBorderSuffix(view.Session.Name) + m.worktreeMarker(view.Session.Name)
+	state := m.paneBadge(view, m.now) + m.usageBorderSuffix(view.Session.Name) + m.worktreeMarker(view.Session.Name)
 	// While scrolled up the view is not live: show a marker so it's obvious new
 	// output is landing below the fold.
 	if view.ScrollOffset > 0 {
@@ -941,6 +960,41 @@ func fitText(value string, width int) string {
 		value += strings.Repeat(" ", width-visible)
 	}
 	return value
+}
+
+// pinRight lays left and right into exactly width columns with right flush to
+// the right edge, truncating left first when they can't both fit. It returns
+// the two plain segments separately so the caller can style each one — widths
+// are computed on plain text, so styling can't change the total. The returned
+// right segment carries the gap padding, so left+right always spans width.
+func pinRight(left, right string, width int) (string, string) {
+	if width <= 0 {
+		return "", ""
+	}
+	rw := lipgloss.Width(right)
+	if rw >= width {
+		return "", truncateText(right, width)
+	}
+	leftWidth := width - rw
+	left = truncateText(left, leftWidth)
+	pad := leftWidth - lipgloss.Width(left)
+	if pad < 0 {
+		pad = 0
+	}
+	return left, strings.Repeat(" ", pad) + right
+}
+
+// headerJoin joins two header segments with the standard " · " separator,
+// dropping either when empty.
+func headerJoin(a, b string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	default:
+		return a + " · " + b
+	}
 }
 
 func truncateText(value string, width int) string {
