@@ -217,6 +217,14 @@ func TestCostShareSection(t *testing.T) {
 	if costShareSection(nil) != "" || costShareSection(map[string]reconciledCost{"x": {someUnknown: true}}) != "" {
 		t.Fatal("no priced agents should produce no section")
 	}
+	// Mixed currencies make summed shares meaningless → suppress the section.
+	mixed := map[string]reconciledCost{
+		"usd": {cost: 1, currency: "USD", confidence: usage.Reported, priced: true},
+		"eur": {cost: 1, currency: "EUR", confidence: usage.Reported, priced: true},
+	}
+	if got := costShareSection(mixed); got != "" {
+		t.Fatalf("mixed-currency shares should be suppressed, got %q", got)
+	}
 }
 
 // After /cost reconciles, the pane badge shows the reported total (plain $) and

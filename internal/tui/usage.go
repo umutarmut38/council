@@ -479,8 +479,18 @@ func costShareSection(rollup map[string]reconciledCost) string {
 	}
 	var rows []row
 	total := 0.0
+	currency := ""
 	for name, rc := range rollup {
 		if rc.priced {
+			// Summing costs across currencies would make the percentages
+			// meaningless, so bail out of shares on a mixed-currency run (the
+			// header already shows "mixed currency" for the same reason).
+			if rc.currency != "" && currency != "" && rc.currency != currency {
+				return ""
+			}
+			if rc.currency != "" {
+				currency = rc.currency
+			}
 			rows = append(rows, row{name, rc})
 			total += rc.cost
 		}
