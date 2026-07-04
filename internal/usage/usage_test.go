@@ -11,6 +11,71 @@ func TestEstimateTokens(t *testing.T) {
 	}
 }
 
+// Below a dime, costs render with four decimals so several small rows reconcile
+// with their total ($0.0060 ×3 + $0.0019 = $0.0199, not three "$0.01" → "$0.03").
+func TestFormatMoneyPrecision(t *testing.T) {
+	for _, tc := range []struct {
+		v    float64
+		want string
+	}{
+		{0, "0.00"},
+		{0.006, "0.0060"},
+		{0.0199, "0.0199"},
+		{0.099, "0.0990"},
+		{0.10, "0.10"},
+		{0.15, "0.15"},
+		{1.2, "1.20"},
+	} {
+		if got := FormatMoney(tc.v); got != tc.want {
+			t.Errorf("FormatMoney(%v) = %q, want %q", tc.v, got, tc.want)
+		}
+	}
+}
+
+// Yen has no minor unit, so the /cost table must not print fractional yen —
+// including under the new sub-dime 4-decimal rule.
+func TestCostJPYNoDecimals(t *testing.T) {
+	big, small := 1234.0, 0.06
+	if got := cost(&big, "JPY"); got != "JPY 1234" {
+		t.Errorf("cost(1234, JPY) = %q, want %q", got, "JPY 1234")
+	}
+	if got := cost(&small, "JPY"); got != "JPY 0" {
+		t.Errorf("cost(0.06, JPY) = %q, want %q (no fractional yen)", got, "JPY 0")
+	}
+}
+
+// The /cost table Cost column carries the ~ estimate prefix for a still-estimated
+// row (e.g. Copilot before it reports on exit); the Total is estimated whenever
+// any session is.
+func TestFormatTableEstimatePrefix(t *testing.T) {
+	c := func(v float64) *float64 { return &v }
+	out := FormatTable(Summary{
+		Sessions: []SessionTotal{
+			{Agent: "copilot", Phase: "session", Confidence: Estimated, Cost: c(0.006), Currency: "USD"},
+			{Agent: "codex", Phase: "session", Confidence: Reported, Cost: c(0.006), Currency: "USD"},
+		},
+		Cost:     c(0.012),
+		Currency: "USD",
+	})
+	row := func(prefix string) string {
+		for _, l := range strings.Split(out, "\n") {
+			if strings.HasPrefix(l, prefix) {
+				return l
+			}
+		}
+		return ""
+	}
+	if r := row("copilot"); !strings.Contains(r, "~$0.0060") {
+		t.Fatalf("estimated row = %q, want ~$0.0060:\n%s", r, out)
+	}
+	if r := row("codex"); !strings.Contains(r, "$0.0060") || strings.Contains(r, "~") {
+		t.Fatalf("reported row = %q, want plain $0.0060 (no ~):\n%s", r, out)
+	}
+	if r := row("Total"); !strings.Contains(r, "~$0.0120") {
+		t.Fatalf("Total = %q, want ~$0.0120 (any session estimated):\n%s", r, out)
+	}
+}
+
 // Two instances of the same CLI must stay separate sessions, not merge.
 func TestAggregateKeepsSameToolInstancesApart(t *testing.T) {
 	s := Aggregate([]Event{

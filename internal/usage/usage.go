@@ -638,16 +638,30 @@ func FormatTable(s Summary) string {
 	var b strings.Builder
 	tw := tabwriter.NewWriter(&b, 0, 2, 2, ' ', 0)
 	fmt.Fprintln(tw, "Agent\tPhase\tTool\tModel\tPriceModel\tInput\tCache\tOutput\tCost\tSource\tConfidence\tNote")
+	anyEstimated := false
 	for _, ses := range s.Sessions {
 		note := displayNote(ses)
+		// Only a *priced* estimate makes the summed Total an estimate: an unpriced
+		// session adds no cost to s.Cost, so it can't turn the figure into one
+		// (it surfaces as a "--" row and a hint). Matches the header's logic.
+		if ses.Cost != nil && ses.Confidence == Estimated {
+			anyEstimated = true
+		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			ses.Agent, ses.Phase, dash(ses.Tool), dash(ses.Model), dash(ses.PriceModel),
 			tokens(ses.Tokens.Input), cacheTokens(ses.Tokens), tokens(ses.Tokens.Output+ses.Tokens.Reasoning),
-			cost(ses.Cost, ses.Currency), dash(ses.PriceSource), dash(ses.PriceConf), dash(note))
+			costCell(ses.Cost, ses.Currency, ses.Confidence), dash(ses.PriceSource), dash(ses.PriceConf), dash(note))
+	}
+	// The Total cost carries ~ when it includes an estimate-derived component —
+	// any priced session whose tokens are still estimated (e.g. Copilot mid-run,
+	// which only reports on exit), so the figure reads as the lower bound it is.
+	totalConf := Reported
+	if anyEstimated {
+		totalConf = Estimated
 	}
 	fmt.Fprintf(tw, "Total\t\t\t\t\t%s\t%s\t%s\t%s\t\t\t%s\n",
 		tokens(s.Tokens.Input), cacheTokens(s.Tokens), tokens(s.Tokens.Output+s.Tokens.Reasoning),
-		cost(s.Cost, s.Currency), dash(s.Note))
+		costCell(s.Cost, s.Currency, totalConf), dash(s.Note))
 	tw.Flush()
 	if len(s.Hints) > 0 {
 		b.WriteString("\nHints:\n")
@@ -762,14 +776,33 @@ func cacheTokens(t TokenTotals) string {
 
 var currencySymbols = map[string]string{"USD": "$", "EUR": "EUR ", "GBP": "GBP ", "JPY": "JPY "}
 
-// FormatMoney renders an amount with two decimals, switching to four when a
-// real sub-cent cost would otherwise round to 0.00 and read as free — "never
-// silently $0" applies to rounding too.
+// FormatMoney renders an amount with two decimals, switching to four below a
+// dime. Two decimals hides real sub-cent costs ("never silently $0") and, worse,
+// makes several small rows visibly disagree with their total — three $0.006 rows
+// each round to $0.01 (reads as $0.03) but truly sum to $0.02. Four decimals
+// under $0.10 lets small rows and their small total reconcile.
+//
+// Note: at or above a dime, 2-decimal rows can still be a cent off from a
+// many-row total; that is inherent to cent display and not the confusing case
+// this addresses.
 func FormatMoney(v float64) string {
-	if v > 0 && v < 0.005 {
+	if v > 0 && v < 0.10 {
 		return fmt.Sprintf("%.4f", v)
 	}
 	return fmt.Sprintf("%.2f", v)
+}
+
+// costCell renders a cost for the /cost table, adding the ~ estimate prefix when
+// the token count is still estimated (matching the header/badge vocabulary). The
+// table's Confidence column is *price* confidence, so without this an exit-only
+// reporter like Copilot mid-run — priced "exact" but not yet reported — reads as
+// final even though its tokens are only the estimated floor.
+func costCell(c *float64, currency, tokenConfidence string) string {
+	s := cost(c, currency)
+	if c != nil && tokenConfidence == Estimated {
+		return "~" + s
+	}
+	return s
 }
 
 func cost(c *float64, currency string) string {
@@ -779,6 +812,10 @@ func cost(c *float64, currency string) string {
 	cur := strings.ToUpper(strings.TrimSpace(currency))
 	if cur == "" {
 		cur = "USD"
+	}
+	// Yen has no minor unit — never show decimals (matches the TUI's compactCost).
+	if cur == "JPY" {
+		return currencySymbols[cur] + fmt.Sprintf("%.0f", *c)
 	}
 	if sym, ok := currencySymbols[cur]; ok {
 		return sym + FormatMoney(*c)
