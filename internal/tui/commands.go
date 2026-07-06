@@ -245,13 +245,6 @@ func (m *Model) submitInput() tea.Cmd {
 			return nil
 		}
 	}
-	if session := m.focusedSession(); session != nil {
-		if err := sendLine(session, m.Config.PromptForAgent(session.Name, text)); err != nil {
-			m.Status = err.Error()
-			return nil
-		}
-		m.Status = "sent to " + session.Name
-	}
 	return nil
 }
 
@@ -414,18 +407,35 @@ func (m *Model) handleCommand(text string) (bool, tea.Cmd) {
 		m.clearScreens(rest)
 	case "quit":
 		m.terminateAgents()
-		m.Status = "quit with Ctrl+X"
+		return true, tea.Quit
 	case "help":
-		all := command.Composers()
-		names := make([]string, 0, len(all))
-		for _, c := range all {
-			names = append(names, "/"+c.Name)
-		}
-		m.Status = "commands: " + strings.Join(names, " ") + "  |  @agent msg, Tab completes"
-	default:
-		m.Status = "unknown command: " + fields[0]
+		m.openCommandHelp()
 	}
 	return true, nil
+}
+
+// openCommandHelp renders the full in-chat command reference — name, args,
+// description, and any global key — into the pager, the same way /setup and
+// /status surface long output. A 39-command dump never fit the status line.
+// The pager has no Markdown renderer, so entries are plain text (no ** bold).
+func (m *Model) openCommandHelp() {
+	composers := command.Composers()
+	var b strings.Builder
+	b.WriteString("# In-chat commands\n\n")
+	b.WriteString("Type a command word after the slash. Tab completes it. @agent msg targets one pane.\n\n")
+	for _, c := range composers {
+		name := "/" + c.Name
+		if c.Args != "" {
+			name += " " + c.Args
+		}
+		fmt.Fprintf(&b, "  %-28s %s", name, c.Desc)
+		if c.Key != "" {
+			fmt.Fprintf(&b, " (%s)", c.Key)
+		}
+		b.WriteByte('\n')
+	}
+	m.openArtifactText("commands", b.String())
+	m.Status = fmt.Sprintf("%d commands — Esc/q to close", len(composers))
 }
 
 // cmdRestart terminates and relaunches one pane with its current (phase)

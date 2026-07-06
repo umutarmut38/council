@@ -71,6 +71,16 @@ func parseWithTrailingFlags(fs *flag.FlagSet, args []string) ([]string, error) {
 	}
 }
 
+// firstPositional returns the leading positional argument (the optional [run]
+// stamp) or "" — the value parseWithTrailingFlags collects when a command
+// accepts `<run>` followed by flags.
+func firstPositional(args []string) string {
+	if len(args) > 0 {
+		return args[0]
+	}
+	return ""
+}
+
 // newOrchFlagSet creates a flag set with the flags every orchestration
 // subcommand shares.
 func newOrchFlagSet(name string) (*flag.FlagSet, *bool) {
@@ -114,7 +124,8 @@ func councilPlan(args []string) error {
 	issueNum := fs.Int("issue", 0, "fetch the issue from GitHub by number (via gh)")
 	agentsOverride := fs.String("agents", "", "comma-separated agent names")
 	base := fs.String("base", "", "base ref for worktrees (default HEAD)")
-	if err := fs.Parse(args); err != nil {
+	positional, err := parseWithTrailingFlags(fs, args)
+	if err != nil {
 		return err
 	}
 
@@ -124,7 +135,7 @@ func councilPlan(args []string) error {
 	}
 	cwd, _ := os.Getwd()
 	issue, err := orchestrate.ResolveIssue(
-		orchestrate.IssueSpec{Inline: strings.Join(fs.Args(), " "), File: *file, Number: *issueNum},
+		orchestrate.IssueSpec{Inline: strings.Join(positional, " "), File: *file, Number: *issueNum},
 		cwd, fileRefOpts(cfg))
 	if err != nil {
 		return err
@@ -171,7 +182,8 @@ func doPlan(ctrl *orchestrate.Controller, cfg config.Config) error {
 func councilVote(args []string) error {
 	fs, noLocal := newOrchFlagSet("council vote")
 	agentsOverride := fs.String("agents", "", "comma-separated agent names")
-	if err := fs.Parse(args); err != nil {
+	positional, err := parseWithTrailingFlags(fs, args)
+	if err != nil {
 		return err
 	}
 	cfg, err := loadConfig(*noLocal)
@@ -182,7 +194,7 @@ func councilVote(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := ctrl.UseRun(fs.Arg(0)); err != nil {
+	if err := ctrl.UseRun(firstPositional(positional)); err != nil {
 		return err
 	}
 	return doVote(ctrl, cfg)
@@ -228,7 +240,8 @@ func doVote(ctrl *orchestrate.Controller, cfg config.Config) error {
 func councilBuild(args []string) error {
 	fs, noLocal := newOrchFlagSet("council build")
 	agentsOverride := fs.String("agents", "", "comma-separated agent names")
-	if err := fs.Parse(args); err != nil {
+	positional, err := parseWithTrailingFlags(fs, args)
+	if err != nil {
 		return err
 	}
 	cfg, err := loadConfig(*noLocal)
@@ -239,7 +252,7 @@ func councilBuild(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := ctrl.UseRun(fs.Arg(0)); err != nil {
+	if err := ctrl.UseRun(firstPositional(positional)); err != nil {
 		return err
 	}
 	return doBuild(ctrl, cfg)
@@ -266,7 +279,8 @@ func doBuild(ctrl *orchestrate.Controller, cfg config.Config) error {
 func councilReview(args []string) error {
 	fs, noLocal := newOrchFlagSet("council review")
 	agentsOverride := fs.String("agents", "", "comma-separated agent names")
-	if err := fs.Parse(args); err != nil {
+	positional, err := parseWithTrailingFlags(fs, args)
+	if err != nil {
 		return err
 	}
 	cfg, err := loadConfig(*noLocal)
@@ -277,7 +291,7 @@ func councilReview(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := ctrl.UseRun(fs.Arg(0)); err != nil {
+	if err := ctrl.UseRun(firstPositional(positional)); err != nil {
 		return err
 	}
 
@@ -413,7 +427,8 @@ func councilRunAll(args []string) error {
 	issueNum := fs.Int("issue", 0, "fetch the issue from GitHub by number (via gh)")
 	agentsOverride := fs.String("agents", "", "comma-separated agent names")
 	base := fs.String("base", "", "base ref for worktrees (default HEAD)")
-	if err := fs.Parse(args); err != nil {
+	positional, err := parseWithTrailingFlags(fs, args)
+	if err != nil {
 		return err
 	}
 
@@ -423,7 +438,7 @@ func councilRunAll(args []string) error {
 	}
 	cwd, _ := os.Getwd()
 	issue, err := orchestrate.ResolveIssue(
-		orchestrate.IssueSpec{Inline: strings.Join(fs.Args(), " "), File: *file, Number: *issueNum},
+		orchestrate.IssueSpec{Inline: strings.Join(positional, " "), File: *file, Number: *issueNum},
 		cwd, fileRefOpts(cfg))
 	if err != nil {
 		return err
@@ -572,7 +587,8 @@ func printRunStatus(run *orchestrate.Run) {
 func councilResume(args []string) error {
 	fs, noLocal := newOrchFlagSet("council resume")
 	agentsOverride := fs.String("agents", "", "comma-separated agent names")
-	if err := fs.Parse(args); err != nil {
+	positional, err := parseWithTrailingFlags(fs, args)
+	if err != nil {
 		return err
 	}
 	cfg, err := loadConfig(*noLocal)
@@ -583,7 +599,7 @@ func councilResume(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := ctrl.UseRun(fs.Arg(0)); err != nil {
+	if err := ctrl.UseRun(firstPositional(positional)); err != nil {
 		return err
 	}
 	store, err := ctrl.Store(config.Phase("resume"))

@@ -17,8 +17,6 @@ func TestHandleCommandResolvesAliases(t *testing.T) {
 	}{
 		{"/broadcast hi", "sent to all agents"}, // alias of /all
 		{"/all hi", "sent to all agents"},
-		{"/exit", "quit with Ctrl+X"}, // alias of /quit
-		{"/quit", "quit with Ctrl+X"},
 		{"/nope", "unknown command: /nope"},
 	}
 	for _, tc := range cases {
@@ -30,6 +28,34 @@ func TestHandleCommandResolvesAliases(t *testing.T) {
 		if m.Status != tc.status {
 			t.Fatalf("handleCommand(%q) status = %q, want %q", tc.input, m.Status, tc.status)
 		}
+	}
+
+	// /quit and its /exit alias both route to the quit handler, which returns a
+	// tea.Cmd (tea.Quit) rather than setting a status.
+	for _, word := range []string{"/quit", "/exit"} {
+		m := hudModel(t, "a")
+		handled, cmd := m.handleCommand(word)
+		if !handled {
+			t.Fatalf("handleCommand(%q) should be handled", word)
+		}
+		if cmd == nil {
+			t.Fatalf("handleCommand(%q) should return a quit command", word)
+		}
+	}
+}
+
+// TestHelpOpensPager checks that /help renders the full command reference into
+// the pager (not the one-line status bar, which never fit 39 commands).
+func TestHelpOpensPager(t *testing.T) {
+	m := hudModel(t, "a")
+	if handled, _ := m.handleCommand("/help"); !handled {
+		t.Fatal("/help should be handled")
+	}
+	if !strings.Contains(m.artifactView, "/plan") || !strings.Contains(m.artifactView, "/quit") {
+		t.Fatalf("/help pager missing commands:\n%s", m.artifactView)
+	}
+	if !strings.Contains(m.Status, "commands") {
+		t.Fatalf("/help status = %q", m.Status)
 	}
 }
 

@@ -99,7 +99,7 @@ See [Workflows → Personalities](workflows.md#personalities-categories-and-targ
 | Command | What it does |
 |---|---|
 | `/setup` | Show pre-launch setup/env status: each setup command's label, PID, lifecycle state, readiness-gate result, and captured output, plus the exported env keys (keys only — values are never shown). Empty unless `env`/`setup` is configured (experimental). |
-| `/help` | List commands in the status line. |
+| `/help` | Open the full command reference in the pager. |
 | `/quit` (`/exit`) | Quit (same as `Ctrl+X`). |
 
 ---
@@ -108,42 +108,40 @@ See [Workflows → Personalities](workflows.md#personalities-categories-and-targ
 
 <!-- BEGIN GENERATED: cli-general -->
 ```text
-council [--agents claude,codex] [--no-local-config]   launch the interactive multiplexer
-council [--agents claude,codex] ask "<prompt>"        launch and broadcast a prompt
-council config init [--force]                         write the default (safe) config
-council config wizard                                 interactive setup
-council config add-agent <preset>                     add a known agent CLI to the config
-council doctor                                        check config, commands, repo, run dirs
-council trust [--revoke|--show]                       trust this repo's .council.yaml
-council version                                       print build version, commit, and date
+council [--agents claude,codex] [--no-local-config]                                  launch the interactive multiplexer
+council [--agents claude,codex] ask "<prompt>"                                       launch and broadcast a prompt
+council config init [--force]                                                        write the default (safe) config
+council config wizard                                                                interactive setup
+council config add-agent <preset> [--name x] [--role planner,builder,voter,review]   add a known agent CLI to the config
+council config schema [--json]                                                       print the configuration reference (Markdown, or JSON Schema)
+council doctor [--fix]                                                               check config, commands, repo, run dirs (--fix applies safe fixes)
+council trust [--revoke|--show]                                                      trust this repo's .council.yaml
+council version                                                                      print build version, commit, and date
 ```
 <!-- END GENERATED: cli-general -->
-
-> Also: `council config schema` prints the configuration reference (the tables
-> in [Configuration → Schema reference](configuration.md#schema-reference-generated)).
 
 Orchestration from the shell — each phase opens the live panes and blocks until
 you quit it:
 
 <!-- BEGIN GENERATED: cli-orchestration -->
 ```text
-council plan "<issue>" | --file issue.md | --issue 123   start a run; each agent drafts a plan
-council vote [run]                                       tally ranked votes into a winner
-council build [run]                                      all agents implement the winning plan
-council review [run]                                     gate builds + reviewers pick the best
-council adopt [run] [agent] [--dry-run] [--yes]          preview + apply a build's diff
-council run "<issue>"                                    plan -> vote -> build
-council resume [run]                                     reopen an older run with fresh agent processes
-council status [run]                                     show a run's phase, artifacts, and winners
-council cost [run] [--since 30d] | cost prices refresh   per-session usage and estimated cost
-council report [run] [--post]                            write report.md (--post comments on the issue)
-council pr [run] [agent]                                 open a PR from a build branch (via gh)
-council scorecard                                        agent performance across runs
-council artifacts scan [run] [--all]                     scan run artifacts for likely secrets
-council queue add|list|run|clear                         batch issues through council
-council stack detect|set <go|node|rust|python>           set review.check_command
-council clean [--dry-run] [--yes]                        remove council worktrees + branches
-council clean-runs [--keep N] [--dry-run]                prune old run artifacts
+council plan "<issue>" | --file issue.md | --issue 123 [--agents a,b] [--base ref]   start a run; each agent drafts a plan
+council vote [run] [--agents a,b]                                                    tally ranked votes into a winner
+council build [run] [--agents a,b]                                                   all agents implement the winning plan
+council review [run] [--agents a,b]                                                  gate builds + reviewers pick the best
+council adopt [run] [agent] [--dry-run] [--yes]                                      preview + apply a build's diff
+council run "<issue>" | --file issue.md | --issue 123 [--agents a,b] [--base ref]    plan -> vote -> build
+council resume [run] [--agents a,b]                                                  reopen an older run with fresh agent processes
+council status [run]                                                                 show a run's phase, artifacts, and winners
+council cost [run] [--since 30d] [--source ledger|codeburn] | cost prices refresh    per-session usage and estimated cost
+council report [run] [--post N]                                                      write report.md (--post N comments on issue #N)
+council pr [run] [agent]                                                             open a PR from a build branch (via gh)
+council scorecard                                                                    agent performance across runs
+council artifacts scan [run] [--all]                                                 scan run artifacts for likely secrets
+council queue add|list|run|clear                                                     batch issues through council
+council stack detect|set <go|node|rust|python>                                       set review.check_command
+council clean [--dry-run] [--yes]                                                    remove council worktrees + branches
+council clean-runs [--keep N] [--dry-run]                                            prune old run artifacts
 ```
 <!-- END GENERATED: cli-orchestration -->
 
@@ -153,4 +151,7 @@ Notes:
 - `--agents` restricts to a comma-separated subset.
 - `--file` reads the issue from a markdown file; `--issue <n>` fetches a GitHub
   issue body via `gh`.
+- `--base <ref>` sets the base ref for the per-agent worktrees (default `HEAD`).
+- `council config schema` prints the configuration reference — the same tables as
+  [Configuration → Schema reference](configuration.md#schema-reference-generated); `--json` emits a JSON Schema (draft 2020-12) instead.
 - Repo-local `.council.yaml` files are only applied once trusted (`council trust`); pass `--no-local-config` to ignore them entirely.

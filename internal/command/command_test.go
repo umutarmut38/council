@@ -44,19 +44,13 @@ func TestIsOrchestration(t *testing.T) {
 	}
 }
 
-// TestCLIAvailabilityRules pins the requires-repo context rule: every
-// orchestration command needs a git repo, every general one does not.
-func TestCLIAvailabilityRules(t *testing.T) {
+// TestCLIGroupsAreKnown pins that every command lands in a known group (the
+// help/docs renderers switch on it). Repo enforcement lives in
+// orchestrate.NewController, not in this registry.
+func TestCLIGroupsAreKnown(t *testing.T) {
 	for _, c := range CLIs() {
 		switch c.Group {
-		case GroupOrchestration:
-			if !c.RequiresRepo {
-				t.Errorf("orchestration command %q should require a repo", c.Name)
-			}
-		case GroupGeneral:
-			if c.RequiresRepo {
-				t.Errorf("general command %q should not require a repo", c.Name)
-			}
+		case GroupOrchestration, GroupGeneral:
 		default:
 			t.Errorf("command %q has an unknown group %d", c.Name, c.Group)
 		}
@@ -123,8 +117,9 @@ const generalUsageBlock = `Usage:
   council [--agents claude,codex] ask "<prompt>"
   council config init [--force]       write the default (safe) config
   council config wizard               interactive setup
-  council config add-agent <preset>   add a known agent CLI to the config
-  council doctor                      check config, commands, repo, run dirs
+  council config add-agent <preset> [--name x] [--role planner,builder,voter,review]
+  council config schema [--json]      print the configuration reference (Markdown, or JSON Schema)
+  council doctor [--fix]              check config, commands, repo, run dirs (--fix applies safe fixes)
   council trust [--revoke|--show]     trust this repo's .council.yaml
   council version
 `
