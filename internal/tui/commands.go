@@ -417,23 +417,25 @@ func (m *Model) handleCommand(text string) (bool, tea.Cmd) {
 // openCommandHelp renders the full in-chat command reference — name, args,
 // description, and any global key — into the pager, the same way /setup and
 // /status surface long output. A 39-command dump never fit the status line.
+// The pager has no Markdown renderer, so entries are plain text (no ** bold).
 func (m *Model) openCommandHelp() {
+	composers := command.Composers()
 	var b strings.Builder
 	b.WriteString("# In-chat commands\n\n")
-	b.WriteString("Type a command after `/`. Tab completes the command word. `@agent msg` targets one pane.\n\n")
-	for _, c := range command.Composers() {
+	b.WriteString("Type a command after /. Tab completes the command word. @agent msg targets one pane.\n\n")
+	for _, c := range composers {
 		name := "/" + c.Name
 		if c.Args != "" {
 			name += " " + c.Args
 		}
-		fmt.Fprintf(&b, "- **%s** — %s", name, c.Desc)
+		fmt.Fprintf(&b, "  %-28s %s", name, c.Desc)
 		if c.Key != "" {
 			fmt.Fprintf(&b, " (%s)", c.Key)
 		}
 		b.WriteByte('\n')
 	}
 	m.openArtifactText("commands", b.String())
-	m.Status = fmt.Sprintf("%d commands — Esc/q to close", len(command.Composers()))
+	m.Status = fmt.Sprintf("%d commands — Esc/q to close", len(composers))
 }
 
 // cmdRestart terminates and relaunches one pane with its current (phase)

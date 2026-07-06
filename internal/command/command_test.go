@@ -117,7 +117,7 @@ const generalUsageBlock = `Usage:
   council [--agents claude,codex] ask "<prompt>"
   council config init [--force]       write the default (safe) config
   council config wizard               interactive setup
-  council config add-agent <preset> [--name x] [--role planner,builder,...]
+  council config add-agent <preset> [--name x] [--role planner,builder,voter,review]
   council config schema [--json]      print the configuration reference (Markdown, or JSON Schema)
   council doctor [--fix]              check config, commands, repo, run dirs (--fix applies safe fixes)
   council trust [--revoke|--show]     trust this repo's .council.yaml

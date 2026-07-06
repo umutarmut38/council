@@ -84,6 +84,11 @@ func run(args []string) error {
 		case "launch":
 			// The explicit form of bare `council` (the registry names this
 			// command "launch"); put any --agents/--no-local-config before it.
+			// Reject trailing args so a typo like `council launch foo` errors
+			// instead of being silently dropped.
+			if len(remaining) > 1 {
+				return fmt.Errorf("council launch takes no arguments (got %q); put flags before it", remaining[1])
+			}
 		case "ask":
 			if len(remaining) < 2 {
 				return errors.New(`usage: council ask "<prompt>"`)

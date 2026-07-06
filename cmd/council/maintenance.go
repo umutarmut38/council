@@ -186,14 +186,15 @@ func writeStackToLocalConfig(cmd []string) error {
 func councilReport(args []string) error {
 	fs, noLocal := newOrchFlagSet("council report")
 	post := fs.Int("post", 0, "post the report as a comment on this GitHub issue number (via gh)")
-	if err := fs.Parse(args); err != nil {
+	positional, err := parseWithTrailingFlags(fs, args)
+	if err != nil {
 		return err
 	}
 	cfg, err := loadConfig(*noLocal)
 	if err != nil {
 		return err
 	}
-	run, err := orchestrate.OpenRun(cfg.Sessions.RootDir, fs.Arg(0))
+	run, err := orchestrate.OpenRun(cfg.Sessions.RootDir, firstPositional(positional))
 	if err != nil {
 		return err
 	}

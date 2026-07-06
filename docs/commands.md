@@ -108,15 +108,15 @@ See [Workflows → Personalities](workflows.md#personalities-categories-and-targ
 
 <!-- BEGIN GENERATED: cli-general -->
 ```text
-council [--agents claude,codex] [--no-local-config]                         launch the interactive multiplexer
-council [--agents claude,codex] ask "<prompt>"                              launch and broadcast a prompt
-council config init [--force]                                               write the default (safe) config
-council config wizard                                                       interactive setup
-council config add-agent <preset> [--name x] [--role planner,builder,...]   add a known agent CLI to the config
-council config schema [--json]                                              print the configuration reference (Markdown, or JSON Schema)
-council doctor [--fix]                                                      check config, commands, repo, run dirs (--fix applies safe fixes)
-council trust [--revoke|--show]                                             trust this repo's .council.yaml
-council version                                                             print build version, commit, and date
+council [--agents claude,codex] [--no-local-config]                                  launch the interactive multiplexer
+council [--agents claude,codex] ask "<prompt>"                                       launch and broadcast a prompt
+council config init [--force]                                                        write the default (safe) config
+council config wizard                                                                interactive setup
+council config add-agent <preset> [--name x] [--role planner,builder,voter,review]   add a known agent CLI to the config
+council config schema [--json]                                                       print the configuration reference (Markdown, or JSON Schema)
+council doctor [--fix]                                                               check config, commands, repo, run dirs (--fix applies safe fixes)
+council trust [--revoke|--show]                                                      trust this repo's .council.yaml
+council version                                                                      print build version, commit, and date
 ```
 <!-- END GENERATED: cli-general -->
 
@@ -133,7 +133,7 @@ council adopt [run] [agent] [--dry-run] [--yes]                                 
 council run "<issue>" | --file issue.md | --issue 123 [--agents a,b] [--base ref]    plan -> vote -> build
 council resume [run] [--agents a,b]                                                  reopen an older run with fresh agent processes
 council status [run]                                                                 show a run's phase, artifacts, and winners
-council cost [run] [--since 30d] [--source codeburn] | cost prices refresh           per-session usage and estimated cost
+council cost [run] [--since 30d] [--source ledger|codeburn] | cost prices refresh    per-session usage and estimated cost
 council report [run] [--post N]                                                      write report.md (--post N comments on issue #N)
 council pr [run] [agent]                                                             open a PR from a build branch (via gh)
 council scorecard                                                                    agent performance across runs
