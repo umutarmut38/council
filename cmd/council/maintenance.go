@@ -181,8 +181,8 @@ func writeStackToLocalConfig(cmd []string) error {
 	return nil
 }
 
-// councilReport writes report.md for a run; --post comments it on the GitHub
-// issue (requires the run to have been started with --issue and gh installed).
+// councilReport writes report.md for a run; --post N comments it on GitHub
+// issue #N (via gh; the number is passed explicitly, not read from the run).
 func councilReport(args []string) error {
 	fs, noLocal := newOrchFlagSet("council report")
 	post := fs.Int("post", 0, "post the report as a comment on this GitHub issue number (via gh)")

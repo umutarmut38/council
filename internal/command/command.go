@@ -33,11 +33,10 @@ type CLI struct {
 	// Summary is the one-line description used by the docs and, unless
 	// SynopsisOnly is set, by `council help`.
 	Summary string
-	// Group places the command in the help/docs layout.
+	// Group places the command in the help/docs layout. Every
+	// GroupOrchestration command drives a run and only works inside a git
+	// repository (enforced by orchestrate.NewController, not this metadata).
 	Group Group
-	// RequiresRepo marks commands that drive a run and only work inside a git
-	// repository.
-	RequiresRepo bool
 	// SynopsisOnly renders the command in `council help` as a bare synopsis
 	// line without the inline description (the docs still describe it). It
 	// matches the historical help layout for the launch/ask/version forms and
@@ -52,28 +51,29 @@ var cliCommands = []CLI{
 	{Name: "ask", Use: `[--agents claude,codex] ask "<prompt>"`, Summary: "launch and broadcast a prompt", Group: GroupGeneral, SynopsisOnly: true},
 	{Name: "config init", Use: `config init [--force]`, Summary: "write the default (safe) config", Group: GroupGeneral},
 	{Name: "config wizard", Use: `config wizard`, Summary: "interactive setup", Group: GroupGeneral},
-	{Name: "config add-agent", Use: `config add-agent <preset>`, Summary: "add a known agent CLI to the config", Group: GroupGeneral},
-	{Name: "doctor", Use: `doctor`, Summary: "check config, commands, repo, run dirs", Group: GroupGeneral},
+	{Name: "config add-agent", Use: `config add-agent <preset> [--name x] [--role planner,builder,...]`, Summary: "add a known agent CLI to the config", Group: GroupGeneral, SynopsisOnly: true},
+	{Name: "config schema", Use: `config schema [--json]`, Summary: "print the configuration reference (Markdown, or JSON Schema)", Group: GroupGeneral},
+	{Name: "doctor", Use: `doctor [--fix]`, Summary: "check config, commands, repo, run dirs (--fix applies safe fixes)", Group: GroupGeneral},
 	{Name: "trust", Use: `trust [--revoke|--show]`, Summary: "trust this repo's .council.yaml", Group: GroupGeneral},
 	{Name: "version", Aliases: []string{"--version", "-v"}, Use: `version`, Summary: "print build version, commit, and date", Group: GroupGeneral, SynopsisOnly: true},
 
-	{Name: "plan", Use: `plan "<issue>" | --file issue.md | --issue 123`, Summary: "start a run; each agent drafts a plan", Group: GroupOrchestration, RequiresRepo: true, SynopsisOnly: true},
-	{Name: "vote", Use: `vote [run]`, Summary: "tally ranked votes into a winner", Group: GroupOrchestration, RequiresRepo: true},
-	{Name: "build", Use: `build [run]`, Summary: "all agents implement the winning plan", Group: GroupOrchestration, RequiresRepo: true},
-	{Name: "review", Use: `review [run]`, Summary: "gate builds + reviewers pick the best", Group: GroupOrchestration, RequiresRepo: true},
-	{Name: "adopt", Use: `adopt [run] [agent] [--dry-run] [--yes]`, Summary: "preview + apply a build's diff", Group: GroupOrchestration, RequiresRepo: true, SynopsisOnly: true},
-	{Name: "run", Use: `run "<issue>"`, Summary: "plan -> vote -> build", Group: GroupOrchestration, RequiresRepo: true},
-	{Name: "resume", Use: `resume [run]`, Summary: "reopen an older run with fresh agent processes", Group: GroupOrchestration, RequiresRepo: true},
-	{Name: "status", Use: `status [run]`, Summary: "show a run's phase, artifacts, and winners", Group: GroupOrchestration, RequiresRepo: true},
-	{Name: "cost", Use: `cost [run] [--since 30d] | cost prices refresh`, Summary: "per-session usage and estimated cost", Group: GroupOrchestration, RequiresRepo: true},
-	{Name: "report", Use: `report [run] [--post]`, Summary: "write report.md (--post comments on the issue)", Group: GroupOrchestration, RequiresRepo: true},
-	{Name: "pr", Use: `pr [run] [agent]`, Summary: "open a PR from a build branch (via gh)", Group: GroupOrchestration, RequiresRepo: true},
-	{Name: "scorecard", Use: `scorecard`, Summary: "agent performance across runs", Group: GroupOrchestration, RequiresRepo: true},
-	{Name: "artifacts", Use: `artifacts scan [run] [--all]`, Summary: "scan run artifacts for likely secrets", Group: GroupOrchestration, RequiresRepo: true},
-	{Name: "queue", Use: `queue add|list|run|clear`, Summary: "batch issues through council", Group: GroupOrchestration, RequiresRepo: true},
-	{Name: "stack", Use: `stack detect|set <go|node|rust|python>`, Summary: "set review.check_command", Group: GroupOrchestration, RequiresRepo: true},
-	{Name: "clean", Use: `clean [--dry-run] [--yes]`, Summary: "remove council worktrees + branches", Group: GroupOrchestration, RequiresRepo: true},
-	{Name: "clean-runs", Use: `clean-runs [--keep N] [--dry-run]`, Summary: "prune old run artifacts", Group: GroupOrchestration, RequiresRepo: true},
+	{Name: "plan", Use: `plan "<issue>" | --file issue.md | --issue 123 [--agents a,b] [--base ref]`, Summary: "start a run; each agent drafts a plan", Group: GroupOrchestration, SynopsisOnly: true},
+	{Name: "vote", Use: `vote [run] [--agents a,b]`, Summary: "tally ranked votes into a winner", Group: GroupOrchestration},
+	{Name: "build", Use: `build [run] [--agents a,b]`, Summary: "all agents implement the winning plan", Group: GroupOrchestration},
+	{Name: "review", Use: `review [run] [--agents a,b]`, Summary: "gate builds + reviewers pick the best", Group: GroupOrchestration},
+	{Name: "adopt", Use: `adopt [run] [agent] [--dry-run] [--yes]`, Summary: "preview + apply a build's diff", Group: GroupOrchestration, SynopsisOnly: true},
+	{Name: "run", Use: `run "<issue>" | --file issue.md | --issue 123 [--agents a,b] [--base ref]`, Summary: "plan -> vote -> build", Group: GroupOrchestration, SynopsisOnly: true},
+	{Name: "resume", Use: `resume [run] [--agents a,b]`, Summary: "reopen an older run with fresh agent processes", Group: GroupOrchestration},
+	{Name: "status", Use: `status [run]`, Summary: "show a run's phase, artifacts, and winners", Group: GroupOrchestration},
+	{Name: "cost", Use: `cost [run] [--since 30d] [--source codeburn] | cost prices refresh`, Summary: "per-session usage and estimated cost", Group: GroupOrchestration, SynopsisOnly: true},
+	{Name: "report", Use: `report [run] [--post N]`, Summary: "write report.md (--post N comments on issue #N)", Group: GroupOrchestration},
+	{Name: "pr", Use: `pr [run] [agent]`, Summary: "open a PR from a build branch (via gh)", Group: GroupOrchestration},
+	{Name: "scorecard", Use: `scorecard`, Summary: "agent performance across runs", Group: GroupOrchestration},
+	{Name: "artifacts", Use: `artifacts scan [run] [--all]`, Summary: "scan run artifacts for likely secrets", Group: GroupOrchestration},
+	{Name: "queue", Use: `queue add|list|run|clear`, Summary: "batch issues through council", Group: GroupOrchestration},
+	{Name: "stack", Use: `stack detect|set <go|node|rust|python>`, Summary: "set review.check_command", Group: GroupOrchestration},
+	{Name: "clean", Use: `clean [--dry-run] [--yes]`, Summary: "remove council worktrees + branches", Group: GroupOrchestration},
+	{Name: "clean-runs", Use: `clean-runs [--keep N] [--dry-run]`, Summary: "prune old run artifacts", Group: GroupOrchestration},
 }
 
 // CLIs returns the ordered CLI command reference.

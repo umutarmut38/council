@@ -81,6 +81,9 @@ func run(args []string) error {
 	initialPrompt := ""
 	if len(remaining) > 0 {
 		switch remaining[0] {
+		case "launch":
+			// The explicit form of bare `council` (the registry names this
+			// command "launch"); put any --agents/--no-local-config before it.
 		case "ask":
 			if len(remaining) < 2 {
 				return errors.New(`usage: council ask "<prompt>"`)
