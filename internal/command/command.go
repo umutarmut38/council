@@ -34,7 +34,7 @@ type CLI struct {
 	// SynopsisOnly is set, by `council help`.
 	Summary string
 	// Group places the command in the help/docs layout. Every
-	// GroupOrchestration command drives a run and only works inside a git
+	// GroupOrchestration command is repo-scoped — it only works inside a git
 	// repository (enforced by orchestrate.NewController, not this metadata).
 	Group Group
 	// SynopsisOnly renders the command in `council help` as a bare synopsis

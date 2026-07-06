@@ -422,7 +422,7 @@ func (m *Model) openCommandHelp() {
 	composers := command.Composers()
 	var b strings.Builder
 	b.WriteString("# In-chat commands\n\n")
-	b.WriteString("Type a command after /. Tab completes the command word. @agent msg targets one pane.\n\n")
+	b.WriteString("Type a command word after the slash. Tab completes it. @agent msg targets one pane.\n\n")
 	for _, c := range composers {
 		name := "/" + c.Name
 		if c.Args != "" {
