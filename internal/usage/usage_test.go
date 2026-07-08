@@ -44,6 +44,36 @@ func TestCostJPYNoDecimals(t *testing.T) {
 	}
 }
 
+// Cache writes ($1.25/M-class rates) and reads ($0.10/M-class) are priced an
+// order of magnitude apart, so the /cost table shows them as separate CacheW /
+// CacheR columns rather than one lumped Cache figure.
+func TestFormatTableSplitsCacheWriteAndRead(t *testing.T) {
+	out := FormatTable(Summary{
+		Sessions: []SessionTotal{
+			{Agent: "claude", Phase: "session", Confidence: Reported,
+				Tokens: TokenTotals{Input: 20, Output: 486, CacheCreate: 30648, CacheRead: 27374}},
+		},
+		Tokens: TokenTotals{Input: 20, Output: 486, CacheCreate: 30648, CacheRead: 27374},
+	})
+	header := strings.SplitN(out, "\n", 2)[0]
+	if !strings.Contains(header, "CacheW") || !strings.Contains(header, "CacheR") || strings.Contains(header, "Cache ") {
+		t.Fatalf("header = %q, want separate CacheW and CacheR columns", header)
+	}
+	for _, prefix := range []string{"claude", "Total"} {
+		for _, want := range []string{"30.6k", "27.4k"} {
+			ok := false
+			for _, l := range strings.Split(out, "\n") {
+				if strings.HasPrefix(l, prefix) && strings.Contains(l, want) {
+					ok = true
+				}
+			}
+			if !ok {
+				t.Fatalf("%s row missing %s:\n%s", prefix, want, out)
+			}
+		}
+	}
+}
+
 // The /cost table Cost column carries the ~ estimate prefix for a still-estimated
 // row (e.g. Copilot before it reports on exit); the Total is estimated whenever
 // any session is.
