@@ -65,7 +65,7 @@ var cliCommands = []CLI{
 	{Name: "run", Use: `run "<issue>" | --file issue.md | --issue 123 [--agents a,b] [--base ref]`, Summary: "plan -> vote -> build", Group: GroupOrchestration, SynopsisOnly: true},
 	{Name: "resume", Use: `resume [run] [--agents a,b]`, Summary: "reopen an older run with fresh agent processes", Group: GroupOrchestration},
 	{Name: "status", Use: `status [run]`, Summary: "show a run's phase, artifacts, and winners", Group: GroupOrchestration},
-	{Name: "cost", Use: `cost [run] [--since 30d] [--source ledger|codeburn] | cost prices refresh`, Summary: "per-session usage and estimated cost", Group: GroupOrchestration, SynopsisOnly: true},
+	{Name: "cost", Use: `cost [run] [--since 30d] [--source ledger|codeburn] | cost prices refresh | cost models [filter]`, Summary: "per-session usage and estimated cost", Group: GroupOrchestration, SynopsisOnly: true},
 	{Name: "report", Use: `report [run] [--post N]`, Summary: "write report.md (--post N comments on issue #N)", Group: GroupOrchestration},
 	{Name: "pr", Use: `pr [run] [agent]`, Summary: "open a PR from a build branch (via gh)", Group: GroupOrchestration},
 	{Name: "scorecard", Use: `scorecard`, Summary: "agent performance across runs", Group: GroupOrchestration},

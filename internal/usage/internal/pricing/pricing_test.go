@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -198,5 +199,57 @@ func TestUserPriceStale(t *testing.T) {
 	}
 	if fresh.IsStale(now, 60) {
 		t.Fatal("7-day-old profile should not be stale at 60d")
+	}
+}
+
+func TestVersionDotNormalization(t *testing.T) {
+	r := New(Options{})
+	// Dot-form selector with no exact key falls through to the dashed table name.
+	res := r.ResolveDetailed("claude-haiku-4.5", "")
+	if !res.Found || res.PriceModel != "claude-haiku-4-5" {
+		t.Fatalf("claude-haiku-4.5 -> %q found=%v, want claude-haiku-4-5", res.PriceModel, res.Found)
+	}
+	if !strings.Contains(res.Note, "version dot") {
+		t.Fatalf("note = %q, want it to mention version dot normalization", res.Note)
+	}
+	// A genuine dot-form key must still win as an exact match, not via normalization.
+	exact := r.ResolveDetailed("gpt-5.4-mini", "")
+	if !exact.Found || exact.PriceModel != "gpt-5.4-mini" || exact.Note != "exact model" {
+		t.Fatalf("gpt-5.4-mini -> %q note=%q, want exact match", exact.PriceModel, exact.Note)
+	}
+}
+
+func TestModelsEnumeration(t *testing.T) {
+	models := New(Options{}).Models()
+	if len(models) < 100 {
+		t.Fatalf("Models() returned %d, want the full table", len(models))
+	}
+	for i := 1; i < len(models); i++ {
+		if models[i-1].Name > models[i].Name {
+			t.Fatalf("Models() not sorted at %d: %q > %q", i, models[i-1].Name, models[i].Name)
+		}
+	}
+	found := false
+	for _, m := range models {
+		if m.Name == "claude-haiku-4-5" {
+			found = true
+			if m.Costs.Input <= 0 || m.Costs.Output <= 0 {
+				t.Fatalf("claude-haiku-4-5 has non-positive rates: %+v", m.Costs)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("claude-haiku-4-5 missing from Models()")
+	}
+}
+
+func TestBuiltinAliasesCopy(t *testing.T) {
+	a := BuiltinAliases()
+	if a["claude-4.5-haiku"] != "claude-haiku-4-5" {
+		t.Fatalf("alias map missing expected entry: %v", a["claude-4.5-haiku"])
+	}
+	a["mut"] = "x" // must not affect the package map
+	if _, ok := builtinAliases["mut"]; ok {
+		t.Fatal("BuiltinAliases returned a live reference, not a copy")
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -70,9 +71,17 @@ type UserPrice struct {
 }
 
 var (
-	reDate     = regexp.MustCompile(`-\d{8}$`)
-	reProvider = regexp.MustCompile(`^[^/]+/`)
+	reDate       = regexp.MustCompile(`-\d{8}$`)
+	reProvider   = regexp.MustCompile(`^[^/]+/`)
+	reVersionDot = regexp.MustCompile(`(\d)\.(\d)`)
 )
+
+// dashedVersion rewrites a dotted version selector to the dashed form the price
+// tables use: "claude-haiku-4.5" -> "claude-haiku-4-5". Returns the input
+// unchanged when there's no dotted version.
+func dashedVersion(model string) string {
+	return reVersionDot.ReplaceAllString(model, "$1-$2")
+}
 
 // safePerTokenRate clamps a rate to a sane non-negative value, rejecting
 // NaN/Inf/negative and capping at $1/token (defends against tampered data).
@@ -228,9 +237,10 @@ type candidate struct {
 	note string
 }
 
-// getModelCosts resolves only exact keys and explicit aliases. It deliberately
-// avoids family/latest and longest-prefix matching, so unknown selectors remain
-// unknown until a user maps them.
+// getModelCosts resolves only exact keys and explicit aliases, plus a
+// dot->dash version normalization (claude-haiku-4.5 -> claude-haiku-4-5) tried
+// last. It deliberately avoids family/latest and longest-prefix matching, so
+// unknown selectors remain unknown until a user maps them.
 func (r *Resolver) getModelCosts(model string) (ModelCosts, string, string, bool) {
 	model = strings.TrimSpace(model)
 	if model == "" || strings.EqualFold(model, "unknown") {
@@ -256,6 +266,27 @@ func (r *Resolver) getModelCosts(model string) (ModelCosts, string, string, bool
 			candidates = append(candidates, candidate{key: v, note: "built-in alias " + canonical + " -> " + v})
 		}
 	}
+	// Version selectors are often written with a dot (claude-haiku-4.5) while
+	// the tables use a dash. Try the dashed form (and its aliases) LAST, after
+	// exact match, so genuine dot-form keys like gpt-5.4-mini still win first.
+	addDashed := func(base string) {
+		dashed := dashedVersion(base)
+		if dashed == base {
+			return
+		}
+		candidates = append(candidates, candidate{key: dashed, note: "version dot normalized for pricing"})
+		if v, ok := r.userAlias[dashed]; ok {
+			candidates = append(candidates, candidate{key: v, note: "user alias " + dashed + " -> " + v})
+		}
+		if v, ok := builtinAliases[dashed]; ok {
+			candidates = append(candidates, candidate{key: v, note: "built-in alias " + dashed + " -> " + v})
+		}
+	}
+	addDashed(model)
+	if canonical := canonicalName(model); canonical != model {
+		addDashed(canonical)
+	}
+
 	seen := map[string]bool{}
 	for _, cand := range candidates {
 		if cand.key == "" || seen[cand.key] {
@@ -364,6 +395,32 @@ func (r *Resolver) CalculateCost(model string, in, out, cacheCreate, cacheRead, 
 
 // Origin reports the active table source and its freshness for UI labels.
 func (r *Resolver) Origin() (source string, at time.Time) { return r.origin, r.originAt }
+
+// ListedModel is one row of the active price table.
+type ListedModel struct {
+	Name  string
+	Costs ModelCosts
+}
+
+// Models returns every model in the active price table, sorted by name. Used by
+// `council cost models` so users can discover the canonical name to alias to.
+func (r *Resolver) Models() []ListedModel {
+	out := make([]ListedModel, 0, len(r.priced))
+	for name, c := range r.priced {
+		out = append(out, ListedModel{Name: name, Costs: c})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// BuiltinAliases returns a copy of the built-in selector->canonical alias map.
+func BuiltinAliases() map[string]string {
+	out := make(map[string]string, len(builtinAliases))
+	for k, v := range builtinAliases {
+		out[k] = v
+	}
+	return out
+}
 
 // IsStale reports whether a user price profile is older than the given window.
 func (up UserPrice) IsStale(now time.Time, days int) bool {

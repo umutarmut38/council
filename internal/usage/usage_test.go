@@ -331,3 +331,22 @@ func TestLoadEventsMissingFile(t *testing.T) {
 		t.Fatalf("missing file should be empty/no-error, got %v / %v", evs, err)
 	}
 }
+
+func TestPriceUnknownHintSuggestsAlias(t *testing.T) {
+	s := Summary{Sessions: []SessionTotal{
+		{Agent: "copilot-planner", Phase: "session", Model: "made-up-model-xyz", Tokens: TokenTotals{Input: 100}},
+		{Agent: "mystery", Phase: "session", Model: "", Tokens: TokenTotals{Input: 100}},
+	}}
+	s.Price(NewPricer(PricerOptions{}))
+	joined := strings.Join(s.Hints, "\n")
+	// Known but unpriced name → point at the remedy with the offending name.
+	if !strings.Contains(joined, `map it in usage.model_aliases ("made-up-model-xyz: <canonical>")`) {
+		t.Fatalf("hint should name the alias remedy:\n%s", joined)
+	}
+	// Unknown ("--") model can't be aliased → no alias remedy for that row.
+	for _, h := range s.Hints {
+		if strings.HasPrefix(h, "mystery/") && strings.Contains(h, "model_aliases") {
+			t.Fatalf("unknown-model hint should not suggest an alias: %q", h)
+		}
+	}
+}
