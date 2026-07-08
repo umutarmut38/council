@@ -239,6 +239,29 @@ func (m Model) handleDirectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Direct keystrokes bypass the composer, so meter them here: accumulate the
+	// typed line and record it as an estimate event on Enter. Besides the live
+	// tally, that event seeds provider-session reconciliation (tool+cwd+window),
+	// which later replaces the estimate with the CLI's reported cost — without
+	// it a direct-only run has no usage at all. The mirror is approximate by
+	// design (backspace/ctrl+u only; the pane's own line editing can diverge);
+	// reconciliation supersedes it.
+	if m.Config.Usage.Enabled && m.directTyped != nil {
+		switch {
+		case len(msg.Runes) > 0: // printable input, incl. pasted text (mirrors keyToPTY)
+			m.directTyped[session.Name] += string(msg.Runes)
+		case msg.String() == "enter":
+			if text := strings.TrimSpace(m.directTyped[session.Name]); text != "" {
+				m.recordUsageInput(session, m.phase, text)
+			}
+			delete(m.directTyped, session.Name)
+		case msg.String() == "backspace":
+			m.directTyped[session.Name] = dropLastRune(m.directTyped[session.Name])
+		case msg.String() == "ctrl+u", msg.String() == "ctrl+c":
+			delete(m.directTyped, session.Name) // the pane clears its line; mirror it
+		}
+	}
+
 	m.sendKeyToSession(session, msg)
 	// Direct keystrokes mean the user is handling whatever the pane asked for.
 	if view := m.findAgentForMessage(session.Name, session); view != nil {

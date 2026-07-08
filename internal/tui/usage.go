@@ -18,6 +18,12 @@ import (
 // so idle panes cost nothing; no staleness bookkeeping needed.
 const usageReconcileInterval = time.Second
 
+// usageReconcileMinGap throttles the actual reconcile sweep: each pass re-reads
+// events.jsonl and stats the provider stores, so during continuous agent output
+// a 1s cadence is pure churn. 3s is imperceptible for a header cost figure. The
+// 1s tick itself must stay — it also expires toasts and refreshes idle ages.
+const usageReconcileMinGap = 3 * time.Second
+
 // usageTickCmd schedules the next live-usage tick.
 func usageTickCmd() tea.Cmd {
 	return tea.Tick(usageReconcileInterval, func(time.Time) tea.Msg { return usageTickMsg{} })
@@ -30,6 +36,9 @@ func usageTickCmd() tea.Cmd {
 func (m *Model) maybeReconcileCmd() tea.Cmd {
 	if !m.Config.Usage.Enabled || m.usageReconcileBusy || !m.usageDirty {
 		return nil
+	}
+	if m.now.Sub(m.usageLastReconcile) < usageReconcileMinGap {
+		return nil // usageDirty stays set; a later tick picks it up
 	}
 	runDir := ""
 	if m.orch != nil && m.orch.Run() != nil {
@@ -46,6 +55,7 @@ func (m *Model) maybeReconcileCmd() tea.Cmd {
 	}
 	m.usageDirty = false
 	m.usageReconcileBusy = true
+	m.usageLastReconcile = m.now
 	return reconcileRollupCmd(runDir, pricer)
 }
 
@@ -107,6 +117,7 @@ func (m *Model) initUsage() {
 	m.usageTally = map[string]usage.TokenPair{}
 	m.usageRate = map[string]usage.Rate{}
 	m.usageOutputSeen = map[string]int{}
+	m.directTyped = map[string]string{}
 	m.usagePricer = m.buildPricer()
 	for name, a := range m.Config.Agents {
 		model, _, _ := usageModel(a)
