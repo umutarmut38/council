@@ -59,3 +59,22 @@ func TestCachedParseHitAndInvalidate(t *testing.T) {
 		t.Fatalf("want ErrNotExist, got %v", err)
 	}
 }
+
+// A cache hit whose stored value has a different type than the caller's T must
+// re-parse (miss) instead of panicking on the type assertion.
+func TestCachedParseTypeMismatchIsMiss(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s")
+	if err := os.WriteFile(path, []byte("v"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	key := path + "\x00cwd"
+	if s, err := cachedParse(key, path, func() (string, error) { return "str", nil }); err != nil || s != "str" {
+		t.Fatalf("string parse: %q %v", s, err)
+	}
+	// Same key+file, different T: must not panic, must run the parse.
+	ran := false
+	n, err := cachedParse(key, path, func() (int, error) { ran = true; return 7, nil })
+	if err != nil || n != 7 || !ran {
+		t.Fatalf("type-mismatch hit should re-parse: n=%d ran=%v err=%v", n, ran, err)
+	}
+}

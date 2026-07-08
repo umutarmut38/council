@@ -40,7 +40,12 @@ func cachedParse[T any](key, path string, parse func() (T, error)) (T, error) {
 	e, ok := fileCache[key]
 	fileCacheMu.Unlock()
 	if ok && e.size == st.Size() && e.mtime.Equal(st.ModTime()) {
-		return e.val.(T), nil
+		// Checked assertion: if a key were ever reused with a different parse
+		// type (disjoint per reader today, but cheap to guard), treat the type
+		// mismatch as a miss and re-parse rather than panic on the assertion.
+		if v, typeOK := e.val.(T); typeOK {
+			return v, nil
+		}
 	}
 	v, err := parse()
 	if err != nil {
