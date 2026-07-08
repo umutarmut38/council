@@ -252,7 +252,12 @@ func (m Model) handleDirectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.directTyped[session.Name] += string(msg.Runes)
 		case msg.String() == "enter":
 			if text := strings.TrimSpace(m.directTyped[session.Name]); text != "" {
-				m.recordUsageInput(session, m.phase, text)
+				// Direct mode sends the raw keystrokes — no personality prefix or
+				// paste wrapping — so meter the typed text verbatim, not the
+				// composer's wrapped prompt. ensureRun mirrors the composer's send
+				// path so a direct-only run still enables raw PTY logging.
+				_ = m.ensureRun()
+				m.recordUsageInputAs(session, m.phase, text, text, text)
 			}
 			delete(m.directTyped, session.Name)
 		case msg.String() == "backspace":

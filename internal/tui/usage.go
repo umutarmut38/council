@@ -263,8 +263,21 @@ func (m Model) recordPhaseInputs(prompts map[string]string) {
 	}
 }
 
-// recordUsageInput meters the actual prompt council writes to an agent PTY.
+// recordUsageInput meters a composer send: council wraps userText with the
+// agent's personality prefix and paste/submit transport before writing it to
+// the PTY, so that wrapped prompt is what the model sees and gets billed.
 func (m Model) recordUsageInput(s *agent.Session, phase, userText string) {
+	prompt := m.Config.PromptForAgent(s.Name, userText)
+	m.recordUsageInputAs(s, phase, userText, prompt, linePayload(s.Config.Terminal, prompt))
+}
+
+// recordUsageInputAs records a prompt estimate where agentPrompt is the
+// model-visible text (billed) and wire is the bytes sent to the PTY (a
+// transport diagnostic). Composer sends pass the personality-wrapped prompt;
+// direct mode sends raw keystrokes with no council wrapping, so it passes the
+// typed text for both — otherwise it would bill a personality prefix and
+// bracketed-paste bytes it never transmitted.
+func (m Model) recordUsageInputAs(s *agent.Session, phase, userText, agentPrompt, wire string) {
 	if !m.Config.Usage.Enabled {
 		return
 	}
@@ -273,8 +286,7 @@ func (m Model) recordUsageInput(s *agent.Session, phase, userText string) {
 	if view := m.findAgentForMessage(s.Name, s); view != nil {
 		m.recordUsageOutput(s, view.transcript())
 	}
-	prompt := m.Config.PromptForAgent(s.Name, userText)
-	wire := linePayload(s.Config.Terminal, prompt)
+	prompt := agentPrompt
 	est := usage.EstimatorFor(m.Config.Usage.Estimator)
 	// Estimate the input from the SEMANTIC prompt (personality prefix + user
 	// text) the model actually sees — not the wire payload. For paste-mode agents

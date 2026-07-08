@@ -130,9 +130,13 @@ func TestDirectModeMetersInputOnEnter(t *testing.T) {
 		Usage: usageConfigOn(),
 		Agents: map[string]config.AgentConfig{
 			"claude": {
-				Command: []string{"claude"},
-				Usage:   config.AgentUsageConfig{Tool: "claude"},
+				Command:     []string{"claude"},
+				Usage:       config.AgentUsageConfig{Tool: "claude"},
+				Personality: "architect",
 			},
+		},
+		Personalities: map[string]config.PersonalityConfig{
+			"architect": {PromptPrefix: "You are The Architect."},
 		},
 	}
 	cfg.Normalize()
@@ -179,6 +183,15 @@ func TestDirectModeMetersInputOnEnter(t *testing.T) {
 	}
 	if !strings.Contains(e.PromptPreview, "hi ther") || e.PromptHash == "" {
 		t.Fatalf("prompt correlation fields missing: %+v", e)
+	}
+	// Direct mode sends raw keystrokes, so the personality prefix must NOT be
+	// billed: the model-visible estimate equals the typed text, not the wrapped
+	// composer prompt.
+	if strings.Contains(e.PromptPreview, "Architect") {
+		t.Fatalf("direct mode billed the personality prefix it never sent: %q", e.PromptPreview)
+	}
+	if e.InputChars != e.UserInputChars {
+		t.Fatalf("input chars (%d) should equal user chars (%d) — no personality wrapping in direct mode", e.InputChars, e.UserInputChars)
 	}
 	// Enter with an empty accumulator records nothing new.
 	key(tea.KeyMsg{Type: tea.KeyEnter})
