@@ -4,6 +4,42 @@ All notable changes will be documented here.
 
 This project follows semantic versioning once `v0.1.0` is tagged.
 
+## v1.1.1 - 2026-07-09
+
+A docs and CLI-discoverability pass over the v1.1.0 cost feature: every
+subcommand now has real `--help`, the CLI has a generated reference page, and the
+751-line configuration doc is split into navigable subpages.
+
+### Added
+
+- **`council <command> --help` for every subcommand.** Each subcommand now prints
+  structured help — synopsis, summary, verbs, and flags — and exits 0. Previously
+  flag-based subcommands dumped a terse flag list and exited 1, and the
+  manual-parser commands (`trust`, `stack`, `queue`, `artifacts`, `cost prices`)
+  rejected `--help` as an unknown flag. Help, top-level usage, and the docs all
+  render from one command registry, so they can't drift apart. `council help`
+  gained a pointer to per-command help.
+- **CLI Reference docs page.** A new generated `docs/cli.md` expands every
+  command with its verbs and flags (the same text `--help` prints).
+
+### Changed
+
+- **Configuration docs split into subpages.** The 751-line `configuration.md`
+  became a parent overview (per-repo override + trust + a section index) with
+  child pages per topic — agents, UI & themes, sessions & review, worktrees,
+  usage & cost, files/env/policy, personalities, and the generated schema
+  reference — so a field is easier to find.
+- **`council-config` skill updated for cost/worktrees.** Its `reference/schema.md`
+  is now generated from the config structs (adds the missing `usage`,
+  `worktrees`, `agents.<name>.usage`, and per-agent `worktree` fields), and the
+  interview gained steps for cost tracking and freestyle worktrees.
+
+### Fixed
+
+- **`--help` synopsis drift.** `clean-runs --yes` and `config init --interactive`
+  were accepted by the code but undocumented; the registry and docs now list
+  them.
+
 ## v1.1.0 - 2026-07-09
 
 Provider-independent cost tracking lands, and the HUD is redesigned around it.

@@ -19,7 +19,8 @@ const (
 		"  council doctor          check agents, git, and run dirs are ready\n" +
 		"  council                 launch the interactive multiplexer\n" +
 		`  council plan "<issue>"  start a plan → vote → build run`
-	footer = "Config: ~/.council.yaml   Docs: https://github.com/umutarmut38/council"
+	helpHint = "Run 'council <command> --help' for a command's flags and details."
+	footer   = "Config: ~/.council.yaml   Docs: https://github.com/umutarmut38/council"
 
 	// Description columns chosen to match the historical help layout. Synopsis
 	// lines and entries wider than the column fall back to a two-space gap.
@@ -46,6 +47,8 @@ func UsageString() string {
 	b.WriteString(flagsBlock)
 	b.WriteString("\n\n")
 	b.WriteString(examplesBlock)
+	b.WriteString("\n\n")
+	b.WriteString(helpHint)
 	b.WriteString("\n\n")
 	b.WriteString(footer)
 	return strings.TrimRight(b.String(), "\n")

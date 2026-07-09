@@ -33,6 +33,15 @@ func mainExitCode(args []string) int {
 }
 
 func run(args []string) error {
+	// A --help/-h anywhere after a known command token prints that command's
+	// structured help and exits 0, instead of the flag package's terse dump or a
+	// manual parser's "unknown flag" error. Runs before any config load or repo
+	// check so `council plan --help` works outside a git repo.
+	if c, ok := helpTarget(args); ok {
+		fmt.Println(command.HelpString(c))
+		return nil
+	}
+
 	if len(args) >= 1 {
 		if c, ok := command.LookupCLI(args[0]); ok && c.Name == "version" {
 			fmt.Println(version.String())
@@ -78,6 +87,13 @@ func run(args []string) error {
 	}
 
 	remaining := flags.Args()
+	// `launch`/`ask` can follow the global flags (`council --agents x ask --help`);
+	// the top-of-run helpTarget only sees args[0], so re-check the positionals the
+	// flag parser left behind before treating a trailing --help as an ask prompt.
+	if c, ok := helpTarget(remaining); ok {
+		fmt.Println(command.HelpString(c))
+		return nil
+	}
 	initialPrompt := ""
 	if len(remaining) > 0 {
 		switch remaining[0] {
@@ -238,4 +254,31 @@ func parseAgentList(value string) []string {
 
 func printUsage() {
 	fmt.Println(command.UsageString())
+}
+
+// helpTarget resolves `council <cmd> ... --help` to the CLI entry whose help
+// should print. It matches only when a bare --help/-h token follows a known
+// command, so a --help buried inside quoted issue text is not treated as a help
+// request, and bare `council --help` (no command) falls through to full usage.
+func helpTarget(args []string) (command.CLI, bool) {
+	if len(args) == 0 {
+		return command.CLI{}, false
+	}
+	hasHelp := false
+	for _, a := range args[1:] {
+		if a == "--help" || a == "-h" {
+			hasHelp = true
+			break
+		}
+	}
+	if !hasHelp {
+		return command.CLI{}, false
+	}
+	// Two-token commands (e.g. "config init") resolve before single tokens.
+	if len(args) >= 2 {
+		if c, ok := command.LookupCLI(args[0] + " " + args[1]); ok {
+			return c, true
+		}
+	}
+	return command.LookupCLI(args[0])
 }
