@@ -36,6 +36,9 @@ func targets() []target {
 		{path: "docs/config-schema.md", regions: map[string]string{
 			"config-schema": config.SchemaMarkdown(),
 		}},
+		{path: "skills/council-config/reference/schema.md", regions: map[string]string{
+			"config-schema": config.SchemaMarkdown(),
+		}},
 	}
 }
 
