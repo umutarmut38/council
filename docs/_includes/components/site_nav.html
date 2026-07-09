@@ -14,9 +14,19 @@
 {%- endcomment -%}
 
 <nav aria-label="Main" id="site-nav" class="site-nav">
-  {%- assign nav_top_pages = site.html_pages
-        | where_exp: "item", "item.title != nil"
-        | where_exp: "item", "item.parent == nil"
+  {%- comment -%}
+    Build the parent→children grouping over ALL pages first, exactly as the
+    upstream components/nav/pages.html does. components/nav/children.html reads
+    nav_parenthood / nav_top_node_titles to resolve each parent's child pages;
+    without this setup they are empty and child pages never render.
+  {%- endcomment -%}
+  {%- assign nav_parenthood = site.html_pages
+        | where_exp: "item", "item.title != nil" | group_by: "parent" -%}
+  {%- assign nav_top_nodes = nav_parenthood
+        | where_exp: "item", "item.name == ''" | map: "items" | first -%}
+  {%- assign nav_top_node_titles = nav_top_nodes | map: "title" -%}
+
+  {%- assign nav_top_pages = nav_top_nodes
         | where_exp: "item", "item.nav_exclude != true" -%}
 
   {%- comment -%} Ungrouped pages first (no nav_section): Home, etc. {%- endcomment -%}
