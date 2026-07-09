@@ -55,6 +55,10 @@ func TestMainExitCode(t *testing.T) {
 		{"-h", []string{"-h"}, 0, "Usage:"},
 		{"--help", []string{"--help"}, 0, "Usage:"},
 		{"--help after --agents", []string{"--agents", "claude", "--help"}, 0, "Usage:"},
+		// A command that follows the global flags still resolves to command help
+		// (not treated as an ask prompt or a launch trailing arg).
+		{"ask --help after --agents", []string{"--agents", "claude", "ask", "--help"}, 0, "council ask"},
+		{"launch --help after --agents", []string{"--agents", "claude", "launch", "--help"}, 0, "council launch"},
 		{"unknown command", []string{"frobnicate"}, 1, "unknown command"},
 		{"ask without prompt", []string{"ask"}, 1, "usage: council ask"},
 		{"unknown flag", []string{"--nope"}, 1, "not defined"},

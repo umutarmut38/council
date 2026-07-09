@@ -313,7 +313,6 @@ Verbs:
 
 - `--issue N` — (queue add) GitHub issue number
 - `--file task.md` — (queue add) issue file
-- `--no-local-config` — ignore the repo-local .council.yaml
 
 ### council stack
 
@@ -328,8 +327,6 @@ Verbs:
   stack detect                     detect the project stack and set the review gate
   stack set <go|node|rust|python>  set the review gate for a named stack
 ```
-
-- `--no-local-config` — ignore the repo-local .council.yaml
 
 ### council clean
 

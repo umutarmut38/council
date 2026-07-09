@@ -71,18 +71,19 @@ type Flag struct {
 // registry entry.
 var noLocalConfigFlag = Flag{Name: "--no-local-config", Desc: "ignore the repo-local .council.yaml"}
 
-// AcceptsNoLocalConfig reports whether the command accepts --no-local-config
-// (every orchestration command via newOrchFlagSet, plus doctor and the bare
-// launch/ask forms).
+// AcceptsNoLocalConfig reports whether the command actually reads
+// --no-local-config (orchestration commands go through newOrchFlagSet, plus
+// doctor and the bare launch/ask forms). queue and stack are manual-parser
+// orchestration commands that never read the flag — don't advertise a
+// trust-bypass flag they silently ignore.
 func (c CLI) AcceptsNoLocalConfig() bool {
-	if c.Group == GroupOrchestration {
-		return true
-	}
 	switch c.Name {
+	case "queue", "stack":
+		return false
 	case "doctor", "launch", "ask":
 		return true
 	}
-	return false
+	return c.Group == GroupOrchestration
 }
 
 // HelpFlags returns the command's documented flags with the shared

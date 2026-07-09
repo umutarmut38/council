@@ -157,6 +157,17 @@ func TestHelpFlagsAppendsNoLocalConfigOnlyWhereAccepted(t *testing.T) {
 	if strings.Contains(HelpString(schema), "--no-local-config") {
 		t.Error("config schema help should not list --no-local-config")
 	}
+	// queue and stack are orchestration commands but manual parsers that never
+	// read --no-local-config, so help must not advertise it.
+	for _, name := range []string{"queue", "stack"} {
+		c, _ := LookupCLI(name)
+		if c.AcceptsNoLocalConfig() {
+			t.Errorf("%s should not accept --no-local-config (manual parser ignores it)", name)
+		}
+		if strings.Contains(HelpString(c), "--no-local-config") {
+			t.Errorf("%s help should not list --no-local-config", name)
+		}
+	}
 }
 
 func TestUsageStringRendersBothSections(t *testing.T) {

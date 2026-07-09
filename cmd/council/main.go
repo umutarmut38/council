@@ -87,6 +87,13 @@ func run(args []string) error {
 	}
 
 	remaining := flags.Args()
+	// `launch`/`ask` can follow the global flags (`council --agents x ask --help`);
+	// the top-of-run helpTarget only sees args[0], so re-check the positionals the
+	// flag parser left behind before treating a trailing --help as an ask prompt.
+	if c, ok := helpTarget(remaining); ok {
+		fmt.Println(command.HelpString(c))
+		return nil
+	}
 	initialPrompt := ""
 	if len(remaining) > 0 {
 		switch remaining[0] {
