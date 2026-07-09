@@ -106,6 +106,10 @@ See [Workflows → Personalities](workflows.md#personalities-categories-and-targ
 
 ## CLI subcommands
 
+One-line synopsis of every subcommand below. For each command's full flags,
+verbs, and description, see the [CLI Reference](cli.md) — or run
+`council <command> --help`.
+
 <!-- BEGIN GENERATED: cli-general -->
 ```text
 council [--agents claude,codex] [--no-local-config]                                  launch the interactive multiplexer
@@ -153,5 +157,5 @@ Notes:
   issue body via `gh`.
 - `--base <ref>` sets the base ref for the per-agent worktrees (default `HEAD`).
 - `council config schema` prints the configuration reference — the same tables as
-  [Configuration → Schema reference](configuration.md#schema-reference-generated); `--json` emits a JSON Schema (draft 2020-12) instead.
+  [Configuration → Schema reference](config-schema.md); `--json` emits a JSON Schema (draft 2020-12) instead.
 - Repo-local `.council.yaml` files are only applied once trusted (`council trust`); pass `--no-local-config` to ignore them entirely.

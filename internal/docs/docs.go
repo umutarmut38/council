@@ -32,7 +32,8 @@ type target struct {
 func targets() []target {
 	return []target{
 		{path: "docs/commands.md", regions: command.CLIReferenceRegions()},
-		{path: "docs/configuration.md", regions: map[string]string{
+		{path: "docs/cli.md", regions: command.CLIDocsRegions()},
+		{path: "docs/config-schema.md", regions: map[string]string{
 			"config-schema": config.SchemaMarkdown(),
 		}},
 	}
