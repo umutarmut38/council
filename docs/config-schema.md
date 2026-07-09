@@ -1,39 +1,16 @@
-# `.council.yaml` schema reference
+---
+title: Schema reference
+parent: Configuration
+nav_section: Reference
+nav_order: 8
+---
 
-Source of truth: `internal/config/config.go`, `schema.go`, and `presets.go` in
-the [council](https://github.com/umutarmut38/council) repo. The **Fields** section
-below is generated from those structs (identical to `council config schema` and
-`docs/config-schema.md`), so it never drifts. `.council.yaml` is a **repo-local
-overlay** deep-merged over `~/.council.yaml`: top-level sections (`ui`,
-`sessions`, `review`, `worktrees`, `usage`, `files`, `policy`, `env`,
-`experimental`) and each entry under `agents`, `personalities`, and
-`personality_categories` are deep-merged, so a local file only specifies the keys
-it changes.
+# Schema reference (generated)
 
-## Top-level structure
-
-```yaml
-agents:                 # map: name -> agent config
-personalities:          # map: name -> personality (optional)
-personality_categories: # map: name -> category, for grouped layouts (optional)
-ui:                     # layout, paging, grouping, timing, themes
-sessions:               # run storage, privacy, redaction
-review:                 # post-build check gate (+ timeout/output caps)
-worktrees:              # per-pane git worktrees for freestyle panes (optional)
-usage:                  # local cost/usage ledger (optional, off by default)
-files:                  # @file expansion limits (optional)
-policy:                 # risk posture: safe | normal | aggressive (optional)
-env:                    # experimental: env exported to agents (optional)
-setup:                  # experimental: pre-launch commands (optional)
-experimental:           # feature gates (setup_env)
-```
-
-## Fields
-
-Every field, per config struct. `role` selects orchestration phases (one token
-per phase: `planner`, `builder`, `voter`, `review`; omit for all phases; legacy
-`worker` = `planner`+`builder`, bare `reviewer` = `voter`+`review`). Self-judging
-is always prevented. Personalities are orthogonal — they only inject prompt text.
+The tables below are generated from the config structs by `council config schema`
+(and `go generate ./...`); the narrative pages under
+[Configuration](configuration.md) are the prose version. A test fails if this
+section drifts from the types, so it stays authoritative.
 
 <!-- BEGIN GENERATED: config-schema -->
 ### `agents.<name>`
@@ -242,91 +219,3 @@ Binds explicit usage metadata for cost tracking. Council never inspects `agents.
 | `price_profile` | string | — | A `usage.prices` entry; when set it wins over the price tables. |
 | `tool` | string | — | Native provider-session reader to enable for this agent, e.g. `claude`, `codex`, `copilot`, `cursor`, `opencode`. |
 <!-- END GENERATED: config-schema -->
-
-## Sequence names
-
-`submit_sequence` / `before_send_sequence` / `after_submit_sequence` accept:
-`cr` (`\r`), `lf` (`\n`), `crlf`, `esc`, `ctrl+c`, `ctrl+d`, `ctrl+u`,
-`csi-enter` and `csi-…-enter` (kitty keyboard protocol), `none`, or
-`raw:<bytes>`.
-
-## Known per-agent quirks (preset defaults that work)
-
-From `internal/config/presets.go`. Presets ship **disabled** and **without**
-auto-approval flags.
-
-| Agent   | `command`         | terminal                                              | auto-approval (opt-in) | orchestration |
-|---------|-------------------|------------------------------------------------------|------------------------|---------------|
-| claude  | `["claude"]`      | `type`, `cr`, `submit_delay_ms: 250`                 | `["claude","--dangerously-skip-permissions"]` | all phases |
-| codex   | `["codex"]`       | `paste`, `before_send_sequence: ctrl+u`, `cr`        | `["codex","--full-auto"]` | all phases |
-| cursor  | `["cursor-agent"]`| `type`, `cr`, `submit_delay_ms: 250`                 | `["cursor-agent","--force"]` | all phases |
-| copilot | `["copilot"]`     | `type`, `cr`, `submit_delay_ms: 250`                 | `["copilot","--allow-all-tools"]` | `exclude_build: true` |
-| opencode| `["opencode"]`    | `type`, `cr`                                         | —                      | all phases |
-
-> Flags council recognizes as risky auto-approval (warned by `council doctor`,
-> refused under `policy.mode: safe`): `--dangerously-skip-permissions`,
-> `--allow-all-tools`, `--full-auto`, `--force`, `--yolo`, `--auto-approve`,
-> `--dangerously-bypass-approvals-and-sandbox`.
-
-## Minimal overlay example (planner/builder + voter/review)
-
-```yaml
-# .council.yaml — git-excluded locally via .git/info/exclude; do not commit.
-ui:
-  group_by: category
-  initial_prompt_delay_ms: 8000
-
-review:
-  check_command: ["go", "test", "./..."]
-
-# Optional: local cost tracking (off by default). Shows a run total in the
-# header, a per-pane cost in each border, and the /cost breakdown.
-# usage:
-#   enabled: true
-
-# Optional: give each freestyle (non-orchestration) pane its own git worktree,
-# so same-tool panes get isolated files and a per-pane cost split.
-# worktrees:
-#   freestyle: true
-
-personality_categories:
-  builders: { label: Builders, color: "81", order: 10 }
-  reviewers: { label: Reviewers, color: "203", order: 20 }
-
-personalities:
-  pragmatist:
-    label: Pragmatist
-    category: builders
-    color: "81"
-    prompt_prefix: |
-      Prefer the smallest maintainable change that fully solves the problem.
-  critic:
-    label: Critic
-    category: reviewers
-    color: "212"
-    prompt_prefix: |
-      Scrutinize for correctness, regressions, and brittle assumptions.
-
-agents:
-  codex-worker:
-    enabled: true
-    command: ["codex"]
-    role: [planner, builder]
-    personality: pragmatist
-    terminal:
-      send_mode: paste
-      before_send_sequence: ctrl+u
-      submit_sequence: cr
-    # usage:                 # enable per-agent cost tracking (needs usage.enabled)
-    #   tool: codex          # session reader: claude|codex|copilot|cursor|opencode
-    #   model: gpt-5-codex   # model for estimated pricing until a report supplies one
-  copilot-reviewer:
-    enabled: true
-    command: ["copilot"]
-    role: [voter, review]
-    personality: critic
-    # worktree: false        # copilot needs the live tree; keep it in the launch dir
-    terminal:
-      submit_sequence: cr
-      submit_delay_ms: 250
-```

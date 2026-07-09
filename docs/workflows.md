@@ -31,10 +31,10 @@ council                      # launch all enabled agents
 - `@claude do X` sends to one agent; `@spec.md` inlines a file into your message.
 - `Ctrl+S` saves transcripts; `Ctrl+X` quits.
 
-With [`usage.enabled`](configuration.md#usage) each pane border shows its running
+With [`usage.enabled`](config-usage.md) each pane border shows its running
 cost (`~$` estimated, `$` reported) and `/cost` breaks it down into a per-session
 table plus a share bar of where the run's spend went; opt into
-[`worktrees.freestyle`](configuration.md#worktrees) to give each pane its own git
+[`worktrees.freestyle`](config-worktrees.md) to give each pane its own git
 worktree for file isolation and a per-pane cost split.
 
 ## The orchestrator HUD
@@ -56,7 +56,7 @@ reconstruct the workflow from memory:
   `✓ exited`, `✕ exit 1`, `! needs input`. During a run the glyph carries what
   the agent owes: `● build · working`, `◌ 1m vote · waiting for VOTE.md`,
   `✓ vote · wrote VOTE.md`. A cost badge (`| ~$0.02`) rides alongside when
-  [`usage`](configuration.md#usage) is on.
+  [`usage`](config-usage.md) is on.
 - **Blocked panes** turn the border orange and put a recovery hint in the
   footer. Auto-detection is **experimental**: it fires only when an
   approval-looking prompt (`[y/N]`, "Do you want to proceed", trust dialogs)
@@ -382,7 +382,7 @@ the TUI. `council clean-runs --keep 10` prunes old runs.
 
 The per-run build `worktrees/<stamp>/` are disposable — a fresh run always gets a
 new checkout. The freestyle `workspaces/<agent>/` (opt-in via
-[`worktrees.freestyle`](configuration.md#worktrees)) are the opposite: persistent
+[`worktrees.freestyle`](config-worktrees.md)) are the opposite: persistent
 and reused across sessions, reset only by `/refresh` and removed by `/clean`. Cost
-tracking ([`usage.enabled`](configuration.md#usage)) writes an `events.jsonl`
+tracking ([`usage.enabled`](config-usage.md)) writes an `events.jsonl`
 ledger per run and a shared price cache under `.council/usage/`.

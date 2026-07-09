@@ -209,10 +209,15 @@ func formatModelsList(models []usage.ListedModel, builtin, user map[string]strin
 }
 
 func councilCostPrices(args []string) error {
-	if len(args) == 0 || args[0] != "refresh" {
+	fs, noLocal := newOrchFlagSet("council cost prices")
+	rest, err := parseWithTrailingFlags(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(rest) == 0 || rest[0] != "refresh" {
 		return fmt.Errorf("usage: council cost prices refresh")
 	}
-	cfg, err := loadConfig(false)
+	cfg, err := loadConfig(*noLocal)
 	if err != nil {
 		return err
 	}

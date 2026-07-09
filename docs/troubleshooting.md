@@ -124,7 +124,7 @@ This removes `.council/worktrees/<run>/<agent>` and the corresponding
 
 ## Colors work in one terminal but not another
 
-Agent border colors — and the whole [theme](configuration.md#themes) — are
+Agent border colors — and the whole [theme](config-ui.md#themes) — are
 emitted as plain indexed SGR (`38;5;N`), the most widely supported color
 encoding there is. If they still don't show in a specific terminal, run
 `council doctor` there: it prints three test rows (colored text, colored blocks,

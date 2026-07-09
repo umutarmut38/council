@@ -106,11 +106,15 @@ See [Workflows → Personalities](workflows.md#personalities-categories-and-targ
 
 ## CLI subcommands
 
+One-line synopsis of every subcommand below. For each command's full flags,
+verbs, and description, see the [CLI Reference](cli.md) — or run
+`council <command> --help`.
+
 <!-- BEGIN GENERATED: cli-general -->
 ```text
 council [--agents claude,codex] [--no-local-config]                                  launch the interactive multiplexer
 council [--agents claude,codex] ask "<prompt>"                                       launch and broadcast a prompt
-council config init [--force]                                                        write the default (safe) config
+council config init [--force] [--interactive]                                        write the default (safe) config
 council config wizard                                                                interactive setup
 council config add-agent <preset> [--name x] [--role planner,builder,voter,review]   add a known agent CLI to the config
 council config schema [--json]                                                       print the configuration reference (Markdown, or JSON Schema)
@@ -141,7 +145,7 @@ council artifacts scan [run] [--all]                                            
 council queue add|list|run|clear                                                                           batch issues through council
 council stack detect|set <go|node|rust|python>                                                             set review.check_command
 council clean [--dry-run] [--yes]                                                                          remove council worktrees + branches
-council clean-runs [--keep N] [--dry-run]                                                                  prune old run artifacts
+council clean-runs [--keep N] [--dry-run] [--yes]                                                          prune old run artifacts
 ```
 <!-- END GENERATED: cli-orchestration -->
 
@@ -153,5 +157,5 @@ Notes:
   issue body via `gh`.
 - `--base <ref>` sets the base ref for the per-agent worktrees (default `HEAD`).
 - `council config schema` prints the configuration reference — the same tables as
-  [Configuration → Schema reference](configuration.md#schema-reference-generated); `--json` emits a JSON Schema (draft 2020-12) instead.
+  [Configuration → Schema reference](config-schema.md); `--json` emits a JSON Schema (draft 2020-12) instead.
 - Repo-local `.council.yaml` files are only applied once trusted (`council trust`); pass `--no-local-config` to ignore them entirely.

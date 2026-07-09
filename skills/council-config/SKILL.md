@@ -12,7 +12,7 @@ the file and make sure git ignores it locally and permanently.
 `.council.yaml` is an **overlay**: council loads `~/.council.yaml` first, then
 deep-merges the repo-local `.council.yaml` on top (searched from the current
 directory up to the git root). Top-level sections (`ui`, `sessions`, `review`,
-`files`, `policy`, `personalities`, …) and each entry under `agents`,
+`worktrees`, `usage`, `files`, `policy`, `personalities`, …) and each entry under `agents`,
 `personalities`, and `personality_categories` are merged field-by-field, so the
 local file only needs the keys it wants to change per repo — it does not have to
 redeclare a whole agent.
@@ -46,6 +46,10 @@ repo-local overlay through a conversation:
 - `council stack detect` — write `review.check_command` for the detected stack.
 - `council config schema` / `council doctor` — print the reference and validate
   the resolved config, commands on PATH, repo, and run dirs.
+- `council cost [run]` / `council cost --since 30d` — per-session usage and
+  estimated cost for a run (needs `usage.enabled`); `council cost models` lists
+  price-table model names + aliases; `council cost prices refresh` refreshes the
+  price cache.
 
 ## Workflow
 
@@ -154,7 +158,31 @@ agents). Set `review.check_command` to the project's build/test gate run in each
 build worktree before voting, e.g. `["go", "test", "./..."]`, `["npm", "test"]`,
 `["cargo", "build"]` — empty means no gate (`council stack detect` can fill it).
 
-**g. Optional extras.** Only if the user asks: `sessions` (`root_dir`,
+**g. Cost tracking.** Optional; **off by default**. Ask whether to record local
+usage/cost — `usage.enabled: true` turns on a run-cost total in the header, a
+per-pane cost in each border, and the `/cost` breakdown. Everything stays under
+`.council/`; no API key or billing account is used. If enabled, for each member
+whose tool/model council can't infer (it never guesses from `command`), set
+`agents.<name>.usage.tool` (`claude` / `codex` / `copilot` / `cursor` /
+`opencode`) so real token counts are read, and `usage.model` for the estimated
+price until a report supplies one. Advanced, only if asked: `usage.estimator`
+(`bytes4` / `runes4`), `show_total_in_header` / `show_agent_cost_in_border`
+(both default on when enabled), `usage.model_aliases` (map an observed model name
+to a price-table name — `council cost models` lists them), and custom
+`usage.prices.<name>` profiles (per-million `input`/`output`; `cache_write` and
+`cache_read` derive as 1.25×/0.1× of input unless set). Point the user at
+`council cost` to view totals.
+
+**h. Freestyle worktrees.** Optional; **off by default**. `worktrees.freestyle:
+true` gives each freestyle (non-orchestration) pane its own persistent git
+worktree at `.council/workspaces/<agent>`, so same-tool panes get isolated files
+and a per-pane cost split. `worktrees.seed` copies extra files/globs into each
+worktree on top of the built-in instruction-file allowlist. A tool that needs the
+live working tree (installed `node_modules`, build output, uncommitted state)
+should opt out per-agent with `worktree: false` (e.g. `copilot`). No-op outside a
+git repo; orchestration worktrees are never affected.
+
+**i. Optional extras.** Only if the user asks: `sessions` (`root_dir`,
 `private`, `redact`), `policy.mode` (`safe` / `normal` / `aggressive`), `files`
 (`allow_absolute`, `max_bytes`), and the **experimental** `env` + `setup`
 hooks (require `experimental.setup_env: true`, and from a repo-local file are

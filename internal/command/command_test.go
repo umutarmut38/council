@@ -115,7 +115,7 @@ func TestComposerRegistryHasNoDuplicateWords(t *testing.T) {
 const generalUsageBlock = `Usage:
   council [--agents claude,codex] [--no-local-config]
   council [--agents claude,codex] ask "<prompt>"
-  council config init [--force]       write the default (safe) config
+  council config init [--force] [--interactive]  write the default (safe) config
   council config wizard               interactive setup
   council config add-agent <preset> [--name x] [--role planner,builder,voter,review]
   council config schema [--json]      print the configuration reference (Markdown, or JSON Schema)
@@ -123,6 +123,52 @@ const generalUsageBlock = `Usage:
   council trust [--revoke|--show]     trust this repo's .council.yaml
   council version
 `
+
+func TestHelpStringRendersSynopsisSummaryAndFlags(t *testing.T) {
+	cost, _ := LookupCLI("cost")
+	got := HelpString(cost)
+	for _, want := range []string{
+		"council cost — per-session usage and estimated cost",
+		"Usage:\n  council cost",
+		"--since 30d",
+		"cost prices refresh", // from Long
+		"--no-local-config",   // shared flag appended for orchestration commands
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("HelpString(cost) missing %q:\n%s", want, got)
+		}
+	}
+	if strings.HasSuffix(got, "\n") {
+		t.Error("HelpString should not end with a trailing newline")
+	}
+}
+
+func TestHelpFlagsAppendsNoLocalConfigOnlyWhereAccepted(t *testing.T) {
+	// Orchestration commands and doctor accept --no-local-config; config schema
+	// does not.
+	plan, _ := LookupCLI("plan")
+	if !plan.AcceptsNoLocalConfig() {
+		t.Error("plan should accept --no-local-config")
+	}
+	schema, _ := LookupCLI("config schema")
+	if schema.AcceptsNoLocalConfig() {
+		t.Error("config schema should not accept --no-local-config")
+	}
+	if strings.Contains(HelpString(schema), "--no-local-config") {
+		t.Error("config schema help should not list --no-local-config")
+	}
+	// queue and stack are orchestration commands but manual parsers that never
+	// read --no-local-config, so help must not advertise it.
+	for _, name := range []string{"queue", "stack"} {
+		c, _ := LookupCLI(name)
+		if c.AcceptsNoLocalConfig() {
+			t.Errorf("%s should not accept --no-local-config (manual parser ignores it)", name)
+		}
+		if strings.Contains(HelpString(c), "--no-local-config") {
+			t.Errorf("%s help should not list --no-local-config", name)
+		}
+	}
+}
 
 func TestUsageStringRendersBothSections(t *testing.T) {
 	got := UsageString()

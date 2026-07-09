@@ -130,9 +130,9 @@ council build
 - [Workflows](workflows.md) — roles, personalities, targeting, resume, artifacts.
 - [Configuration](configuration.md) — the full `.council.yaml` reference.
 - [Commands](commands.md) — every composer and CLI command.
-- [Track cost](configuration.md#usage) — set `usage.enabled: true` for a live
+- [Track cost](config-usage.md) — set `usage.enabled: true` for a live
   per-agent cost breakdown (`/cost`, `council cost`).
-- [Isolate freestyle panes](configuration.md#worktrees) — opt-in per-pane git
+- [Isolate freestyle panes](config-worktrees.md) — opt-in per-pane git
   worktrees for file isolation and per-pane cost.
 - Example configs:
   [minimal](https://github.com/umutarmut38/council/blob/main/examples/configs/minimal.yaml),
