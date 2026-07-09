@@ -4,6 +4,68 @@ All notable changes will be documented here.
 
 This project follows semantic versioning once `v0.1.0` is tagged.
 
+## v1.1.0 - 2026-07-09
+
+Provider-independent cost tracking lands, and the HUD is redesigned around it.
+council now meters every run locally — an estimated character floor reconciled
+against each CLI's own session files — and surfaces it in a redesigned header,
+per-pane badges, and a styled `/cost` view with per-agent share bars. Also a
+command-registry audit (real flags, `/quit` actually quits) and opt-in freestyle
+worktrees.
+
+### Added
+
+- **Provider-independent cost tracking (`usage:`).** A local, provider-agnostic
+  per-session cost ledger (`events.jsonl`) with a two-layer model: an estimated
+  character floor, reconciled against each CLI's own session files where one
+  exists. Native session readers ship for Claude, Codex (`rollout-*.jsonl`), and
+  opencode (SQLite, pure-Go `modernc.org/sqlite`); cursor and copilot stay on the
+  estimated floor. A bundled LiteLLM pricing snapshot (3944 models) prices runs
+  offline, with an owner-only refreshable cache. Model is auto-discovered from an
+  agent's session files when `usage.model` is unset. Cost is never silently
+  `$0`: metered-but-unpriced shows `$?`. Includes a `council cost` CLI and
+  `council cost models [filter]` to find canonical price-table names.
+  (#51, #56)
+- **Redesigned cost HUD.** The header pins run cost flush-right beside a phase
+  stepper line, per-pane badges lead with a liveness glyph (● active / ◌ idle
+  age / ✓ clean exit / ✕ failure / ! needs input), and one estimate vocabulary
+  runs throughout — `~$` estimated, `$` reported, `$?` unknown. The `/cost` view
+  is styled and gains per-agent share bars showing who is burning the budget.
+  The composer shows a live `~token` estimate as you type and an accented target
+  chip (focus color for a one-agent send). Status is now a transient toast
+  (4s TTL) driven by an always-on 1s UI clock. (#53)
+- **Freestyle worktrees (opt-in).** Agents can work in isolated worktrees.
+  (#51)
+
+### Changed
+
+- **Command-registry audit.** `/quit` and `/exit` now return `tea.Quit` instead
+  of killing agents and leaving dead panes; `/help` opens the full reference in
+  the pager instead of dumping names to the status line; trailing orchestration
+  flags (`plan/run --base/--agents/--file/--issue`, `vote/build/review/resume
+  --agents`, `cost --source`, `doctor --fix`, …) are now honored instead of
+  silently dropped; and the help/docs use strings list the real flags. Dead code
+  (`CLI.RequiresRepo`, unreachable branches) removed. (#55)
+
+### Fixed
+
+- **`/cost` table precision and estimate flagging.** Sub-dime rows now show four
+  decimals so small rows reconcile with their total; JPY prints with no minor
+  unit; cache reads and writes are split into separate columns (they price at
+  0.1× vs 1.25× input) so a row's cost reconciles; and the Cost column carries
+  the `~` estimate prefix from token confidence (Copilot mid-run no longer reads
+  as final). (#54, #56)
+- **Live-usage typing lag.** The 1s reconcile sweep re-parsed every provider
+  transcript each second while agents streamed; it's throttled to once per 3s and
+  finished transcripts are cached (size+mtime validated), so typing stays
+  responsive. (#56)
+- **Direct-mode metering.** Direct mode now meters raw typed keystrokes (not the
+  wrapped composer prompt) and records an estimate on Enter that seeds provider
+  reconciliation, so a direct-only run reports its real cost. (#56)
+- **Price-name resolution.** Dotted model names (`claude-haiku-4.5`) resolve to
+  their dashed LiteLLM key as a last-resort candidate, and the "price unknown"
+  hint now names the remedy (`map it in usage.model_aliases`). (#56)
+
 ## v1.0.0 - 2026-06-26
 
 The first stable release. The `.council.yaml` schema and platform support are
