@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/umutarmut38/council/internal/command"
 	"github.com/umutarmut38/council/internal/version"
 )
 
@@ -87,6 +88,53 @@ func TestHelpHasNoTerseFlagDump(t *testing.T) {
 		}
 		if !strings.Contains(out, "Examples:") {
 			t.Errorf("council %v missing the full usage:\n%s", args, out)
+		}
+	}
+}
+
+// TestSubcommandHelpExitsZero verifies every registered subcommand answers
+// `--help` with its structured help and exit 0 — the drift the pre-1.1.1 CLI
+// had, where FlagSet-based subs dumped a terse flag list and exited 1 and manual
+// parsers rejected --help as an unknown flag. It runs before any config load, so
+// it stays hermetic.
+func TestSubcommandHelpExitsZero(t *testing.T) {
+	for _, c := range command.CLIs() {
+		if c.Name == "version" {
+			continue // version has no flags/help body; `version` prints the build string
+		}
+		tokens := append(strings.Fields(c.Name), "--help")
+		t.Run(c.Name, func(t *testing.T) {
+			var code int
+			out := captureOutput(t, func() { code = mainExitCode(tokens) })
+			if code != 0 {
+				t.Fatalf("council %v exit = %d, want 0 (output: %q)", tokens, code, out)
+			}
+			if !strings.Contains(out, "council "+c.Name) {
+				t.Errorf("council %v help missing the command name:\n%s", tokens, out)
+			}
+			if strings.Contains(out, "flag: help requested") || strings.Contains(out, "Usage of council") {
+				t.Errorf("council %v leaked a terse flag dump:\n%s", tokens, out)
+			}
+			for _, f := range c.Flags {
+				if !strings.Contains(out, f.Name) {
+					t.Errorf("council %v help missing documented flag %q:\n%s", tokens, f.Name, out)
+				}
+			}
+		})
+	}
+}
+
+// TestSubcommandHelpShortFlag spot-checks that -h works the same as --help for a
+// FlagSet-based sub and a manual-parser sub.
+func TestSubcommandHelpShortFlag(t *testing.T) {
+	for _, tokens := range [][]string{{"adopt", "-h"}, {"trust", "-h"}, {"queue", "-h"}} {
+		var code int
+		out := captureOutput(t, func() { code = mainExitCode(tokens) })
+		if code != 0 {
+			t.Errorf("council %v exit = %d, want 0 (output: %q)", tokens, code, out)
+		}
+		if !strings.Contains(out, "Usage:") {
+			t.Errorf("council %v missing structured help:\n%s", tokens, out)
 		}
 	}
 }

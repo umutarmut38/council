@@ -110,7 +110,7 @@ See [Workflows → Personalities](workflows.md#personalities-categories-and-targ
 ```text
 council [--agents claude,codex] [--no-local-config]                                  launch the interactive multiplexer
 council [--agents claude,codex] ask "<prompt>"                                       launch and broadcast a prompt
-council config init [--force]                                                        write the default (safe) config
+council config init [--force] [--interactive]                                        write the default (safe) config
 council config wizard                                                                interactive setup
 council config add-agent <preset> [--name x] [--role planner,builder,voter,review]   add a known agent CLI to the config
 council config schema [--json]                                                       print the configuration reference (Markdown, or JSON Schema)
@@ -141,7 +141,7 @@ council artifacts scan [run] [--all]                                            
 council queue add|list|run|clear                                                                           batch issues through council
 council stack detect|set <go|node|rust|python>                                                             set review.check_command
 council clean [--dry-run] [--yes]                                                                          remove council worktrees + branches
-council clean-runs [--keep N] [--dry-run]                                                                  prune old run artifacts
+council clean-runs [--keep N] [--dry-run] [--yes]                                                          prune old run artifacts
 ```
 <!-- END GENERATED: cli-orchestration -->
 

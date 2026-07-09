@@ -42,38 +42,150 @@ type CLI struct {
 	// matches the historical help layout for the launch/ask/version forms and
 	// the argument-rich plan/adopt lines.
 	SynopsisOnly bool
+	// Long is an optional paragraph shown in `council <cmd> --help` and the
+	// generated CLI reference, below the synopsis. Verb-style commands (cost,
+	// queue, stack, artifacts) use it to enumerate their sub-verbs.
+	Long string
+	// Flags documents the command's own flags for `council <cmd> --help` and
+	// the CLI reference. ponytail: hand-kept in sync with the stdlib FlagSets in
+	// cmd/council (the FlagSets live inside handler bodies in package main and
+	// can't be reflected from here); TestSubcommandHelpExitsZero exercises every
+	// rendered entry. The shared --no-local-config is appended by the renderer
+	// for the commands that accept it, so it is not repeated here.
+	Flags []Flag
+}
+
+// Flag documents one flag a CLI command accepts.
+type Flag struct {
+	// Name is the flag as typed, e.g. "--agents".
+	Name string
+	// Arg is a value placeholder shown after the name (e.g. "a,b"); empty for
+	// boolean flags.
+	Arg string
+	// Desc is the one-line description.
+	Desc string
+}
+
+// noLocalConfigFlag is the shared flag every orchestration command (and doctor,
+// launch, ask) accepts; the renderer appends it so it isn't repeated on each
+// registry entry.
+var noLocalConfigFlag = Flag{Name: "--no-local-config", Desc: "ignore the repo-local .council.yaml"}
+
+// AcceptsNoLocalConfig reports whether the command accepts --no-local-config
+// (every orchestration command via newOrchFlagSet, plus doctor and the bare
+// launch/ask forms).
+func (c CLI) AcceptsNoLocalConfig() bool {
+	if c.Group == GroupOrchestration {
+		return true
+	}
+	switch c.Name {
+	case "doctor", "launch", "ask":
+		return true
+	}
+	return false
+}
+
+// HelpFlags returns the command's documented flags with the shared
+// --no-local-config appended when it applies.
+func (c CLI) HelpFlags() []Flag {
+	if !c.AcceptsNoLocalConfig() {
+		return c.Flags
+	}
+	return append(append([]Flag(nil), c.Flags...), noLocalConfigFlag)
 }
 
 // cliCommands is the ordered CLI command reference. Order is significant: it is
 // the order help and the generated docs render in.
 var cliCommands = []CLI{
-	{Name: "launch", Use: `[--agents claude,codex] [--no-local-config]`, Summary: "launch the interactive multiplexer", Group: GroupGeneral, SynopsisOnly: true},
-	{Name: "ask", Use: `[--agents claude,codex] ask "<prompt>"`, Summary: "launch and broadcast a prompt", Group: GroupGeneral, SynopsisOnly: true},
-	{Name: "config init", Use: `config init [--force]`, Summary: "write the default (safe) config", Group: GroupGeneral},
-	{Name: "config wizard", Use: `config wizard`, Summary: "interactive setup", Group: GroupGeneral},
-	{Name: "config add-agent", Use: `config add-agent <preset> [--name x] [--role planner,builder,voter,review]`, Summary: "add a known agent CLI to the config", Group: GroupGeneral, SynopsisOnly: true},
-	{Name: "config schema", Use: `config schema [--json]`, Summary: "print the configuration reference (Markdown, or JSON Schema)", Group: GroupGeneral},
-	{Name: "doctor", Use: `doctor [--fix]`, Summary: "check config, commands, repo, run dirs (--fix applies safe fixes)", Group: GroupGeneral},
-	{Name: "trust", Use: `trust [--revoke|--show]`, Summary: "trust this repo's .council.yaml", Group: GroupGeneral},
+	{Name: "launch", Use: `[--agents claude,codex] [--no-local-config]`, Summary: "launch the interactive multiplexer", Group: GroupGeneral, SynopsisOnly: true,
+		Long:  "The bare `council` command. Opens the interactive multiplexer with every enabled agent in its own live pane. `--agents` narrows the launch to a subset.",
+		Flags: []Flag{{Name: "--agents", Arg: "a,b", Desc: "only launch these agents (comma-separated)"}}},
+	{Name: "ask", Use: `[--agents claude,codex] ask "<prompt>"`, Summary: "launch and broadcast a prompt", Group: GroupGeneral, SynopsisOnly: true,
+		Long:  "Launch the multiplexer and immediately broadcast one prompt to every launched agent.",
+		Flags: []Flag{{Name: "--agents", Arg: "a,b", Desc: "only launch these agents (comma-separated)"}}},
+	{Name: "config init", Use: `config init [--force] [--interactive]`, Summary: "write the default (safe) config", Group: GroupGeneral,
+		Flags: []Flag{
+			{Name: "--force", Desc: "overwrite an existing config"},
+			{Name: "--interactive", Desc: "run the setup wizard instead (alias: -i)"},
+		}},
+	{Name: "config wizard", Use: `config wizard`, Summary: "interactive setup", Group: GroupGeneral,
+		Long: "Detect installed agent CLIs, pick which to enable and their roles, optionally opt into auto-approval, detect the project stack for the review gate, and write ~/.council.yaml."},
+	{Name: "config add-agent", Use: `config add-agent <preset> [--name x] [--role planner,builder,voter,review]`, Summary: "add a known agent CLI to the config", Group: GroupGeneral, SynopsisOnly: true,
+		Flags: []Flag{
+			{Name: "--name", Arg: "x", Desc: "agent name in the config (defaults to the preset name)"},
+			{Name: "--role", Arg: "planner,builder,voter,review", Desc: "comma-separated roles (review = review-only; empty = all phases)"},
+		}},
+	{Name: "config schema", Use: `config schema [--json]`, Summary: "print the configuration reference (Markdown, or JSON Schema)", Group: GroupGeneral,
+		Flags: []Flag{{Name: "--json", Desc: "emit a JSON Schema (draft 2020-12) instead of Markdown"}}},
+	{Name: "doctor", Use: `doctor [--fix]`, Summary: "check config, commands, repo, run dirs (--fix applies safe fixes)", Group: GroupGeneral,
+		Flags: []Flag{{Name: "--fix", Desc: "apply safe, local, reversible fixes (default is read-only)"}}},
+	{Name: "trust", Use: `trust [--revoke|--show]`, Summary: "trust this repo's .council.yaml", Group: GroupGeneral,
+		Flags: []Flag{
+			{Name: "--revoke", Desc: "revoke trust for this repo's .council.yaml"},
+			{Name: "--show", Desc: "print the trust status without changing it"},
+		}},
 	{Name: "version", Aliases: []string{"--version", "-v"}, Use: `version`, Summary: "print build version, commit, and date", Group: GroupGeneral, SynopsisOnly: true},
 
-	{Name: "plan", Use: `plan "<issue>" | --file issue.md | --issue 123 [--agents a,b] [--base ref]`, Summary: "start a run; each agent drafts a plan", Group: GroupOrchestration, SynopsisOnly: true},
-	{Name: "vote", Use: `vote [run] [--agents a,b]`, Summary: "tally ranked votes into a winner", Group: GroupOrchestration},
-	{Name: "build", Use: `build [run] [--agents a,b]`, Summary: "all agents implement the winning plan", Group: GroupOrchestration},
-	{Name: "review", Use: `review [run] [--agents a,b]`, Summary: "gate builds + reviewers pick the best", Group: GroupOrchestration},
-	{Name: "adopt", Use: `adopt [run] [agent] [--dry-run] [--yes]`, Summary: "preview + apply a build's diff", Group: GroupOrchestration, SynopsisOnly: true},
-	{Name: "run", Use: `run "<issue>" | --file issue.md | --issue 123 [--agents a,b] [--base ref]`, Summary: "plan -> vote -> build", Group: GroupOrchestration, SynopsisOnly: true},
-	{Name: "resume", Use: `resume [run] [--agents a,b]`, Summary: "reopen an older run with fresh agent processes", Group: GroupOrchestration},
+	{Name: "plan", Use: `plan "<issue>" | --file issue.md | --issue 123 [--agents a,b] [--base ref]`, Summary: "start a run; each agent drafts a plan", Group: GroupOrchestration, SynopsisOnly: true,
+		Flags: []Flag{
+			{Name: "--file", Arg: "issue.md", Desc: "read the issue from a markdown file"},
+			{Name: "--issue", Arg: "123", Desc: "fetch the issue from GitHub by number (via gh)"},
+			{Name: "--agents", Arg: "a,b", Desc: "comma-separated agent names"},
+			{Name: "--base", Arg: "ref", Desc: "base ref for worktrees (default HEAD)"},
+		}},
+	{Name: "vote", Use: `vote [run] [--agents a,b]`, Summary: "tally ranked votes into a winner", Group: GroupOrchestration,
+		Flags: []Flag{{Name: "--agents", Arg: "a,b", Desc: "comma-separated agent names"}}},
+	{Name: "build", Use: `build [run] [--agents a,b]`, Summary: "all agents implement the winning plan", Group: GroupOrchestration,
+		Flags: []Flag{{Name: "--agents", Arg: "a,b", Desc: "comma-separated agent names"}}},
+	{Name: "review", Use: `review [run] [--agents a,b]`, Summary: "gate builds + reviewers pick the best", Group: GroupOrchestration,
+		Flags: []Flag{{Name: "--agents", Arg: "a,b", Desc: "comma-separated agent names"}}},
+	{Name: "adopt", Use: `adopt [run] [agent] [--dry-run] [--yes]`, Summary: "preview + apply a build's diff", Group: GroupOrchestration, SynopsisOnly: true,
+		Flags: []Flag{
+			{Name: "--dry-run", Desc: "show what would be applied without touching the tree"},
+			{Name: "--yes", Desc: "skip the confirmation prompt"},
+		}},
+	{Name: "run", Use: `run "<issue>" | --file issue.md | --issue 123 [--agents a,b] [--base ref]`, Summary: "plan -> vote -> build", Group: GroupOrchestration, SynopsisOnly: true,
+		Flags: []Flag{
+			{Name: "--file", Arg: "issue.md", Desc: "read the issue from a markdown file"},
+			{Name: "--issue", Arg: "123", Desc: "fetch the issue from GitHub by number (via gh)"},
+			{Name: "--agents", Arg: "a,b", Desc: "comma-separated agent names"},
+			{Name: "--base", Arg: "ref", Desc: "base ref for worktrees (default HEAD)"},
+		}},
+	{Name: "resume", Use: `resume [run] [--agents a,b]`, Summary: "reopen an older run with fresh agent processes", Group: GroupOrchestration,
+		Flags: []Flag{{Name: "--agents", Arg: "a,b", Desc: "comma-separated agent names"}}},
 	{Name: "status", Use: `status [run]`, Summary: "show a run's phase, artifacts, and winners", Group: GroupOrchestration},
-	{Name: "cost", Use: `cost [run] [--since 30d] [--source ledger|codeburn] | cost prices refresh | cost models [filter]`, Summary: "per-session usage and estimated cost", Group: GroupOrchestration, SynopsisOnly: true},
-	{Name: "report", Use: `report [run] [--post N]`, Summary: "write report.md (--post N comments on issue #N)", Group: GroupOrchestration},
+	{Name: "cost", Use: `cost [run] [--since 30d] [--source ledger|codeburn] | cost prices refresh | cost models [filter]`, Summary: "per-session usage and estimated cost", Group: GroupOrchestration, SynopsisOnly: true,
+		Long: "Verbs:\n  cost [run]            usage/cost for one run (default: latest)\n  cost prices refresh   refresh the LiteLLM price cache\n  cost models [filter]  list price-table model names + aliases",
+		Flags: []Flag{
+			{Name: "--since", Arg: "30d", Desc: "aggregate across runs newer than this (e.g. 30d, 7d)"},
+			{Name: "--source", Arg: "ledger|codeburn", Desc: "ledger, or codeburn for machine-wide cross-tool totals"},
+		}},
+	{Name: "report", Use: `report [run] [--post N]`, Summary: "write report.md (--post N comments on issue #N)", Group: GroupOrchestration,
+		Flags: []Flag{{Name: "--post", Arg: "N", Desc: "post the report as a comment on GitHub issue #N (via gh)"}}},
 	{Name: "pr", Use: `pr [run] [agent]`, Summary: "open a PR from a build branch (via gh)", Group: GroupOrchestration},
 	{Name: "scorecard", Use: `scorecard`, Summary: "agent performance across runs", Group: GroupOrchestration},
-	{Name: "artifacts", Use: `artifacts scan [run] [--all]`, Summary: "scan run artifacts for likely secrets", Group: GroupOrchestration},
-	{Name: "queue", Use: `queue add|list|run|clear`, Summary: "batch issues through council", Group: GroupOrchestration},
-	{Name: "stack", Use: `stack detect|set <go|node|rust|python>`, Summary: "set review.check_command", Group: GroupOrchestration},
-	{Name: "clean", Use: `clean [--dry-run] [--yes]`, Summary: "remove council worktrees + branches", Group: GroupOrchestration},
-	{Name: "clean-runs", Use: `clean-runs [--keep N] [--dry-run]`, Summary: "prune old run artifacts", Group: GroupOrchestration},
+	{Name: "artifacts", Use: `artifacts scan [run] [--all]`, Summary: "scan run artifacts for likely secrets", Group: GroupOrchestration,
+		Long:  "Verbs:\n  artifacts scan [run]  scan one run (latest by default) for likely secrets",
+		Flags: []Flag{{Name: "--all", Desc: "scan every run under the sessions root, not just one"}}},
+	{Name: "queue", Use: `queue add|list|run|clear`, Summary: "batch issues through council", Group: GroupOrchestration,
+		Long: "Verbs:\n  queue add [--issue N | --file task.md | \"<text>\"]  append a task\n  queue list                                        show queued tasks\n  queue run                                         run each task as a full `council run`\n  queue clear                                       empty the queue",
+		Flags: []Flag{
+			{Name: "--issue", Arg: "N", Desc: "(queue add) GitHub issue number"},
+			{Name: "--file", Arg: "task.md", Desc: "(queue add) issue file"},
+		}},
+	{Name: "stack", Use: `stack detect|set <go|node|rust|python>`, Summary: "set review.check_command", Group: GroupOrchestration,
+		Long: "Verbs:\n  stack detect                     detect the project stack and set the review gate\n  stack set <go|node|rust|python>  set the review gate for a named stack"},
+	{Name: "clean", Use: `clean [--dry-run] [--yes]`, Summary: "remove council worktrees + branches", Group: GroupOrchestration,
+		Flags: []Flag{
+			{Name: "--dry-run", Desc: "list what would be removed"},
+			{Name: "--yes", Desc: "skip the confirmation prompt"},
+		}},
+	{Name: "clean-runs", Use: `clean-runs [--keep N] [--dry-run] [--yes]`, Summary: "prune old run artifacts", Group: GroupOrchestration,
+		Flags: []Flag{
+			{Name: "--keep", Arg: "N", Desc: "number of most recent runs to keep (default 10)"},
+			{Name: "--dry-run", Desc: "list what would be removed"},
+			{Name: "--yes", Desc: "skip the confirmation prompt"},
+		}},
 }
 
 // CLIs returns the ordered CLI command reference.
