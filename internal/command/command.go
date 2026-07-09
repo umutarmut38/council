@@ -47,7 +47,7 @@ type CLI struct {
 	// queue, stack, artifacts) use it to enumerate their sub-verbs.
 	Long string
 	// Flags documents the command's own flags for `council <cmd> --help` and
-	// the CLI reference. ponytail: hand-kept in sync with the stdlib FlagSets in
+	// the CLI reference. NOTE: hand-kept in sync with the stdlib FlagSets in
 	// cmd/council (the FlagSets live inside handler bodies in package main and
 	// can't be reflected from here); TestSubcommandHelpExitsZero exercises every
 	// rendered entry. The shared --no-local-config is appended by the renderer

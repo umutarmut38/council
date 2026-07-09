@@ -19,8 +19,9 @@ Each command lists its own flags below. Two recur:
 - `--agents a,b` — restrict to a comma-separated subset of agents. Accepted by
   the bare `council` launch, `ask`, and the roster phases (`plan`, `vote`,
   `build`, `review`, `run`, `resume`) — not by every orchestration command.
-- `--no-local-config` — ignore the repo-local `.council.yaml`. Accepted by most
-  orchestration commands and `doctor`.
+- `--no-local-config` — ignore the repo-local `.council.yaml`. Accepted by the
+  bare `council` launch, `ask`, `doctor`, and most orchestration commands (not
+  the manual-parser `queue`/`stack`).
 
 `[run]` is a run timestamp (e.g. `20260605-130000`); omit it for the latest run.
 
