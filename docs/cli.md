@@ -14,11 +14,13 @@ For the shorter one-line synopsis of every command, see
 [Commands → CLI subcommands](commands.md#cli-subcommands). For how the in-chat
 composer commands work, see [Commands](commands.md).
 
-Global flags accepted by the bare `council` launch and the orchestration
-commands:
+Each command lists its own flags below. Two recur:
 
-- `--agents a,b` — only launch/target these agents (comma-separated).
-- `--no-local-config` — ignore the repo-local `.council.yaml`.
+- `--agents a,b` — restrict to a comma-separated subset of agents. Accepted by
+  the bare `council` launch, `ask`, and the roster phases (`plan`, `vote`,
+  `build`, `review`, `run`, `resume`) — not by every orchestration command.
+- `--no-local-config` — ignore the repo-local `.council.yaml`. Accepted by most
+  orchestration commands and `doctor`.
 
 `[run]` is a run timestamp (e.g. `20260605-130000`); omit it for the latest run.
 
