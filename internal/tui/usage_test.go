@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/umutarmut38/council/internal/agent"
 	"github.com/umutarmut38/council/internal/config"
 	runstore "github.com/umutarmut38/council/internal/session"
@@ -83,6 +84,120 @@ func TestRecordUsageInputMetersWirePrompt(t *testing.T) {
 
 func usageConfigOn() config.UsageConfig {
 	return config.UsageConfig{Enabled: true, Estimator: usage.EstimatorBytes4}
+}
+
+// The reconcile sweep is throttled to usageReconcileMinGap even though the
+// tick fires every second; usageDirty stays set so a later tick catches up.
+func TestMaybeReconcileThrottle(t *testing.T) {
+	cfg := config.Config{
+		Usage:  usageConfigOn(),
+		Agents: map[string]config.AgentConfig{"a": {Command: []string{"tool"}}},
+	}
+	cfg.Normalize()
+	store := runstore.NewDeferred(t.TempDir(), nil, nil)
+	session := agent.NewSession("a", cfg.Agents["a"], "")
+	defer session.Terminate()
+	m := NewModelWithConfig([]*agent.Session{session}, store, cfg, "", nil, time.Millisecond, nil, nil)
+	if err := m.ensureRun(); err != nil {
+		t.Fatal(err)
+	}
+	t0 := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
+	arm := func(now time.Time) bool {
+		m.now = now
+		m.usageDirty = true
+		m.usageReconcileBusy = false
+		return m.maybeReconcileCmd() != nil // only returns the closure; no IO runs
+	}
+	if !arm(t0) {
+		t.Fatal("first sweep should arm immediately")
+	}
+	if arm(t0.Add(time.Second)) {
+		t.Fatal("sweep within min gap should be throttled")
+	}
+	if !m.usageDirty {
+		t.Fatal("throttled tick must keep usageDirty set")
+	}
+	if !arm(t0.Add(4 * time.Second)) {
+		t.Fatal("sweep after min gap should arm")
+	}
+}
+
+// Direct-mode keystrokes bypass the composer, so handleDirectKey accumulates
+// the typed line and meters it on Enter — producing the SourcePrompt estimate
+// that both feeds the live tally and seeds provider reconciliation (tool+cwd).
+func TestDirectModeMetersInputOnEnter(t *testing.T) {
+	cfg := config.Config{
+		Usage: usageConfigOn(),
+		Agents: map[string]config.AgentConfig{
+			"claude": {
+				Command:     []string{"claude"},
+				Usage:       config.AgentUsageConfig{Tool: "claude"},
+				Personality: "architect",
+			},
+		},
+		Personalities: map[string]config.PersonalityConfig{
+			"architect": {PromptPrefix: "You are The Architect."},
+		},
+	}
+	cfg.Normalize()
+	store := runstore.NewDeferred(t.TempDir(), nil, nil)
+	session := agent.NewSession("claude", cfg.Agents["claude"], "")
+	// Close the raw log opened by ensureRun before the t.TempDir cleanup, or
+	// Windows can't delete the still-open raw/*.log.
+	defer session.Terminate()
+	m := NewModelWithConfig([]*agent.Session{session}, store, cfg, "", nil, time.Millisecond, nil, nil)
+	if err := m.ensureRun(); err != nil {
+		t.Fatal(err)
+	}
+	m.InputMode = InputDirect
+	key := func(msg tea.KeyMsg) {
+		nm, _ := m.handleDirectKey(msg)
+		m = nm.(Model)
+	}
+	key(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hi there")}) // paste-shaped multi-rune
+	key(tea.KeyMsg{Type: tea.KeyBackspace})
+	key(tea.KeyMsg{Type: tea.KeyEnter})
+	prompts := func() []usage.Event {
+		events, err := usage.LoadEvents(store.RunDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []usage.Event
+		for _, e := range events {
+			if e.Source == usage.SourcePrompt {
+				out = append(out, e)
+			}
+		}
+		return out
+	}
+	got := prompts()
+	if len(got) != 1 {
+		t.Fatalf("prompt events = %d, want 1", len(got))
+	}
+	e := got[0]
+	if e.UserInputChars != len("hi ther") {
+		t.Fatalf("user chars = %d, want %d (backspace applied)", e.UserInputChars, len("hi ther"))
+	}
+	if e.Tool != "claude" || e.CWD == "" {
+		t.Fatalf("reconcile seed fields missing: tool=%q cwd=%q", e.Tool, e.CWD)
+	}
+	if !strings.Contains(e.PromptPreview, "hi ther") || e.PromptHash == "" {
+		t.Fatalf("prompt correlation fields missing: %+v", e)
+	}
+	// Direct mode sends raw keystrokes, so the personality prefix must NOT be
+	// billed: the model-visible estimate equals the typed text, not the wrapped
+	// composer prompt.
+	if strings.Contains(e.PromptPreview, "Architect") {
+		t.Fatalf("direct mode billed the personality prefix it never sent: %q", e.PromptPreview)
+	}
+	if e.InputChars != e.UserInputChars {
+		t.Fatalf("input chars (%d) should equal user chars (%d) — no personality wrapping in direct mode", e.InputChars, e.UserInputChars)
+	}
+	// Enter with an empty accumulator records nothing new.
+	key(tea.KeyMsg{Type: tea.KeyEnter})
+	if got := prompts(); len(got) != 1 {
+		t.Fatalf("empty Enter added a prompt event: %d", len(got))
+	}
 }
 
 // Regression for #3: a paste-mode agent's recorded input estimate must be the

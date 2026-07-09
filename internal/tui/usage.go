@@ -18,6 +18,12 @@ import (
 // so idle panes cost nothing; no staleness bookkeeping needed.
 const usageReconcileInterval = time.Second
 
+// usageReconcileMinGap throttles the actual reconcile sweep: each pass re-reads
+// events.jsonl and stats the provider stores, so during continuous agent output
+// a 1s cadence is pure churn. 3s is imperceptible for a header cost figure. The
+// 1s tick itself must stay — it also expires toasts and refreshes idle ages.
+const usageReconcileMinGap = 3 * time.Second
+
 // usageTickCmd schedules the next live-usage tick.
 func usageTickCmd() tea.Cmd {
 	return tea.Tick(usageReconcileInterval, func(time.Time) tea.Msg { return usageTickMsg{} })
@@ -30,6 +36,9 @@ func usageTickCmd() tea.Cmd {
 func (m *Model) maybeReconcileCmd() tea.Cmd {
 	if !m.Config.Usage.Enabled || m.usageReconcileBusy || !m.usageDirty {
 		return nil
+	}
+	if m.now.Sub(m.usageLastReconcile) < usageReconcileMinGap {
+		return nil // usageDirty stays set; a later tick picks it up
 	}
 	runDir := ""
 	if m.orch != nil && m.orch.Run() != nil {
@@ -46,6 +55,7 @@ func (m *Model) maybeReconcileCmd() tea.Cmd {
 	}
 	m.usageDirty = false
 	m.usageReconcileBusy = true
+	m.usageLastReconcile = m.now
 	return reconcileRollupCmd(runDir, pricer)
 }
 
@@ -107,6 +117,7 @@ func (m *Model) initUsage() {
 	m.usageTally = map[string]usage.TokenPair{}
 	m.usageRate = map[string]usage.Rate{}
 	m.usageOutputSeen = map[string]int{}
+	m.directTyped = map[string]string{}
 	m.usagePricer = m.buildPricer()
 	for name, a := range m.Config.Agents {
 		model, _, _ := usageModel(a)
@@ -252,8 +263,21 @@ func (m Model) recordPhaseInputs(prompts map[string]string) {
 	}
 }
 
-// recordUsageInput meters the actual prompt council writes to an agent PTY.
+// recordUsageInput meters a composer send: council wraps userText with the
+// agent's personality prefix and paste/submit transport before writing it to
+// the PTY, so that wrapped prompt is what the model sees and gets billed.
 func (m Model) recordUsageInput(s *agent.Session, phase, userText string) {
+	prompt := m.Config.PromptForAgent(s.Name, userText)
+	m.recordUsageInputAs(s, phase, userText, prompt, linePayload(s.Config.Terminal, prompt))
+}
+
+// recordUsageInputAs records a prompt estimate where agentPrompt is the
+// model-visible text (billed) and wire is the bytes sent to the PTY (a
+// transport diagnostic). Composer sends pass the personality-wrapped prompt;
+// direct mode sends raw keystrokes with no council wrapping, so it passes the
+// typed text for both — otherwise it would bill a personality prefix and
+// bracketed-paste bytes it never transmitted.
+func (m Model) recordUsageInputAs(s *agent.Session, phase, userText, agentPrompt, wire string) {
 	if !m.Config.Usage.Enabled {
 		return
 	}
@@ -262,8 +286,7 @@ func (m Model) recordUsageInput(s *agent.Session, phase, userText string) {
 	if view := m.findAgentForMessage(s.Name, s); view != nil {
 		m.recordUsageOutput(s, view.transcript())
 	}
-	prompt := m.Config.PromptForAgent(s.Name, userText)
-	wire := linePayload(s.Config.Terminal, prompt)
+	prompt := agentPrompt
 	est := usage.EstimatorFor(m.Config.Usage.Estimator)
 	// Estimate the input from the SEMANTIC prompt (personality prefix + user
 	// text) the model actually sees — not the wire payload. For paste-mode agents

@@ -47,6 +47,41 @@ func TestClaudeReaderAggregatesSession(t *testing.T) {
 	}
 }
 
+// The per-file cache must not hide appends: a transcript that grew since the
+// last sweep re-parses and the totals reflect the new usage.
+func TestClaudeReadForCWDSeesAppends(t *testing.T) {
+	root := t.TempDir()
+	cwd := "/test/proj"
+	writeSession(t, root, cwd, "s1.jsonl", `{"type":"assistant","cwd":"/test/proj","sessionId":"s1","timestamp":"2026-06-27T10:00:00Z","message":{"model":"m","usage":{"input_tokens":10,"output_tokens":5}}}
+`)
+	r := Claude(root)
+	calls, err := r.ReadForCWD(cwd)
+	if err != nil || len(calls) != 1 || calls[0].InputTokens != 10 {
+		t.Fatalf("first read: %v %+v", err, calls)
+	}
+	f, err := os.OpenFile(filepath.Join(root, claudeSlug(cwd), "s1.jsonl"), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"type":"assistant","cwd":"/test/proj","sessionId":"s1","timestamp":"2026-06-27T10:00:10Z","message":{"model":"m","usage":{"input_tokens":30,"output_tokens":2}}}` + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	calls, err = r.ReadForCWD(cwd)
+	if err != nil || len(calls) != 1 {
+		t.Fatalf("second read: %v (%d calls)", err, len(calls))
+	}
+	if calls[0].InputTokens != 40 || calls[0].OutputTokens != 7 {
+		t.Fatalf("tokens after append = %d/%d, want 40/7", calls[0].InputTokens, calls[0].OutputTokens)
+	}
+	// Re-reading without changes must serve the cached parse unchanged (the
+	// merge copies, so cached state is not corrupted by prior reads).
+	calls, err = r.ReadForCWD(cwd)
+	if err != nil || len(calls) != 1 || calls[0].InputTokens != 40 {
+		t.Fatalf("cached read: %v %+v", err, calls)
+	}
+}
+
 func TestClaudeReaderMissingDir(t *testing.T) {
 	calls, err := Claude(t.TempDir()).ReadForCWD("/nope")
 	if err != nil || len(calls) != 0 {

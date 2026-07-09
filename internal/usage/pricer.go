@@ -115,6 +115,36 @@ func (p *Pricer) Origin() (source string, at time.Time) {
 	return p.r.Origin()
 }
 
+// ListedModel is one price-table row for `council cost models`, in per-token
+// units like Rate.
+type ListedModel struct {
+	Name                string
+	InputPerToken       float64
+	OutputPerToken      float64
+	CacheCreatePerToken float64
+	CacheReadPerToken   float64
+}
+
+// Models returns every model in the active price table, sorted by name, so
+// users can discover the canonical name to alias an unpriced selector to.
+func (p *Pricer) Models() []ListedModel {
+	if p == nil {
+		return nil
+	}
+	src := p.r.Models()
+	out := make([]ListedModel, len(src))
+	for i, m := range src {
+		out[i] = ListedModel{
+			Name: m.Name, InputPerToken: m.Costs.Input, OutputPerToken: m.Costs.Output,
+			CacheCreatePerToken: m.Costs.CacheWrite, CacheReadPerToken: m.Costs.CacheRead,
+		}
+	}
+	return out
+}
+
+// BuiltinAliases returns the built-in selector->canonical model alias map.
+func BuiltinAliases() map[string]string { return pricing.BuiltinAliases() }
+
 // RefreshPrices fetches the LiteLLM price table into the on-disk cache under dir.
 func RefreshPrices(ctx context.Context, dir string, now time.Time) error {
 	return pricing.RefreshCache(ctx, dir, now)

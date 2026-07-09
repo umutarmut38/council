@@ -259,10 +259,16 @@ type Model struct {
 	usageDirty bool
 	// usageReconcileBusy guards against overlapping off-thread reconciles.
 	usageReconcileBusy bool
-	buildActive        int  // cached live build activity; updated off-thread by buildProgressResultMsg
-	buildTotal         int  // cached worktree count from the same probe
-	layoutLocked       bool // user adjusted rows/cols in settings: adaptive off
-	mouseOn            bool // mouse capture is active (Ctrl+W toggles it)
+	// usageLastReconcile is when the last sweep was armed; sweeps are throttled
+	// to usageReconcileMinGap even though the tick stays at 1s.
+	usageLastReconcile time.Time
+	// directTyped accumulates printable direct-mode keystrokes per session,
+	// metered as an estimate event when Enter submits. Update-goroutine only.
+	directTyped  map[string]string
+	buildActive  int  // cached live build activity; updated off-thread by buildProgressResultMsg
+	buildTotal   int  // cached worktree count from the same probe
+	layoutLocked bool // user adjusted rows/cols in settings: adaptive off
+	mouseOn      bool // mouse capture is active (Ctrl+W toggles it)
 	// attentionCheckPending debounces the delayed approval-prompt re-check.
 	attentionCheckPending bool
 

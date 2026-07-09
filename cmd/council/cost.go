@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/umutarmut38/council/internal/config"
@@ -18,9 +20,13 @@ import (
 //	council cost [run]            summary for a run (default: latest)
 //	council cost --since 30d      summary across recent runs
 //	council cost prices refresh   refresh the LiteLLM price cache
+//	council cost models [filter]  list known price-table models + aliases
 func councilCost(args []string) error {
 	if len(args) > 0 && args[0] == "prices" {
 		return councilCostPrices(args[1:])
+	}
+	if len(args) > 0 && args[0] == "models" {
+		return councilCostModels(args[1:])
 	}
 
 	fs, noLocal := newOrchFlagSet("council cost")
@@ -107,6 +113,99 @@ func councilCostCodeburn() error {
 	fmt.Printf("  today: %.2f  (%d calls)\n", report.Today.Cost, report.Today.Calls)
 	fmt.Printf("  month: %.2f  (%d calls)\n", report.Month.Cost, report.Month.Calls)
 	return nil
+}
+
+// councilCostModels lists the price-table models (and matching aliases) so a
+// user can find the canonical name to point usage.model_aliases at. An optional
+// arg filters by case-insensitive substring on the model or alias name.
+func councilCostModels(args []string) error {
+	fs, noLocal := newOrchFlagSet("council cost models")
+	rest, err := parseWithTrailingFlags(fs, args)
+	if err != nil {
+		return err
+	}
+	cfg, err := loadConfig(*noLocal)
+	if err != nil {
+		return err
+	}
+	pricer := usage.NewPricer(usage.PricerOptions{
+		CacheDir:       usageDir(cfg),
+		ModelAliases:   cfg.Usage.ModelAliases,
+		Prices:         toPriceProfiles(cfg.Usage.Prices),
+		StaleAfterDays: cfg.Usage.StalePriceAfterDays,
+	})
+	filter := strings.ToLower(strings.TrimSpace(strings.Join(rest, " ")))
+	fmt.Print(formatModelsList(pricer.Models(), usage.BuiltinAliases(), cfg.Usage.ModelAliases, filter))
+	if src, at := pricer.Origin(); !at.IsZero() {
+		fmt.Printf("\nprices: %s (%s)\n", src, at.Format("2006-01-02"))
+	}
+	return nil
+}
+
+// formatModelsList renders the price table and matching aliases. filter is a
+// lowercase substring ("" = everything), matched against model names and both
+// sides of each alias. Kept pure so it can be tested without a Pricer.
+func formatModelsList(models []usage.ListedModel, builtin, user map[string]string, filter string) string {
+	match := func(s string) bool { return filter == "" || strings.Contains(strings.ToLower(s), filter) }
+	mtok := func(perToken float64) string {
+		if perToken <= 0 {
+			return "--"
+		}
+		return fmt.Sprintf("%.2f", perToken*1e6)
+	}
+	var b strings.Builder
+	tw := tabwriter.NewWriter(&b, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(tw, "Model\tIn $/M\tOut $/M\tCacheW $/M\tCacheR $/M")
+	shown := 0
+	for _, m := range models {
+		if !match(m.Name) {
+			continue
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", m.Name,
+			mtok(m.InputPerToken), mtok(m.OutputPerToken), mtok(m.CacheCreatePerToken), mtok(m.CacheReadPerToken))
+		shown++
+	}
+	tw.Flush()
+	if shown == 0 {
+		// Only the model table is empty here; a matching Aliases section may still
+		// follow, so scope the message to model names rather than say "no match".
+		b.Reset()
+		fmt.Fprintf(&b, "no model names match %q\n", filter)
+	}
+
+	// Aliases: user entries win over built-ins on the same key and are marked.
+	type aliasRow struct {
+		from, to string
+		user     bool
+	}
+	seen := map[string]bool{}
+	var aliases []aliasRow
+	for from, to := range user {
+		if match(from) || match(to) {
+			aliases = append(aliases, aliasRow{from, to, true})
+		}
+		seen[from] = true
+	}
+	for from, to := range builtin {
+		if seen[from] {
+			continue
+		}
+		if match(from) || match(to) {
+			aliases = append(aliases, aliasRow{from, to, false})
+		}
+	}
+	if len(aliases) > 0 {
+		sort.Slice(aliases, func(i, j int) bool { return aliases[i].from < aliases[j].from })
+		b.WriteString("\nAliases:\n")
+		for _, a := range aliases {
+			suffix := ""
+			if a.user {
+				suffix = "  (user)"
+			}
+			fmt.Fprintf(&b, "  %s -> %s%s\n", a.from, a.to, suffix)
+		}
+	}
+	return b.String()
 }
 
 func councilCostPrices(args []string) error {

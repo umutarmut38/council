@@ -21,7 +21,14 @@ func (s *Summary) Price(p *Pricer) {
 			ses.PriceConf = Unknown
 			ses.PriceModel = UnknownValue
 			ses.PriceNote = joinNote(ses.PriceNote, "price unknown")
-			s.Hints = appendUnique(s.Hints, ses.Agent+"/"+ses.Phase+": price unknown for model "+dash(ses.Model))
+			hint := ses.Agent + "/" + ses.Phase + ": price unknown for model " + dash(ses.Model)
+			// Point at the fix, but only when there's a real name to alias. An
+			// unknown ("--") model can't be aliased — the "usage.model is not
+			// configured" hint already covers that case.
+			if ses.Model != "" && ses.Model != UnknownValue {
+				hint += `; map it in usage.model_aliases ("` + ses.Model + `: <canonical>")`
+			}
+			s.Hints = appendUnique(s.Hints, hint)
 			continue
 		}
 		c, _ := r.Cost(ses.Tokens)

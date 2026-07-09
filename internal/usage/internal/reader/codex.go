@@ -173,15 +173,27 @@ func (r codexReader) parseSession(path, cwd string) (Call, bool, error) {
 	return c, true, nil
 }
 
+// codexParsed is parseSession's memoized result (see cachedParse).
+type codexParsed struct {
+	call Call
+	ok   bool
+}
+
 func (r codexReader) ReadForCWD(cwd string) ([]Call, error) {
 	var calls []Call
 	for _, f := range r.rollouts() {
-		c, ok, err := r.parseSession(f, cwd)
+		res, err := cachedParse(f+"\x00"+cwd, f, func() (codexParsed, error) {
+			c, ok, perr := r.parseSession(f, cwd)
+			return codexParsed{call: c, ok: ok}, perr
+		})
 		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue // raced with deletion since the walk → skip
+			}
 			return nil, err
 		}
-		if ok {
-			calls = append(calls, c)
+		if res.ok {
+			calls = append(calls, res.call)
 		}
 	}
 	return calls, nil

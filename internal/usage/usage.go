@@ -637,7 +637,7 @@ func runID(events []Event) string {
 func FormatTable(s Summary) string {
 	var b strings.Builder
 	tw := tabwriter.NewWriter(&b, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "Agent\tPhase\tTool\tModel\tPriceModel\tInput\tCache\tOutput\tCost\tSource\tConfidence\tNote")
+	fmt.Fprintln(tw, "Agent\tPhase\tTool\tModel\tPriceModel\tInput\tCacheW\tCacheR\tOutput\tCost\tSource\tConfidence\tNote")
 	anyEstimated := false
 	for _, ses := range s.Sessions {
 		note := displayNote(ses)
@@ -647,9 +647,10 @@ func FormatTable(s Summary) string {
 		if ses.Cost != nil && ses.Confidence == Estimated {
 			anyEstimated = true
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			ses.Agent, ses.Phase, dash(ses.Tool), dash(ses.Model), dash(ses.PriceModel),
-			tokens(ses.Tokens.Input), cacheTokens(ses.Tokens), tokens(ses.Tokens.Output+ses.Tokens.Reasoning),
+			tokens(ses.Tokens.Input), cacheCell(ses.Tokens.CacheCreate), cacheCell(ses.Tokens.CacheRead),
+			tokens(ses.Tokens.Output+ses.Tokens.Reasoning),
 			costCell(ses.Cost, ses.Currency, ses.Confidence), dash(ses.PriceSource), dash(ses.PriceConf), dash(note))
 	}
 	// The Total cost carries ~ when it includes an estimate-derived component —
@@ -659,8 +660,9 @@ func FormatTable(s Summary) string {
 	if anyEstimated {
 		totalConf = Estimated
 	}
-	fmt.Fprintf(tw, "Total\t\t\t\t\t%s\t%s\t%s\t%s\t\t\t%s\n",
-		tokens(s.Tokens.Input), cacheTokens(s.Tokens), tokens(s.Tokens.Output+s.Tokens.Reasoning),
+	fmt.Fprintf(tw, "Total\t\t\t\t\t%s\t%s\t%s\t%s\t%s\t\t\t%s\n",
+		tokens(s.Tokens.Input), cacheCell(s.Tokens.CacheCreate), cacheCell(s.Tokens.CacheRead),
+		tokens(s.Tokens.Output+s.Tokens.Reasoning),
 		costCell(s.Cost, s.Currency, totalConf), dash(s.Note))
 	tw.Flush()
 	if len(s.Hints) > 0 {
@@ -763,11 +765,11 @@ func tokens(n int) string {
 	return fmt.Sprintf("%d", n)
 }
 
-// cacheTokens renders a row's cached input (read + write). The Input column is
-// FRESH input only, so without this column two sessions with identical real
-// usage but different cache hits look inexplicably different.
-func cacheTokens(t TokenTotals) string {
-	n := t.CacheRead + t.CacheCreate
+// cacheCell renders one cached-input count (CacheW = cache writes, CacheR =
+// cache reads). The Input column is FRESH input only, and writes bill at 1.25x
+// input while reads bill at 0.1x, so lumping them into one Cache column made
+// costs look wrong (58k "cache" at the read rate is ~$0.006, not $0.044).
+func cacheCell(n int) string {
 	if n == 0 {
 		return "--"
 	}

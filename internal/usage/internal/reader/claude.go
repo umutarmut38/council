@@ -96,13 +96,64 @@ func (r claudeReader) ReadForCWD(cwd string) ([]Call, error) {
 	if err != nil {
 		return nil, err
 	}
-	st := newClaudeScan()
+	total := newClaudeScan()
 	for _, f := range files {
-		if err := r.scanFile(f, cwd, st); err != nil {
+		// Parse each file through the size+mtime cache: the reconcile sweep runs
+		// every few seconds and most transcripts are finished sessions.
+		part, err := cachedParse(f+"\x00"+cwd, f, func() (*claudeScan, error) {
+			st := newClaudeScan()
+			if err := r.scanFile(f, cwd, st); err != nil {
+				return nil, err
+			}
+			return st, nil
+		})
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue // file raced with deletion since the glob → skip it
+			}
 			return nil, err
 		}
+		total.merge(part)
 	}
-	return st.calls(), nil
+	return total.calls(), nil
+}
+
+// merge deep-copies o's accumulated calls and session metadata into s. Cached
+// scans are shared across sweeps, so nothing in o may be mutated. Summing per
+// (session, model) key reproduces the old cross-file accumulation; the one
+// delta is that curModel no longer threads across files mid-session — in
+// practice one file is one session.
+func (s *claudeScan) merge(o *claudeScan) {
+	for _, k := range o.order {
+		oc := *o.byKey[k]
+		c := s.byKey[k]
+		if c == nil {
+			s.byKey[k] = &oc
+			s.order = append(s.order, k)
+			continue
+		}
+		c.InputTokens += oc.InputTokens
+		c.OutputTokens += oc.OutputTokens
+		c.CacheCreate += oc.CacheCreate
+		c.CacheRead += oc.CacheRead
+	}
+	for id, om := range o.meta {
+		m := s.meta[id]
+		if m == nil {
+			cp := *om
+			s.meta[id] = &cp
+			continue
+		}
+		if m.first.IsZero() || (!om.first.IsZero() && om.first.Before(m.first)) {
+			m.first = om.first
+		}
+		if om.last.After(m.last) {
+			m.last = om.last
+		}
+		if m.userMsg == "" {
+			m.userMsg = om.userMsg
+		}
+	}
 }
 
 func (r claudeReader) scanFile(path, cwd string, st *claudeScan) error {

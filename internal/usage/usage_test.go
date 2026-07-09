@@ -44,6 +44,36 @@ func TestCostJPYNoDecimals(t *testing.T) {
 	}
 }
 
+// Cache writes ($1.25/M-class rates) and reads ($0.10/M-class) are priced an
+// order of magnitude apart, so the /cost table shows them as separate CacheW /
+// CacheR columns rather than one lumped Cache figure.
+func TestFormatTableSplitsCacheWriteAndRead(t *testing.T) {
+	out := FormatTable(Summary{
+		Sessions: []SessionTotal{
+			{Agent: "claude", Phase: "session", Confidence: Reported,
+				Tokens: TokenTotals{Input: 20, Output: 486, CacheCreate: 30648, CacheRead: 27374}},
+		},
+		Tokens: TokenTotals{Input: 20, Output: 486, CacheCreate: 30648, CacheRead: 27374},
+	})
+	header := strings.SplitN(out, "\n", 2)[0]
+	if !strings.Contains(header, "CacheW") || !strings.Contains(header, "CacheR") || strings.Contains(header, "Cache ") {
+		t.Fatalf("header = %q, want separate CacheW and CacheR columns", header)
+	}
+	for _, prefix := range []string{"claude", "Total"} {
+		for _, want := range []string{"30.6k", "27.4k"} {
+			ok := false
+			for _, l := range strings.Split(out, "\n") {
+				if strings.HasPrefix(l, prefix) && strings.Contains(l, want) {
+					ok = true
+				}
+			}
+			if !ok {
+				t.Fatalf("%s row missing %s:\n%s", prefix, want, out)
+			}
+		}
+	}
+}
+
 // The /cost table Cost column carries the ~ estimate prefix for a still-estimated
 // row (e.g. Copilot before it reports on exit); the Total is estimated whenever
 // any session is.
@@ -299,5 +329,24 @@ func TestLoadEventsMissingFile(t *testing.T) {
 	evs, err := LoadEvents(t.TempDir())
 	if err != nil || evs != nil {
 		t.Fatalf("missing file should be empty/no-error, got %v / %v", evs, err)
+	}
+}
+
+func TestPriceUnknownHintSuggestsAlias(t *testing.T) {
+	s := Summary{Sessions: []SessionTotal{
+		{Agent: "copilot-planner", Phase: "session", Model: "made-up-model-xyz", Tokens: TokenTotals{Input: 100}},
+		{Agent: "mystery", Phase: "session", Model: "", Tokens: TokenTotals{Input: 100}},
+	}}
+	s.Price(NewPricer(PricerOptions{}))
+	joined := strings.Join(s.Hints, "\n")
+	// Known but unpriced name → point at the remedy with the offending name.
+	if !strings.Contains(joined, `map it in usage.model_aliases ("made-up-model-xyz: <canonical>")`) {
+		t.Fatalf("hint should name the alias remedy:\n%s", joined)
+	}
+	// Unknown ("--") model can't be aliased → no alias remedy for that row.
+	for _, h := range s.Hints {
+		if strings.HasPrefix(h, "mystery/") && strings.Contains(h, "model_aliases") {
+			t.Fatalf("unknown-model hint should not suggest an alias: %q", h)
+		}
 	}
 }
