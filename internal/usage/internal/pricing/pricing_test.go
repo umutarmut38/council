@@ -219,6 +219,24 @@ func TestVersionDotNormalization(t *testing.T) {
 	}
 }
 
+func TestDashedVersion(t *testing.T) {
+	cases := map[string]string{
+		"claude-haiku-4.5": "claude-haiku-4-5",
+		"gpt-5.4-mini":     "gpt-5-4-mini",
+		"foo-4.5.1":        "foo-4-5-1", // consecutive parts fully convert
+		"v1.2.3-rc":        "v1-2-3-rc",
+		"no-version-here":  "no-version-here",
+		"ends.":            "ends.",   // trailing dot, no digit after
+		".5-lead":          ".5-lead", // leading dot, no digit before
+		"a.b":              "a.b",     // non-digit neighbors untouched
+	}
+	for in, want := range cases {
+		if got := dashedVersion(in); got != want {
+			t.Errorf("dashedVersion(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestModelsEnumeration(t *testing.T) {
 	models := New(Options{}).Models()
 	if len(models) < 100 {

@@ -40,9 +40,16 @@ func TestFormatModelsList(t *testing.T) {
 		t.Fatalf("zero cache rate should show --:\n%s", full)
 	}
 
-	// A miss reports it and lists no aliases.
+	// A total miss reports it (scoped to model names) and lists no aliases.
 	miss := formatModelsList(models, builtin, user, "no-such-model")
-	if !strings.Contains(miss, "no models match") || strings.Contains(miss, "Aliases:") {
+	if !strings.Contains(miss, "no model names match") || strings.Contains(miss, "Aliases:") {
 		t.Fatalf("miss output wrong:\n%s", miss)
+	}
+
+	// Filter matching only an alias key still lists that alias below the
+	// model-name miss (the message must not claim a total miss).
+	aliasOnly := formatModelsList(models, map[string]string{"claude-4.5-haiku": "claude-haiku-4-5"}, nil, "4.5-haiku")
+	if !strings.Contains(aliasOnly, "no model names match") || !strings.Contains(aliasOnly, "Aliases:") {
+		t.Fatalf("alias-only filter should show the model-name miss + the alias:\n%s", aliasOnly)
 	}
 }

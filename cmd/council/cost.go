@@ -167,8 +167,10 @@ func formatModelsList(models []usage.ListedModel, builtin, user map[string]strin
 	}
 	tw.Flush()
 	if shown == 0 {
+		// Only the model table is empty here; a matching Aliases section may still
+		// follow, so scope the message to model names rather than say "no match".
 		b.Reset()
-		fmt.Fprintf(&b, "no models match %q\n", filter)
+		fmt.Fprintf(&b, "no model names match %q\n", filter)
 	}
 
 	// Aliases: user entries win over built-ins on the same key and are marked.

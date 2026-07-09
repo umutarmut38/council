@@ -71,16 +71,22 @@ type UserPrice struct {
 }
 
 var (
-	reDate       = regexp.MustCompile(`-\d{8}$`)
-	reProvider   = regexp.MustCompile(`^[^/]+/`)
-	reVersionDot = regexp.MustCompile(`(\d)\.(\d)`)
+	reDate     = regexp.MustCompile(`-\d{8}$`)
+	reProvider = regexp.MustCompile(`^[^/]+/`)
 )
 
 // dashedVersion rewrites a dotted version selector to the dashed form the price
-// tables use: "claude-haiku-4.5" -> "claude-haiku-4-5". Returns the input
-// unchanged when there's no dotted version.
+// tables use: "claude-haiku-4.5" -> "claude-haiku-4-5". A "." becomes "-" only
+// between two digits, so it leaves non-version dots alone and, unlike a
+// non-overlapping regex, fully converts consecutive parts ("4.5.1" -> "4-5-1").
 func dashedVersion(model string) string {
-	return reVersionDot.ReplaceAllString(model, "$1-$2")
+	b := []byte(model)
+	for i := 1; i < len(b)-1; i++ {
+		if b[i] == '.' && b[i-1] >= '0' && b[i-1] <= '9' && b[i+1] >= '0' && b[i+1] <= '9' {
+			b[i] = '-'
+		}
+	}
+	return string(b)
 }
 
 // safePerTokenRate clamps a rate to a sane non-negative value, rejecting
