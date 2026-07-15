@@ -29,17 +29,17 @@ council only knows what it can observe locally, so cost is built in two layers,
 and every number carries a **confidence**:
 
 1. **Estimated floor.** Council prices each prompt immediately with a local
-  estimator (`bytes4` — roughly 4 bytes per token — or `runes4`). Input is
-  measured from the prompt the model actually sees (personality prefix + your
-  text), *not* the terminal control bytes on the wire. Output is the transcript
-  delta, flushed at the next prompt, `/save`, or pane termination. This lower
-  bound is shown as **estimated**.
+   estimator (`bytes4` — roughly 4 bytes per token — or `runes4`). Input is
+   measured from the prompt the model actually sees (personality prefix + your
+   text), *not* the terminal control bytes on the wire. Output is the transcript
+   delta, flushed at the next prompt, `/save`, or pane termination. This lower
+   bound is shown as **estimated**.
 2. **Reported totals.** When you request `/cost`, or after the TUI exits, council
-  reads each declared `usage.tool` CLI's *own* session files (Claude Code,
-  Codex, Copilot, opencode; cursor-agent records no token counts) and reconciles
-  the real numbers over the estimate, shown as **reported**. Cached/reused
-  context is kept in its own column and priced at the cheaper cache-read rate
-  rather than double-charged as fresh input.
+   reads each declared `usage.tool` CLI's *own* session files (Claude Code,
+   Codex, Copilot, opencode; cursor-agent records no token counts) and reconciles
+   the real numbers over the estimate, shown as **reported**. Cached/reused
+   context is kept in its own column and priced at the cheaper cache-read rate
+   rather than double-charged as fresh input.
 
 council never guesses an agent's tool or model from its `command` — set
 `usage.tool` and `usage.model` explicitly, or the row stays an estimate. An

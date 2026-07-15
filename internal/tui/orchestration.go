@@ -702,7 +702,9 @@ func (m *Model) resumeRun(stamp string) tea.Cmd {
 	if err != nil {
 		return rollback(err)
 	}
-	m.flushUsageOutputs()
+	if err := m.flushUsageOutputs(); err != nil {
+		return rollback(fmt.Errorf("usage: %w", err))
+	}
 	if target.Phase != "" {
 		cmd, err := m.resumePhase(target, transcripts)
 		if err != nil {
@@ -776,7 +778,10 @@ func (m *Model) beginPhase(label string, phase config.Phase, prompts map[string]
 		m.Status = err.Error()
 		return false
 	}
-	m.flushUsageOutputs()
+	if err := m.flushUsageOutputs(); err != nil {
+		m.Status = "usage: " + err.Error()
+		return false
+	}
 	sessions := m.orch.PhaseSessions(phase, store, prompts)
 	if err := m.orch.SaveActivePhase(phase, m.orch.AgentsForPhase(phase), false); err != nil {
 		m.Status = err.Error()

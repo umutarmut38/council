@@ -33,6 +33,21 @@ func TestStartFailureCompletesLifecycle(t *testing.T) {
 	}
 }
 
+func TestOutputAcknowledgementRetainsOnlyPendingSuffix(t *testing.T) {
+	s := NewSession("a", config.AgentConfig{}, "")
+	s.emitOutput(func(_ string, _ []byte, _ int64) {}, []byte("first"))
+	s.emitOutput(func(_ string, _ []byte, _ int64) {}, []byte("second"))
+	s.AckOutput(5)
+	data, end := s.PendingOutput()
+	if string(data) != "second" || end != 11 {
+		t.Fatalf("pending = %q @ %d, want second @ 11", data, end)
+	}
+	s.AckOutput(end)
+	if data, _ := s.PendingOutput(); len(data) != 0 {
+		t.Fatalf("pending output remained after ack: %q", data)
+	}
+}
+
 // TestEnableRawLogIsDeferredAndIdempotent covers the lazy raw-log path used when
 // the interactive run directory is created on the first prompt: a session starts
 // with no log, EnableRawLog wires one up, and repeat calls are no-ops.

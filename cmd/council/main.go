@@ -218,6 +218,7 @@ func launchTUIWithTranscripts(sessions []*agent.Session, store *runstore.Store, 
 			session.WaitDone(remaining)
 		}
 		if fm, ok := final.(tui.Model); ok {
+			fm.RecoverFinalOutput()
 			fm.FinalizeUsage()
 		}
 	}()
@@ -242,8 +243,8 @@ func launchTUIWithTranscripts(sessions []*agent.Session, store *runstore.Store, 
 		}
 		sessionsMu.Unlock()
 		if err := s.Start(
-			func(name string, data []byte) {
-				program.Send(tui.AgentOutputMsg{Name: name, Session: s, Data: data})
+			func(name string, data []byte, end int64) {
+				program.Send(tui.AgentOutputMsg{Name: name, Session: s, Data: data, End: end})
 			},
 			func(name string, exitCode *int, err error) {
 				program.Send(tui.AgentExitMsg{Name: name, Session: s, ExitCode: exitCode, Err: err})

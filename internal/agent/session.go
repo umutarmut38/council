@@ -14,7 +14,7 @@ import (
 	"github.com/umutarmut38/council/internal/config"
 )
 
-type OutputFunc func(name string, data []byte)
+type OutputFunc func(name string, data []byte, end int64)
 type ExitFunc func(name string, exitCode *int, err error)
 
 // ptyConn is the platform-specific pseudo-terminal backing a Session. Unix
@@ -56,6 +56,11 @@ type Session struct {
 	started     bool
 	stopping    bool
 	processDone bool
+
+	outputMu      sync.Mutex
+	outputBase    int64
+	outputEnd     int64
+	outputPending []byte
 
 	// Until EnableRawLog attaches a file (the interactive run dir is created
 	// lazily on the first prompt), pre-prompt PTY output — banners, auth
@@ -163,6 +168,57 @@ func (s *Session) Start(onOutput OutputFunc, onExit ExitFunc) error {
 func (s *Session) failStart() {
 	s.finish(nil)
 	s.doneOnce.Do(func() { close(s.doneCh) })
+}
+
+// AckOutput releases emitted bytes through end after Bubble Tea has applied
+// the corresponding output message to the model.
+func (s *Session) AckOutput(end int64) {
+	s.outputMu.Lock()
+	defer s.outputMu.Unlock()
+	if end <= s.outputBase {
+		return
+	}
+	if end > s.outputEnd {
+		end = s.outputEnd
+	}
+	drop := end - s.outputBase
+	if drop >= int64(len(s.outputPending)) {
+		s.outputPending = nil
+	} else {
+		s.outputPending = append([]byte(nil), s.outputPending[drop:]...)
+	}
+	s.outputBase = end
+}
+
+func (s *Session) OutputAcknowledged(end int64) bool {
+	s.outputMu.Lock()
+	defer s.outputMu.Unlock()
+	return end <= s.outputBase
+}
+
+// PendingOutput returns the emitted suffix Bubble Tea has not acknowledged.
+func (s *Session) PendingOutput() (data []byte, end int64) {
+	s.outputMu.Lock()
+	defer s.outputMu.Unlock()
+	return append([]byte(nil), s.outputPending...), s.outputEnd
+}
+
+// TrackOutput retains output until the consumer acknowledges the returned end
+// offset. Session.run uses this before invoking its output callback.
+func (s *Session) TrackOutput(data []byte) int64 {
+	s.outputMu.Lock()
+	defer s.outputMu.Unlock()
+	s.outputPending = append(s.outputPending, data...)
+	s.outputEnd += int64(len(data))
+	return s.outputEnd
+}
+
+func (s *Session) emitOutput(onOutput OutputFunc, data []byte) {
+	if onOutput == nil || len(data) == 0 {
+		return
+	}
+	end := s.TrackOutput(data)
+	onOutput(s.Name, data, end)
 }
 
 // EnableRawLog opens the raw PTY log once the run directory exists, turning on
@@ -389,9 +445,7 @@ func (s *Session) run(onOutput OutputFunc, onExit ExitFunc) {
 	go func() {
 		defer close(fwdDone)
 		coalesceOutput(chunks, maxCoalesceBytes, func(b []byte) {
-			if onOutput != nil {
-				onOutput(s.Name, b)
-			}
+			s.emitOutput(onOutput, b)
 		})
 	}()
 

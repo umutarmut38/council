@@ -231,6 +231,43 @@ func TestFinalizeUsageFlushesTranscriptOutput(t *testing.T) {
 	}
 }
 
+func TestRecoverFinalOutputPersistsUnacknowledgedSuffix(t *testing.T) {
+	cfg := config.Config{
+		Usage:  usageConfigOn(),
+		Agents: map[string]config.AgentConfig{"a": {Command: []string{"tool"}}},
+	}
+	cfg.Normalize()
+	store := runstore.NewDeferred(t.TempDir(), nil, nil)
+	if err := store.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	session := agent.NewSession("a", cfg.Agents["a"], "")
+	m := NewModelWithConfig([]*agent.Session{session}, store, cfg, "", nil, 0, nil, nil)
+	defer session.Terminate()
+
+	// Bubble Tea processed and acknowledged the first chunk.
+	first := []byte("first output\n")
+	firstEnd := session.TrackOutput(first)
+	updated, _ := m.update(AgentOutputMsg{Name: "a", Session: session, Data: first, End: firstEnd})
+	m = updated.(Model)
+	if err := m.flushUsageOutputs(); err != nil {
+		t.Fatal(err)
+	}
+	// The session emitted a second chunk after Program.Run stopped. It remains
+	// unacknowledged and must be recovered by the final model.
+	session.TrackOutput([]byte("shutdown tail\n"))
+	m.RecoverFinalOutput()
+	m.RecoverFinalOutput()
+
+	events, err := usage.LoadEvents(store.RunDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("recovered events = %+v, want first output plus one shutdown tail", events)
+	}
+}
+
 func TestUsageTickOnlyRearmsHeartbeat(t *testing.T) {
 	m := Model{Config: config.Config{Usage: usageConfigOn()}}
 	updated, cmd := m.update(usageTickMsg{})
@@ -558,7 +595,8 @@ func TestCostSnapshotFlushesPendingOutputAndStalesOnNewOutput(t *testing.T) {
 	session := agent.NewSession("a", cfg.Agents["a"], "")
 	m := NewModelWithConfig([]*agent.Session{session}, store, cfg, "", nil, 0, nil, nil)
 	defer session.Terminate()
-	m.appendOutput(m.Agents[0], "visible before cost\n")
+	queued := []byte("queued before cost\n")
+	queuedEnd := session.TrackOutput(queued)
 
 	cmd := m.cmdCost()
 	if cmd == nil {
@@ -571,8 +609,14 @@ func TestCostSnapshotFlushesPendingOutputAndStalesOnNewOutput(t *testing.T) {
 	if len(events) != 1 || events[0].Source != usage.SourceTranscript {
 		t.Fatalf("pending output was not flushed at cost boundary: %+v", events)
 	}
+	// Delivery of the already-acknowledged message must not duplicate or stale
+	// the snapshot.
+	updated, _ := m.update(AgentOutputMsg{Name: "a", Session: session, Data: queued, End: queuedEnd})
+	m = updated.(Model)
 	result := cmd().(costViewMsg)
-	updated, _ := m.update(AgentOutputMsg{Name: "a", Session: session, Data: []byte("arrived during cost\n")})
+	late := []byte("arrived during cost\n")
+	lateEnd := session.TrackOutput(late)
+	updated, _ = m.update(AgentOutputMsg{Name: "a", Session: session, Data: late, End: lateEnd})
 	afterOutput := updated.(Model)
 	updated, _ = afterOutput.update(result)
 	final := updated.(Model)

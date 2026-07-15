@@ -52,6 +52,7 @@ type AgentOutputMsg struct {
 	Name    string
 	Session *agent.Session
 	Data    []byte
+	End     int64
 }
 
 type AgentExitMsg struct {
@@ -560,17 +561,26 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case AgentOutputMsg:
+		if msg.End > 0 && msg.Session.OutputAcknowledged(msg.End) {
+			return m, nil
+		}
 		// The integrated editor's PTY is not in m.Agents, so route it explicitly.
 		if m.editorView != nil && msg.Session == m.editorView.Session {
 			m.appendOutput(m.editorView, string(msg.Data))
+			msg.Session.AckOutput(msg.End)
 			return m, nil
 		}
 		if view := m.findAgentForMessage(msg.Name, msg.Session); view != nil {
 			m.appendOutput(view, string(msg.Data))
-			m.usageRevision++
+			if m.Config.Usage.Enabled {
+				m.usageRevision++
+			}
+			msg.Session.AckOutput(msg.End)
 			if m.noteAttentionOutput(view) {
 				return m, m.scheduleAttentionCheck()
 			}
+		} else {
+			msg.Session.AckOutput(msg.End)
 		}
 		return m, nil
 	case attentionCheckMsg:
@@ -622,23 +632,26 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if view := m.findAgentForMessage(msg.Name, msg.Session); view != nil {
+			if err := m.recordUsageOutput(view); err != nil {
+				m.Status = "usage: " + err.Error()
+			}
 			if msg.ExitCode != nil {
 				view.Session.ExitCode = msg.ExitCode
 				view.Session.Done = true
-				m.appendOutput(view, fmt.Sprintf("\n[%s exited with code %d]\n", msg.Name, *msg.ExitCode))
+				m.appendSystemOutput(view, fmt.Sprintf("\n[%s exited with code %d]\n", msg.Name, *msg.ExitCode))
 			} else {
 				view.Session.Done = true
-				m.appendOutput(view, fmt.Sprintf("\n[%s exited]\n", msg.Name))
+				m.appendSystemOutput(view, fmt.Sprintf("\n[%s exited]\n", msg.Name))
 			}
 			if msg.Err != nil {
-				m.appendOutput(view, "exit error: "+msg.Err.Error()+"\n")
+				m.appendSystemOutput(view, "exit error: "+msg.Err.Error()+"\n")
 			}
 		}
 		return m, nil
 	case AgentStartErrorMsg:
 		if view := m.findAgentForMessage(msg.Name, msg.Session); view != nil {
 			view.Session.MarkStartError(msg.Err)
-			m.appendOutput(view, "start error: "+msg.Err.Error()+"\n")
+			m.appendSystemOutput(view, "start error: "+msg.Err.Error()+"\n")
 			m.Status = msg.Name + " failed to start"
 		}
 		return m, nil
@@ -840,8 +853,15 @@ func (m Model) View() string {
 
 func (m *Model) appendOutput(view *agentView, chunk string) {
 	text := cleanTranscriptOutput(chunk)
-	view.addUsageOutput(text, m.Config.Usage.Estimator)
+	if m.Config.Usage.Enabled {
+		view.addUsageOutput(text, m.Config.Usage.Estimator)
+	}
 	view.appendCleanTranscript(text, m.MaxScrollback)
+	view.applyTerminal(chunk)
+}
+
+func (m *Model) appendSystemOutput(view *agentView, chunk string) {
+	view.appendCleanTranscript(cleanTranscriptOutput(chunk), m.MaxScrollback)
 	view.applyTerminal(chunk)
 }
 
@@ -1032,7 +1052,9 @@ func (m *Model) saveTranscripts() error {
 		if err := m.Store.SaveTranscript(view.Session.Name, content); err != nil {
 			return err
 		}
-		m.recordUsageOutput(view)
+		if err := m.recordUsageOutput(view); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1049,7 +1071,28 @@ func (v *agentView) transcript() string {
 // FlushUsage persists transcript deltas from the final model before the launch
 // layer terminates every session it has registered.
 func (m *Model) FlushUsage() {
-	m.flushUsageOutputs()
+	_ = m.flushUsageOutputs()
+}
+
+// RecoverFinalOutput ingests session output emitted after Program.Run stopped
+// accepting messages, then persists the corresponding usage delta.
+func (m *Model) RecoverFinalOutput() {
+	m.recoverPendingOutput()
+	_ = m.flushUsageOutputs()
+}
+
+func (m *Model) recoverPendingOutput() {
+	for _, view := range m.Agents {
+		data, end := view.Session.PendingOutput()
+		if len(data) == 0 {
+			continue
+		}
+		m.appendOutput(view, string(data))
+		view.Session.AckOutput(end)
+		if m.Config.Usage.Enabled {
+			m.usageRevision++
+		}
+	}
 }
 
 func (m *Model) focusByName(name string) {

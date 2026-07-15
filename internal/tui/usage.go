@@ -44,7 +44,7 @@ func (m Model) FinalizeUsage() {
 	// Flush those deltas here so reader-less tools do not lose their final output.
 	// This is idempotent when terminateAgents already flushed them: the shared
 	// usageOutputSeen map suppresses a duplicate event.
-	m.flushUsageOutputs()
+	_ = m.flushUsageOutputs()
 	runDir := m.activeUsageRunDir()
 	if runDir == "" {
 		return
@@ -350,9 +350,9 @@ func (m *Model) recordUsageInputAs(s *agent.Session, phase, userText, agentPromp
 // recorded by THIS process (see usageOutputSeen). Flushed at turn boundaries
 // (before each new prompt), on manual /save, and when the panes terminate — so
 // reader-less tools get an output floor without anyone pressing save.
-func (m *Model) recordUsageOutput(view *agentView) {
+func (m *Model) recordUsageOutput(view *agentView) error {
 	if !m.Config.Usage.Enabled || m.Store == nil || m.Store.RunDir == "" || m.usageOutputSeen == nil {
-		return
+		return nil
 	}
 	est := usage.EstimatorFor(m.Config.Usage.Estimator)
 	s := view.Session
@@ -360,7 +360,7 @@ func (m *Model) recordUsageOutput(view *agentView) {
 	total := totalChars / 4
 	delta := total - m.usageOutputSeen[s]
 	if delta <= 0 {
-		return
+		return nil
 	}
 	a := m.Config.Agents[s.Name]
 	tool, toolSource, toolConf := usageTool(a)
@@ -382,16 +382,19 @@ func (m *Model) recordUsageOutput(view *agentView) {
 		ev.PromptPreview = usage.PromptPreview(agentPrompt)
 	}
 	if err := m.recordUsageEvent(ev); err != nil {
-		m.Status = "usage: " + err.Error()
-		return
+		return err
 	}
 	m.usageOutputSeen[s] = total
+	return nil
 }
 
-func (m *Model) flushUsageOutputs() {
+func (m *Model) flushUsageOutputs() error {
 	for _, view := range m.Agents {
-		m.recordUsageOutput(view)
+		if err := m.recordUsageOutput(view); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // usageHeaderCost is the compact run total for the status line.
@@ -700,9 +703,15 @@ func (m *Model) cmdCost() tea.Cmd {
 		return nil
 	}
 	// Establish the snapshot boundary before capturing the revision: output
-	// already visible in panes belongs in this scan, while output arriving after
-	// this point increments usageRevision in AgentOutputMsg and stales the result.
-	m.flushUsageOutputs()
+	// already emitted belongs in this scan, even if its Bubble Tea message is
+	// still queued. Those messages are acknowledged here and become no-ops when
+	// dequeued; output emitted afterward increments the revision and stales the
+	// result.
+	m.recoverPendingOutput()
+	if err := m.flushUsageOutputs(); err != nil {
+		m.Status = "cost: pending usage: " + err.Error()
+		return nil
+	}
 	pricer := m.usagePricer
 	var pricerOptions usage.PricerOptions
 	if pricer == nil {
