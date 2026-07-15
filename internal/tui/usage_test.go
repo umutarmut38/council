@@ -132,6 +132,68 @@ func TestRestartClearsDirectInputForOldSession(t *testing.T) {
 	defer m.Agents[0].Session.Terminate()
 }
 
+func TestRestartPreservesOutputAfterLedgerFailure(t *testing.T) {
+	cfg := config.Config{
+		Usage:  usageConfigOn(),
+		Agents: map[string]config.AgentConfig{"a": {Command: []string{"tool"}}},
+	}
+	cfg.Normalize()
+	store := runstore.NewDeferred(t.TempDir(), nil, nil)
+	if err := store.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	old := agent.NewSession("a", cfg.Agents["a"], "")
+	m := NewModelWithConfig([]*agent.Session{old}, store, cfg, "", nil, 0, nil, nil)
+	m.appendOutput(m.Agents[0], "output pending across restart\n")
+
+	eventsPath := filepath.Join(store.RunDir, "usage", "events.jsonl")
+	if err := os.MkdirAll(eventsPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m.cmdRestart("a")
+	fresh := m.Agents[0].Session
+	defer fresh.Terminate()
+	if m.Agents[0].usageOutputUnits == 0 {
+		t.Fatal("restart discarded output after failed ledger append")
+	}
+	if err := os.Remove(eventsPath); err != nil {
+		t.Fatal(err)
+	}
+	m.flushUsageOutputs()
+
+	events, err := usage.LoadEvents(store.RunDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Source != usage.SourceTranscript {
+		t.Fatalf("restart retry events = %+v, want one transcript event", events)
+	}
+}
+
+func TestDirectModeFailedRunSetupClearsSubmittedLine(t *testing.T) {
+	root := t.TempDir()
+	blockedRoot := filepath.Join(root, "not-a-directory")
+	if err := os.WriteFile(blockedRoot, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{
+		Usage:    usageConfigOn(),
+		Sessions: config.SessionConfig{RootDir: blockedRoot},
+		Agents:   map[string]config.AgentConfig{"a": {Command: []string{"tool"}}},
+	}
+	cfg.Normalize()
+	session := agent.NewSession("a", cfg.Agents["a"], "")
+	m := NewModelWithConfig([]*agent.Session{session}, runstore.NewDeferred(blockedRoot, nil, nil), cfg, "", nil, 0, nil, nil)
+	m.InputMode = InputDirect
+	m.directTyped[session] = "already sent line"
+
+	updated, _ := m.handleDirectKey(tea.KeyMsg{Type: tea.KeyEnter})
+	next := updated.(Model)
+	if _, ok := next.directTyped[session]; ok {
+		t.Fatal("failed run setup retained a line already submitted to the PTY")
+	}
+}
+
 func usageConfigOn() config.UsageConfig {
 	return config.UsageConfig{Enabled: true, Estimator: usage.EstimatorBytes4}
 }

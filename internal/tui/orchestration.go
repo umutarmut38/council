@@ -787,7 +787,6 @@ func (m *Model) beginPhase(label string, phase config.Phase, prompts map[string]
 	m.Target = TargetAll
 	m.Store = store
 	m.setUsageRun(store.RunDir)
-	m.Store = store
 	m.pendingBuild = nil               // any new phase invalidates a staged build
 	m.phasePrompts = nil               // and the prompts /resend would repeat
 	m.buildActive, m.buildTotal = 0, 0 // stale build activity must not leak across phases

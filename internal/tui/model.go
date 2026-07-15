@@ -846,7 +846,7 @@ func (m *Model) appendOutput(view *agentView, chunk string) {
 
 func (v *agentView) addUsageOutput(text, estimator string) {
 	if estimator != usage.EstimatorRunes4 {
-		v.usageOutputUnits += len([]byte(text))
+		v.usageOutputUnits += len(text)
 		return
 	}
 	data := append(v.usageUTF8Tail, []byte(text)...)

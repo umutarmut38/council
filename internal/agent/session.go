@@ -267,6 +267,7 @@ func (s *Session) MarkStartError(err error) {
 	s.mu.Lock()
 	s.StartError = err
 	s.Done = true
+	s.processDone = true
 	s.mu.Unlock()
 	s.doneOnce.Do(func() { close(s.doneCh) })
 }

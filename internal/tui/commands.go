@@ -453,12 +453,16 @@ func (m *Model) cmdRestart(rest string) {
 	}
 	old := view.Session
 	m.recordUsageOutput(view)
+	pendingOutput := view.usageOutputUnits - m.usageOutputSeen[old]*4
+	if pendingOutput < 0 {
+		pendingOutput = 0
+	}
 	_ = old.Terminate()
 	delete(m.usageOutputSeen, old)
 	delete(m.directTyped, old)
 	fresh := agent.NewSession(old.Name, old.Config, old.RawLogPath)
 	view.Session = fresh
-	view.usageOutputUnits = 0
+	view.usageOutputUnits = pendingOutput
 	view.usageUTF8Tail = nil
 	view.PhaseDone = false
 	view.clearAttention()

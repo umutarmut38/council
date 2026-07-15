@@ -203,10 +203,10 @@ func launchTUIWithTranscripts(sessions []*agent.Session, store *runstore.Store, 
 		var terminateWG sync.WaitGroup
 		for _, session := range owned {
 			terminateWG.Add(1)
-			go func() {
+			go func(session *agent.Session) {
 				defer terminateWG.Done()
 				_ = session.Terminate()
-			}()
+			}(session)
 		}
 		terminateWG.Wait()
 		deadline := time.Now().Add(2 * time.Second)

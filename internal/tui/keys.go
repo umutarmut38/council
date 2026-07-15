@@ -258,9 +258,9 @@ func (m Model) handleDirectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.Status = "cannot start run: " + err.Error()
 				} else {
 					m.recordUsageInputAs(session, m.phase, text, text, text)
-					delete(m.directTyped, session)
 				}
 			}
+			delete(m.directTyped, session)
 		case msg.String() == "backspace":
 			m.directTyped[session] = dropLastRune(m.directTyped[session])
 		case msg.String() == "ctrl+u", msg.String() == "ctrl+c":
