@@ -38,6 +38,15 @@ func (m Model) FinalizeUsage() {
 	if !m.Config.Usage.Enabled {
 		return
 	}
+	// Program.Run can return without passing through a TUI quit handler (for
+	// example, when its input closes). The launch defer has already terminated
+	// the sessions, but the returned model still owns their rendered transcripts.
+	// Flush those deltas here so reader-less tools do not lose their final output.
+	// This is idempotent when terminateAgents already flushed them: the shared
+	// usageOutputSeen map suppresses a duplicate event.
+	for _, view := range m.Agents {
+		m.recordUsageOutput(view.Session, view.transcript())
+	}
 	runDir := ""
 	if m.orch != nil && m.orch.Run() != nil {
 		runDir = m.orch.Run().Dir

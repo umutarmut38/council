@@ -86,6 +86,39 @@ func usageConfigOn() config.UsageConfig {
 	return config.UsageConfig{Enabled: true, Estimator: usage.EstimatorBytes4}
 }
 
+func TestFinalizeUsageFlushesTranscriptOutput(t *testing.T) {
+	cfg := config.Config{
+		Usage:  usageConfigOn(),
+		Agents: map[string]config.AgentConfig{"a": {Command: []string{"tool"}}},
+	}
+	cfg.Normalize()
+	store := runstore.NewDeferred(t.TempDir(), nil, nil)
+	session := agent.NewSession("a", cfg.Agents["a"], "")
+	defer session.Terminate()
+	m := NewModelWithConfig([]*agent.Session{session}, store, cfg, "", nil, time.Millisecond, nil, nil)
+	if err := m.ensureRun(); err != nil {
+		t.Fatal(err)
+	}
+	m.Agents[0].Lines = []string{"final transcript output"}
+
+	m.FinalizeUsage()
+	m.FinalizeUsage()
+
+	events, err := usage.LoadEvents(store.RunDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var outputs int
+	for _, event := range events {
+		if event.Source == usage.SourceTranscript {
+			outputs++
+		}
+	}
+	if outputs != 1 {
+		t.Fatalf("transcript events = %d, want 1 after finalization: %+v", outputs, events)
+	}
+}
+
 func TestUsageTickOnlyRearmsHeartbeat(t *testing.T) {
 	m := Model{Config: config.Config{Usage: usageConfigOn()}}
 	updated, cmd := m.update(usageTickMsg{})

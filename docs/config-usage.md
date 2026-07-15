@@ -63,20 +63,21 @@ sub-cent costs show extra decimals (`~$0.0047`) instead of rounding to `$0.00`.
 table and a share bar of where the run's spend went:
 
 ```text
-Agent          Phase    Tool   Model         Input  Cache  Output  Cost     Source           Confidence
-codex-builder  session  codex  gpt-5.4-mini  8.8k   4.5k   36      $0.01    litellm-bundled  exact
-codex-planner  session  codex  gpt-5.4-mini  5.3k   8.1k   36      $0.0047  litellm-bundled  exact
-Total                                         14.1k  12.6k  72      $0.0147
+Agent          Phase    Tool   Model         Input  CacheW  CacheR  Output  Cost     Source           Confidence
+codex-builder  session  codex  gpt-5.4-mini  8.8k   -       4.5k    36      $0.01    litellm-bundled  exact
+codex-planner  session  codex  gpt-5.4-mini  5.3k   -       8.1k    36      $0.0047  litellm-bundled  exact
+Total                                         14.1k  -       12.6k   72      $0.0147
 
 Share:
 codex-builder  ███████████░░░░░░░░░  68%  $0.01
 codex-planner  ██████░░░░░░░░░░░░░░░  32%  $0.0047
 ```
 
-**Input** is *fresh* input only; **Cache** is the reused context, priced at the
-cache-read rate. That split is why two panes that sent nearly the same context can
-cost different amounts — above, the planner sent less fresh input and hit cache
-more, so it is cheaper despite the near-identical total. **Source** and
+**Input** is *fresh* input only; **CacheW** is context written for later reuse,
+and **CacheR** is reused context read at the cheaper cache rate. That split is why
+two panes that sent nearly the same context can cost different amounts — above,
+the planner sent less fresh input and hit cache more, so it is cheaper despite the
+near-identical total. **Source** and
 **Confidence** describe the *price* (where the rate came from and whether it was
 an exact table match), not the token counts. The header carries the run total
 (right-pinned), and while you type, the composer shows a live `~N tok` estimate of
