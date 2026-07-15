@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -76,6 +77,8 @@ type usageTickMsg struct{}
 // costViewMsg is the /cost view rendered off-thread (empty body = no usage yet).
 type costViewMsg struct {
 	stamp    string
+	runDir   string
+	request  uint64
 	body     string
 	rollup   map[string]reconciledCost
 	err      error
@@ -121,6 +124,10 @@ type agentView struct {
 
 	Lines   []string
 	Partial string
+	// usageOutputUnits is cumulative cleaned output observed from this PTY.
+	// Unlike Lines/Partial it is never trimmed with the display scrollback.
+	usageOutputUnits int
+	usageUTF8Tail    []byte
 
 	Screen    [][]screenCell
 	Width     int
@@ -243,11 +250,10 @@ type Model struct {
 	// in View.
 	usageTally map[string]usage.TokenPair
 	usageRate  map[string]usage.Rate
-	// usageOutputSeen is the transcript-token total already recorded per agent,
-	// so each flush appends only the delta. In-memory only: every TUI process
-	// starts with fresh PTY transcripts, so its deltas are relative to its own
-	// recorded output.
-	usageOutputSeen map[string]int
+	// usageOutputSeen is the transcript-token total already recorded per PTY
+	// session, so replacements of the same named agent get an independent
+	// watermark and each flush appends only that session's delta.
+	usageOutputSeen map[*agent.Session]int
 	usagePricer     *usage.Pricer
 	// usageReconciled holds per-agent priced totals from /cost, so the header/badge
 	// can show reported cost instead of only the estimated floor. A new local event
@@ -256,11 +262,14 @@ type Model struct {
 	// usageRevision changes whenever a local event advances the live estimate;
 	// an older /cost result cannot replace a newer header/badge value.
 	usageRevision uint64
+	// usageRunDir identifies the ledger represented by the live tally/snapshot.
+	usageRunDir string
 	// usageReconcileBusy guards against overlapping explicit /cost requests.
 	usageReconcileBusy bool
-	// directTyped accumulates printable direct-mode keystrokes per session,
+	usageCostRequest   uint64
+	// directTyped accumulates printable direct-mode keystrokes per PTY session,
 	// metered as an estimate event when Enter submits. Update-goroutine only.
-	directTyped  map[string]string
+	directTyped  map[*agent.Session]string
 	buildActive  int  // cached live build activity; updated off-thread by buildProgressResultMsg
 	buildTotal   int  // cached worktree count from the same probe
 	layoutLocked bool // user adjusted rows/cols in settings: adaptive off
@@ -568,14 +577,21 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case usageTickMsg:
 		return m, usageTickCmd()
 	case costViewMsg:
+		if msg.request != m.usageCostRequest {
+			return m, nil
+		}
 		m.usageReconcileBusy = false
+		if msg.runDir != m.activeUsageRunDir() || msg.revision != m.usageRevision {
+			m.Status = "cost -- result stale; run /cost again"
+			return m, nil
+		}
 		switch {
 		case msg.err != nil:
 			m.Status = "cost: " + msg.err.Error()
 		case msg.body == "":
 			m.Status = "cost -- no usage recorded yet"
 		default:
-			if msg.rollup != nil && msg.revision == m.usageRevision {
+			if msg.rollup != nil {
 				m.usageReconciled = msg.rollup
 			}
 			m.openArtifactText("cost: "+msg.stamp, msg.body)
@@ -822,12 +838,35 @@ func (m Model) View() string {
 }
 
 func (m *Model) appendOutput(view *agentView, chunk string) {
-	view.appendTranscript(chunk, m.MaxScrollback)
+	text := cleanTranscriptOutput(chunk)
+	view.addUsageOutput(text, m.Config.Usage.Estimator)
+	view.appendCleanTranscript(text, m.MaxScrollback)
 	view.applyTerminal(chunk)
 }
 
+func (v *agentView) addUsageOutput(text, estimator string) {
+	if estimator != usage.EstimatorRunes4 {
+		v.usageOutputUnits += len([]byte(text))
+		return
+	}
+	data := append(v.usageUTF8Tail, []byte(text)...)
+	v.usageUTF8Tail = nil
+	for len(data) > 0 {
+		if !utf8.FullRune(data) {
+			v.usageUTF8Tail = append([]byte(nil), data...)
+			return
+		}
+		_, size := utf8.DecodeRune(data)
+		v.usageOutputUnits++
+		data = data[size:]
+	}
+}
+
 func (v *agentView) appendTranscript(chunk string, maxScrollback int) {
-	text := cleanTranscriptOutput(chunk)
+	v.appendCleanTranscript(cleanTranscriptOutput(chunk), maxScrollback)
+}
+
+func (v *agentView) appendCleanTranscript(text string, maxScrollback int) {
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
 
@@ -992,7 +1031,7 @@ func (m *Model) saveTranscripts() error {
 		if err := m.Store.SaveTranscript(view.Session.Name, content); err != nil {
 			return err
 		}
-		m.recordUsageOutput(view.Session, content)
+		m.recordUsageOutput(view)
 	}
 	return nil
 }
@@ -1006,19 +1045,10 @@ func (v *agentView) transcript() string {
 	return strings.Join(lines, "\n")
 }
 
-func (m *Model) terminateAgents() {
-	for _, view := range m.Agents {
-		// Flush the final transcript delta before the pane dies so exit-time
-		// output isn't lost — reader-less tools have no provider store for
-		// FinalizeUsage to recover it from.
-		m.recordUsageOutput(view.Session, view.transcript())
-		_ = view.Session.Terminate()
-	}
-	// The integrated editor session is not in m.Agents; tear it down too so no
-	// editor process is leaked on quit.
-	if m.editorView != nil {
-		_ = m.editorView.Session.Terminate()
-	}
+// FlushUsage persists transcript deltas from the final model before the launch
+// layer terminates every session it has registered.
+func (m *Model) FlushUsage() {
+	m.flushUsageOutputs()
 }
 
 func (m *Model) focusByName(name string) {

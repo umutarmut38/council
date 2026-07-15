@@ -28,19 +28,30 @@ func (m *Model) cmdPlan(rest string) tea.Cmd {
 		m.Status = "usage: /plan <issue or @file>"
 		return nil
 	}
-	if err := m.orch.StartRun(issue); err != nil {
-		m.Status = "plan: " + err.Error()
+	selection := m.orch.Selection()
+	createdRun := false
+	rollback := func(message string) tea.Cmd {
+		if createdRun {
+			_ = m.orch.RemoveCurrentRun()
+		}
+		m.orch.RestoreSelection(selection)
+		m.Status = message
 		return nil
 	}
+	if err := m.orch.StartRun(issue); err != nil {
+		return rollback("plan: " + err.Error())
+	}
+	createdRun = true
 	if !m.scopePhaseOrWarn("plan") {
-		return nil
+		return rollback(m.Status)
 	}
 	prompts, err := m.orch.PlanPrompts()
 	if err != nil {
-		m.Status = "plan: " + err.Error()
-		return nil
+		return rollback("plan: " + err.Error())
 	}
-	m.beginPhase("plan", config.PhasePlan, prompts)
+	if !m.beginPhase("plan", config.PhasePlan, prompts) {
+		return rollback(m.Status)
+	}
 	m.Status = "planning — run " + m.orch.Run().Stamp
 	return m.phaseCmds(m.orch.InteractivePrompts(config.PhasePlan, prompts))
 }
@@ -88,7 +99,9 @@ func (m *Model) cmdVote() tea.Cmd {
 		m.Status = "vote: " + err.Error()
 		return nil
 	}
-	m.beginPhase("vote", config.PhaseVote, prompts)
+	if !m.beginPhase("vote", config.PhaseVote, prompts) {
+		return nil
+	}
 	m.Status = "voting on plans"
 	return m.phaseCmds(m.orch.InteractivePrompts(config.PhaseVote, prompts))
 }
@@ -126,7 +139,9 @@ func (m *Model) cmdBuild() tea.Cmd {
 		m.Status = "build: no worker agents (role: [worker]) to build"
 		return nil
 	}
-	m.beginPhase("build", config.PhaseBuild, prompts)
+	if !m.beginPhase("build", config.PhaseBuild, prompts) {
+		return nil
+	}
 	m.pendingBuild = m.orch.InteractivePrompts(config.PhaseBuild, prompts)
 	m.Status = "build ready in worktrees — adjust the tools, then /start-build"
 	return nil
@@ -188,7 +203,9 @@ func (m Model) handleReviewReady(msg reviewReadyMsg) (tea.Model, tea.Cmd) {
 		m.refreshProgress()
 		return m, nil
 	default:
-		m.beginPhase("review", config.PhaseReview, msg.prompts)
+		if !m.beginPhase("review", config.PhaseReview, msg.prompts) {
+			return m, nil
+		}
 		m.Status = fmt.Sprintf("reviewing %d builds", len(msg.survivors))
 		return m, m.phaseCmds(m.orch.InteractivePrompts(config.PhaseReview, msg.prompts))
 	}
@@ -625,7 +642,9 @@ func (m *Model) cmdRefine(note string) tea.Cmd {
 	}
 	sort.Strings(participants)
 	m.orch.SetScope(participants)
-	m.beginPhase("refine", config.PhasePlan, prompts)
+	if !m.beginPhase("refine", config.PhasePlan, prompts) {
+		return nil
+	}
 	m.Status = fmt.Sprintf("refining %d plan(s) with %s", len(participants), strings.Join(participants, ", "))
 	return m.phaseCmds(m.orch.InteractivePrompts(config.PhasePlan, prompts))
 }
@@ -669,30 +688,39 @@ func (m *Model) resumeRun(stamp string) tea.Cmd {
 		m.Status = "orchestration unavailable"
 		return nil
 	}
-	if err := m.orch.UseRun(stamp); err != nil {
+	selection := m.orch.Selection()
+	rollback := func(err error) tea.Cmd {
+		m.orch.RestoreSelection(selection)
 		m.Status = "resume: " + err.Error()
 		return nil
+	}
+	if err := m.orch.UseRun(stamp); err != nil {
+		return rollback(err)
 	}
 	transcripts := orchestrate.LoadTranscripts(m.orch.Run().Dir, m.orch.Agents())
 	target, err := m.orch.ResumeTarget()
 	if err != nil {
-		m.Status = "resume: " + err.Error()
-		return nil
+		return rollback(err)
 	}
+	m.flushUsageOutputs()
 	if target.Phase != "" {
-		return m.resumePhase(target, transcripts)
+		cmd, err := m.resumePhase(target, transcripts)
+		if err != nil {
+			return rollback(err)
+		}
+		return cmd
 	}
 
 	store, err := runstore.OpenAt(m.orch.Run().Dir, "resume")
 	if err != nil {
-		m.Status = "resume: " + err.Error()
-		return nil
+		return rollback(err)
 	}
 	sessions := m.orch.ResumeSessions(store)
 	m.InputMode = InputComposer
 	m.PromptInput = ""
 	m.Target = TargetAll
 	m.Store = store
+	m.setUsageRun(store.RunDir)
 	m.pendingBuild = nil
 	m.phase = ""
 	m.watching = nil
@@ -707,17 +735,20 @@ func (m *Model) resumeRun(stamp string) tea.Cmd {
 	return nil
 }
 
-func (m *Model) resumePhase(target orchestrate.ResumeTarget, transcripts map[string]string) tea.Cmd {
+func (m *Model) resumePhase(target orchestrate.ResumeTarget, transcripts map[string]string) (tea.Cmd, error) {
 	store, err := m.orch.Store(target.Phase)
 	if err != nil {
-		m.Status = "resume: " + err.Error()
-		return nil
+		return nil, err
 	}
 	sessions := m.orch.PhaseSessions(target.Phase, store, target.Prompts)
+	if err := m.orch.SaveActivePhase(target.Phase, target.Participants, target.SendPrompts); err != nil {
+		return nil, err
+	}
 	m.InputMode = InputComposer
 	m.PromptInput = ""
 	m.Target = TargetAll
 	m.Store = store
+	m.setUsageRun(store.RunDir)
 	m.pendingBuild = nil
 	m.ScreenMode = ScreenPanes
 	m.phase = string(target.Phase)
@@ -725,42 +756,48 @@ func (m *Model) resumePhase(target orchestrate.ResumeTarget, transcripts map[str
 	if target.PendingBuild {
 		m.pendingBuild = m.orch.InteractivePrompts(target.Phase, target.Prompts)
 	}
-	_ = m.orch.SaveActivePhase(target.Phase, target.Participants, target.SendPrompts)
 	m.Status = target.Status
 	m.refreshProgress()
 	m.replaceAgentsWithTranscripts(sessions, transcripts)
 	if target.PendingBuild {
-		return m.phaseCmds(nil)
+		return m.phaseCmds(nil), nil
 	}
 	if target.SendPrompts {
-		return m.phaseCmds(m.orch.InteractivePrompts(target.Phase, target.Prompts))
+		return m.phaseCmds(m.orch.InteractivePrompts(target.Phase, target.Prompts)), nil
 	}
-	return m.phaseCmds(nil)
+	return m.phaseCmds(nil), nil
 }
 
 // beginPhase relaunches every pane in its worktree with the phase command and
 // arms the artifact watcher for plan/vote.
-func (m *Model) beginPhase(label string, phase config.Phase, prompts map[string]string) {
+func (m *Model) beginPhase(label string, phase config.Phase, prompts map[string]string) bool {
 	store, err := m.orch.Store(phase)
 	if err != nil {
 		m.Status = err.Error()
-		return
+		return false
 	}
+	m.flushUsageOutputs()
 	sessions := m.orch.PhaseSessions(phase, store, prompts)
+	if err := m.orch.SaveActivePhase(phase, m.orch.AgentsForPhase(phase), false); err != nil {
+		m.Status = err.Error()
+		return false
+	}
 	m.InputMode = InputComposer
 	m.PromptInput = ""
 	m.Target = TargetAll
+	m.Store = store
+	m.setUsageRun(store.RunDir)
 	m.Store = store
 	m.pendingBuild = nil               // any new phase invalidates a staged build
 	m.phasePrompts = nil               // and the prompts /resend would repeat
 	m.buildActive, m.buildTotal = 0, 0 // stale build activity must not leak across phases
 	m.phase = label
 	m.watching = m.orch.ArtifactPaths(phase)
-	_ = m.orch.SaveActivePhase(phase, m.orch.AgentsForPhase(phase), false)
 	// Refresh BEFORE relaunching panes: the phase rail adds a header line, and
 	// the new PTYs must be sized for the body that will actually be rendered.
 	m.refreshProgress()
 	m.replaceAgents(sessions)
+	return true
 }
 
 func (m *Model) replaceAgents(sessions []*agent.Session) {
@@ -770,6 +807,8 @@ func (m *Model) replaceAgents(sessions []*agent.Session) {
 func (m *Model) replaceAgentsWithTranscripts(sessions []*agent.Session, transcripts map[string]string) {
 	for _, v := range m.Agents {
 		_ = v.Session.Terminate()
+		delete(m.usageOutputSeen, v.Session)
+		delete(m.directTyped, v.Session)
 	}
 	views := make([]*agentView, 0, len(sessions))
 	for _, s := range sessions {

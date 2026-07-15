@@ -44,15 +44,8 @@ func (m Model) FinalizeUsage() {
 	// Flush those deltas here so reader-less tools do not lose their final output.
 	// This is idempotent when terminateAgents already flushed them: the shared
 	// usageOutputSeen map suppresses a duplicate event.
-	for _, view := range m.Agents {
-		m.recordUsageOutput(view.Session, view.transcript())
-	}
-	runDir := ""
-	if m.orch != nil && m.orch.Run() != nil {
-		runDir = m.orch.Run().Dir
-	} else if m.Store != nil {
-		runDir = m.Store.RunDir
-	}
+	m.flushUsageOutputs()
+	runDir := m.activeUsageRunDir()
 	if runDir == "" {
 		return
 	}
@@ -71,8 +64,8 @@ func (m *Model) initUsage() {
 	}
 	m.usageTally = map[string]usage.TokenPair{}
 	m.usageRate = map[string]usage.Rate{}
-	m.usageOutputSeen = map[string]int{}
-	m.directTyped = map[string]string{}
+	m.usageOutputSeen = map[*agent.Session]int{}
+	m.directTyped = map[*agent.Session]string{}
 	m.usagePricer = m.buildPricer()
 	for name, a := range m.Config.Agents {
 		model, _, _ := usageModel(a)
@@ -80,6 +73,47 @@ func (m *Model) initUsage() {
 			m.usageRate[name] = r
 		}
 	}
+	m.setUsageRun(m.activeUsageRunDir())
+}
+
+// activeUsageRunDir is the ledger owned by the current panes. Their Store is
+// authoritative; the orchestration run is only a fallback before a phase store
+// has been opened.
+func (m Model) activeUsageRunDir() string {
+	if m.Store != nil && m.Store.RunDir != "" {
+		return m.Store.RunDir
+	}
+	if m.orch != nil && m.orch.Run() != nil {
+		return m.orch.Run().Dir
+	}
+	return ""
+}
+
+// setUsageRun resets process-local deltas when the active ledger changes and
+// hydrates a cheap cumulative snapshot from that ledger. It never scans a
+// provider store; reported rows already persisted in events.jsonl are reused.
+func (m *Model) setUsageRun(runDir string) {
+	if !m.Config.Usage.Enabled || runDir == m.usageRunDir {
+		return
+	}
+	m.usageRunDir = runDir
+	m.usageRevision++
+	m.usageCostRequest++
+	m.usageReconcileBusy = false
+	m.usageTally = map[string]usage.TokenPair{}
+	m.usageOutputSeen = map[*agent.Session]int{}
+	m.usageReconciled = nil
+	m.directTyped = map[*agent.Session]string{}
+	if runDir == "" {
+		return
+	}
+	events, err := usage.LoadEvents(runDir)
+	if err != nil || len(events) == 0 {
+		return
+	}
+	summary := usage.Aggregate(events)
+	summary.Price(m.usagePricer)
+	m.usageReconciled = rollupReconciled(summary)
 }
 
 func usageTool(a config.AgentConfig) (tool, source, confidence string) {
@@ -108,34 +142,70 @@ func agentCWD(a config.AgentConfig) string {
 	return cwd
 }
 
-// recordUsageEvent appends one usage event for the active run and bumps the live
-// tally. No-op when usage is disabled. Runs on the Update goroutine.
-func (m *Model) recordUsageEvent(e usage.Event) {
+// recordUsageEvent appends one usage event for the active run, then advances
+// the live state. Runs on the Update goroutine.
+func (m *Model) recordUsageEvent(e usage.Event) error {
 	if !m.Config.Usage.Enabled || m.Store == nil {
-		return
+		return nil
 	}
 	dir := m.Store.RunDir
 	if dir == "" {
 		if err := m.Store.Ensure(); err != nil {
-			return
+			return err
 		}
 		dir = m.Store.RunDir
 	}
+	m.setUsageRun(dir)
 	e.RunID = filepath.Base(dir)
 	m.enrichUsageEvent(&e)
-	m.usageRevision++
-	// A reconciled row is a snapshot. Once this agent records more local usage,
-	// fall back to its live estimate until the next explicit /cost scan.
-	delete(m.usageReconciled, e.Agent)
-	if tool := m.Config.Agents[e.Agent].Usage.Tool; tool != "" {
-		delete(m.usageReconciled, tool)
+	if err := usage.Append(dir, e); err != nil {
+		return err
 	}
+	m.usageRevision++
+	m.advanceReconciledUsage(e)
 	if m.usageTally != nil {
 		t := m.usageTally[e.Agent]
 		t.AddEvent(e)
 		m.usageTally[e.Agent] = t
 	}
-	_ = usage.Append(dir, e)
+	return nil
+}
+
+// advanceReconciledUsage keeps a full-run /cost or resumed-run snapshot live by
+// adding the new local estimate to the covered agent/tool row. The local tally
+// still records the event, but the header skips it while the snapshot covers the
+// row, preventing double-counting.
+func (m *Model) advanceReconciledUsage(e usage.Event) {
+	key := e.Agent
+	rc, ok := m.usageReconciled[key]
+	if !ok {
+		key = m.Config.Agents[e.Agent].Usage.Tool
+		rc, ok = m.usageReconciled[key]
+	}
+	if !ok || key == "" {
+		return
+	}
+	rc.confidence = weakerConfidence(rc.confidence, usage.Estimated)
+	rate, found := m.usageRate[e.Agent]
+	if m.usagePricer != nil {
+		if resolved := m.usagePricer.Rate(e.Model, e.PriceProfile); resolved.Found {
+			rate, found = resolved, true
+		}
+	}
+	if !found || !rate.Found || (rc.currency != "" && rate.Currency != "" && rc.currency != rate.Currency) {
+		rc.someUnknown = true
+		m.usageReconciled[key] = rc
+		return
+	}
+	var totals usage.TokenTotals
+	totals.AddEvent(e)
+	cost, _ := rate.Cost(totals)
+	rc.cost += cost
+	rc.priced = true
+	if rc.currency == "" {
+		rc.currency = rate.Currency
+	}
+	m.usageReconciled[key] = rc
 }
 
 func (m Model) enrichUsageEvent(e *usage.Event) {
@@ -246,7 +316,7 @@ func (m *Model) recordUsageInputAs(s *agent.Session, phase, userText, agentPromp
 	// A new prompt is a turn boundary: flush the previous turn's transcript
 	// delta first, so output cost accrues per turn instead of only on /save.
 	if view := m.findAgentForMessage(s.Name, s); view != nil {
-		m.recordUsageOutput(s, view.transcript())
+		m.recordUsageOutput(view)
 	}
 	prompt := agentPrompt
 	est := usage.EstimatorFor(m.Config.Usage.Estimator)
@@ -262,7 +332,7 @@ func (m *Model) recordUsageInputAs(s *agent.Session, phase, userText, agentPromp
 	a := m.Config.Agents[s.Name]
 	tool, toolSource, toolConf := usageTool(a)
 	model, modelSource, modelConf := usageModel(a)
-	m.recordUsageEvent(usage.Event{
+	if err := m.recordUsageEvent(usage.Event{
 		Agent: s.Name, Phase: phase, Source: usage.SourcePrompt, Confidence: usage.Estimated,
 		Tool: tool, ToolSource: toolSource, ToolConfidence: toolConf,
 		Model: model, ModelSource: modelSource, ModelConfidence: modelConf,
@@ -270,7 +340,9 @@ func (m *Model) recordUsageInputAs(s *agent.Session, phase, userText, agentPromp
 		Estimator: est.Name, UserInputChars: userChars, WireInputChars: wireChars,
 		InputChars: inputChars, InputTokens: inputTokens,
 		PromptHash: usage.PromptHash(prompt), PromptPreview: usage.PromptPreview(prompt),
-	})
+	}); err != nil {
+		m.Status = "usage: " + err.Error()
+	}
 }
 
 // recordUsageOutput meters an agent's transcript. Transcript output is a weak
@@ -278,17 +350,18 @@ func (m *Model) recordUsageInputAs(s *agent.Session, phase, userText, agentPromp
 // recorded by THIS process (see usageOutputSeen). Flushed at turn boundaries
 // (before each new prompt), on manual /save, and when the panes terminate — so
 // reader-less tools get an output floor without anyone pressing save.
-func (m *Model) recordUsageOutput(s *agent.Session, content string) {
+func (m *Model) recordUsageOutput(view *agentView) {
 	if !m.Config.Usage.Enabled || m.Store == nil || m.Store.RunDir == "" || m.usageOutputSeen == nil {
 		return
 	}
 	est := usage.EstimatorFor(m.Config.Usage.Estimator)
-	total, totalChars := est.Estimate(content)
-	delta := total - m.usageOutputSeen[s.Name]
+	s := view.Session
+	totalChars := view.usageOutputUnits
+	total := totalChars / 4
+	delta := total - m.usageOutputSeen[s]
 	if delta <= 0 {
 		return
 	}
-	m.usageOutputSeen[s.Name] = total
 	a := m.Config.Agents[s.Name]
 	tool, toolSource, toolConf := usageTool(a)
 	model, modelSource, modelConf := usageModel(a)
@@ -308,7 +381,17 @@ func (m *Model) recordUsageOutput(s *agent.Session, content string) {
 		ev.PromptHash = usage.PromptHash(agentPrompt)
 		ev.PromptPreview = usage.PromptPreview(agentPrompt)
 	}
-	m.recordUsageEvent(ev)
+	if err := m.recordUsageEvent(ev); err != nil {
+		m.Status = "usage: " + err.Error()
+		return
+	}
+	m.usageOutputSeen[s] = total
+}
+
+func (m *Model) flushUsageOutputs() {
+	for _, view := range m.Agents {
+		m.recordUsageOutput(view)
+	}
 }
 
 // usageHeaderCost is the compact run total for the status line.
@@ -610,12 +693,8 @@ func (m *Model) cmdCost() tea.Cmd {
 		m.Status = "cost -- already reconciling"
 		return nil
 	}
-	runDir, stamp := "", ""
-	if m.orch != nil && m.orch.Run() != nil {
-		runDir, stamp = m.orch.Run().Dir, m.orch.Run().Stamp
-	} else if m.Store != nil && m.Store.RunDir != "" {
-		runDir, stamp = m.Store.RunDir, filepath.Base(m.Store.RunDir)
-	}
+	runDir := m.activeUsageRunDir()
+	stamp := filepath.Base(runDir)
 	if runDir == "" {
 		m.Status = "cost -- no run yet (send a prompt first)"
 		return nil
@@ -626,10 +705,12 @@ func (m *Model) cmdCost() tea.Cmd {
 		pricerOptions = m.pricerOptions()
 	}
 	revision := m.usageRevision
+	m.usageCostRequest++
+	request := m.usageCostRequest
 	m.usageReconcileBusy = true
 	m.Status = "cost -- reconciling..."
 	return func() tea.Msg {
-		out := costViewMsg{stamp: stamp, revision: revision}
+		out := costViewMsg{stamp: stamp, runDir: runDir, request: request, revision: revision}
 		events, err := usage.LoadEvents(runDir)
 		if err != nil {
 			out.err = err

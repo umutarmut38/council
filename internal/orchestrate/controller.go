@@ -32,6 +32,44 @@ type Controller struct {
 	reviewRefs   []PlanRef       // anonymized build letters, set when a review prompt is built
 }
 
+// Selection captures the mutable run/scope chosen by in-TUI navigation. It is
+// intentionally narrow: callers use it to roll back a failed resume before any
+// model sessions or stores are replaced.
+type Selection struct {
+	run        *Run
+	manager    *Manager
+	worktrees  map[string]string
+	scope      map[string]bool
+	refs       []PlanRef
+	reviewRefs []PlanRef
+}
+
+func (c *Controller) Selection() Selection {
+	selection := Selection{run: c.run, manager: c.manager}
+	selection.worktrees = make(map[string]string, len(c.worktrees))
+	for name, path := range c.worktrees {
+		selection.worktrees[name] = path
+	}
+	if c.scope != nil {
+		selection.scope = make(map[string]bool, len(c.scope))
+		for name, enabled := range c.scope {
+			selection.scope[name] = enabled
+		}
+	}
+	selection.refs = append([]PlanRef(nil), c.refs...)
+	selection.reviewRefs = append([]PlanRef(nil), c.reviewRefs...)
+	return selection
+}
+
+func (c *Controller) RestoreSelection(selection Selection) {
+	c.run = selection.run
+	c.manager = selection.manager
+	c.worktrees = selection.worktrees
+	c.scope = selection.scope
+	c.refs = selection.refs
+	c.reviewRefs = selection.reviewRefs
+}
+
 // NewController selects the participating agents (enabled, not globally
 // orchestration.exclude) and locates the git repo. Per-phase exclusions are
 // applied when sessions/artifacts are built. baseRef is the worktree base
@@ -105,6 +143,16 @@ func (c *Controller) AgentsForPhase(phase config.Phase) []string {
 
 func (c *Controller) Run() *Run { return c.run }
 
+// RemoveCurrentRun removes only the currently selected run directory. Callers
+// use it for a freshly-created provisional run that failed before any phase was
+// committed; existing resumed runs are never removed through this helper.
+func (c *Controller) RemoveCurrentRun() error {
+	if c.run == nil {
+		return nil
+	}
+	return os.RemoveAll(c.run.Dir)
+}
+
 // RepoRoot is the git repository root council was launched in. Used to build the
 // freestyle-worktree manager without re-detecting the repo.
 func (c *Controller) RepoRoot() string { return c.repoRoot }
@@ -128,9 +176,10 @@ func (c *Controller) StartRun(issueText string) error {
 		return err
 	}
 	if err := run.SaveIssue(issueText); err != nil {
+		_ = os.RemoveAll(run.Dir)
 		return err
 	}
-	c.run = run
+	c.selectRun(run)
 	return nil
 }
 
@@ -140,8 +189,17 @@ func (c *Controller) UseRun(stamp string) error {
 	if err != nil {
 		return err
 	}
-	c.run = run
+	c.selectRun(run)
 	return nil
+}
+
+func (c *Controller) selectRun(run *Run) {
+	c.run = run
+	c.manager = nil
+	c.worktrees = map[string]string{}
+	c.scope = nil
+	c.refs = nil
+	c.reviewRefs = nil
 }
 
 // SetScope restricts which agents participate in (and judge) subsequent phases.

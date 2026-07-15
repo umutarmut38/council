@@ -5,9 +5,33 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/umutarmut38/council/internal/config"
 )
+
+func TestTerminateBeforeStartPreventsLateStart(t *testing.T) {
+	s := NewSession("late", config.AgentConfig{Command: []string{"true"}}, "")
+	if err := s.Terminate(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Start(nil, nil); err == nil {
+		t.Fatal("Start succeeded after Terminate")
+	}
+	if !s.WaitDone(100 * time.Millisecond) {
+		t.Fatal("pre-start termination did not complete")
+	}
+}
+
+func TestStartFailureCompletesLifecycle(t *testing.T) {
+	s := NewSession("missing", config.AgentConfig{Command: []string{"council-command-that-does-not-exist"}}, "")
+	if err := s.Start(nil, nil); err == nil {
+		t.Fatal("Start unexpectedly succeeded")
+	}
+	if !s.WaitDone(100 * time.Millisecond) {
+		t.Fatal("failed start did not complete its lifecycle")
+	}
+}
 
 // TestEnableRawLogIsDeferredAndIdempotent covers the lazy raw-log path used when
 // the interactive run directory is created on the first prompt: a session starts

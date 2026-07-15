@@ -167,7 +167,6 @@ func (m *Model) handleCompareKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.Status = row.Agent + "'s worktree is gone (cleaned?) — only the captured diff is available (d)"
 		}
 	case "ctrl+c", "ctrl+x":
-		m.terminateAgents()
 		return m, tea.Quit
 	}
 	return m, nil
@@ -213,7 +212,6 @@ func (m *Model) handleCompareFilesKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.Status = "no live worktree file for " + file.Path
 		}
 	case "ctrl+c", "ctrl+x":
-		m.terminateAgents()
 		return m, tea.Quit
 	}
 	return m, nil

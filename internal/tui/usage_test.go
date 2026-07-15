@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -82,6 +84,54 @@ func TestRecordUsageInputMetersWirePrompt(t *testing.T) {
 	}
 }
 
+func TestRunes4OutputCountsSplitUTF8Once(t *testing.T) {
+	cfg := config.Config{
+		Usage:  config.UsageConfig{Enabled: true, Estimator: usage.EstimatorRunes4},
+		Agents: map[string]config.AgentConfig{"a": {Command: []string{"tool"}}},
+	}
+	cfg.Normalize()
+	store := runstore.NewDeferred(t.TempDir(), nil, nil)
+	if err := store.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	session := agent.NewSession("a", cfg.Agents["a"], "")
+	m := NewModelWithConfig([]*agent.Session{session}, store, cfg, "", nil, 0, nil, nil)
+	defer session.Terminate()
+
+	encoded := []byte("€€€€")
+	m.appendOutput(m.Agents[0], string(encoded[:2]))
+	m.appendOutput(m.Agents[0], string(encoded[2:7]))
+	m.appendOutput(m.Agents[0], string(encoded[7:]))
+	m.flushUsageOutputs()
+
+	events, err := usage.LoadEvents(store.RunDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].OutputTokens != 1 || events[0].TranscriptCharsTotal != 4 {
+		t.Fatalf("split UTF-8 usage = %+v, want 4 runes / 1 token", events)
+	}
+}
+
+func TestRestartClearsDirectInputForOldSession(t *testing.T) {
+	cfg := config.Config{
+		Usage:  usageConfigOn(),
+		Agents: map[string]config.AgentConfig{"a": {Command: []string{"tool"}}},
+	}
+	cfg.Normalize()
+	old := agent.NewSession("a", cfg.Agents["a"], "")
+	m := NewModelWithConfig([]*agent.Session{old}, runstore.NewDeferred(t.TempDir(), nil, nil), cfg, "", nil, 0, nil, nil)
+	m.directTyped[old] = "old partial line"
+	m.cmdRestart("a")
+	if _, ok := m.directTyped[old]; ok {
+		t.Fatal("restart retained direct input for the old PTY session")
+	}
+	if fresh := m.Agents[0].Session; fresh == old || m.directTyped[fresh] != "" {
+		t.Fatalf("fresh session inherited old direct input: old=%p fresh=%p value=%q", old, fresh, m.directTyped[fresh])
+	}
+	defer m.Agents[0].Session.Terminate()
+}
+
 func usageConfigOn() config.UsageConfig {
 	return config.UsageConfig{Enabled: true, Estimator: usage.EstimatorBytes4}
 }
@@ -99,7 +149,7 @@ func TestFinalizeUsageFlushesTranscriptOutput(t *testing.T) {
 	if err := m.ensureRun(); err != nil {
 		t.Fatal(err)
 	}
-	m.Agents[0].Lines = []string{"final transcript output"}
+	m.appendOutput(m.Agents[0], "final transcript output\n")
 
 	m.FinalizeUsage()
 	m.FinalizeUsage()
@@ -130,7 +180,7 @@ func TestUsageTickOnlyRearmsHeartbeat(t *testing.T) {
 	}
 }
 
-func TestRecordUsageEventInvalidatesAffectedReconciledRows(t *testing.T) {
+func TestRecordUsageEventAdvancesAffectedReconciledRow(t *testing.T) {
 	cfg := config.Config{
 		Usage: usageConfigOn(),
 		Agents: map[string]config.AgentConfig{
@@ -140,39 +190,220 @@ func TestRecordUsageEventInvalidatesAffectedReconciledRows(t *testing.T) {
 	}
 	cfg.Normalize()
 	store := runstore.NewDeferred(t.TempDir(), nil, nil)
+	if err := store.Ensure(); err != nil {
+		t.Fatal(err)
+	}
 	m := Model{
-		Config:     cfg,
-		Store:      store,
-		usageTally: map[string]usage.TokenPair{},
+		Config:      cfg,
+		Store:       store,
+		usageRunDir: store.RunDir,
+		usageTally:  map[string]usage.TokenPair{},
 		usageRate: map[string]usage.Rate{
 			"a": {InputPerToken: 0.001, Currency: "USD", Found: true},
 		},
 		usageReconciled: map[string]reconciledCost{
-			"a":      {cost: 1, currency: "USD", confidence: usage.Reported, priced: true},
-			"claude": {cost: 2, currency: "USD", confidence: usage.Reported, priced: true},
-			"b":      {cost: 3, currency: "USD", confidence: usage.Reported, priced: true},
+			"a": {cost: 1, currency: "USD", confidence: usage.Reported, priced: true},
+			"b": {cost: 3, currency: "USD", confidence: usage.Reported, priced: true},
 		},
 	}
 	m.recordUsageEvent(usage.Event{Agent: "a", Source: usage.SourcePrompt, Confidence: usage.Estimated, InputTokens: 4})
 
-	if _, ok := m.usageReconciled["a"]; ok {
-		t.Fatal("new local usage must invalidate the agent's reconciled row")
-	}
-	if _, ok := m.usageReconciled["claude"]; ok {
-		t.Fatal("new local usage must invalidate the shared tool row")
+	a := m.usageReconciled["a"]
+	if a.cost < 1.0039 || a.cost > 1.0041 || a.confidence != usage.Estimated {
+		t.Fatalf("advanced row = %+v, want prior $1 plus ~$0.004 delta", a)
 	}
 	if _, ok := m.usageReconciled["b"]; !ok {
 		t.Fatal("another agent's reconciled row should remain valid")
 	}
-	if got := m.usageBorderSuffix("a"); got != " | ~$0.0040" {
-		t.Fatalf("badge = %q, want live estimate after invalidation", got)
+	if got := m.usageBorderSuffix("a"); got != " | ~$1.00" {
+		t.Fatalf("badge = %q, want cumulative live estimate", got)
+	}
+}
+
+func TestUsageRunHydratesHistoryBeforeLiveDelta(t *testing.T) {
+	runDir := t.TempDir()
+	if err := usage.Append(runDir, usage.Event{
+		Agent: "a", Source: usage.SourcePrompt, Confidence: usage.Estimated,
+		Model: "custom", PriceProfile: "local", InputTokens: 1000,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store, err := runstore.OpenAt(runDir, "resume")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{
+		Usage: config.UsageConfig{
+			Enabled: true,
+			Prices: map[string]config.PriceProfile{
+				"local": {InputPerMillion: 1, Currency: "USD", Source: "test"},
+			},
+		},
+		Agents: map[string]config.AgentConfig{
+			"a": {Usage: config.AgentUsageConfig{Model: "custom", PriceProfile: "local"}},
+		},
+	}
+	cfg.Normalize()
+	m := NewModelWithConfig(nil, store, cfg, "", nil, 0, nil, nil)
+	before := m.usageReconciled["a"]
+	if !before.priced || before.cost < 0.0009 || before.cost > 0.0011 {
+		t.Fatalf("hydrated row = %+v, want historical $0.001", before)
+	}
+
+	m.recordUsageEvent(usage.Event{Agent: "a", Source: usage.SourcePrompt, Confidence: usage.Estimated, InputTokens: 1000})
+	after := m.usageReconciled["a"]
+	if after.cost < 0.0019 || after.cost > 0.0021 {
+		t.Fatalf("advanced row = %+v, want historical + live $0.002", after)
+	}
+}
+
+func TestPaneReplacementFlushesEachSessionOutput(t *testing.T) {
+	cfg := config.Config{
+		Usage:  usageConfigOn(),
+		Agents: map[string]config.AgentConfig{"a": {Command: []string{"tool"}}},
+	}
+	cfg.Normalize()
+	store := runstore.NewDeferred(t.TempDir(), nil, nil)
+	if err := store.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	first := agent.NewSession("a", cfg.Agents["a"], "")
+	m := NewModelWithConfig([]*agent.Session{first}, store, cfg, "", nil, 0, nil, nil)
+	m.appendOutput(m.Agents[0], "first session output\n")
+	m.flushUsageOutputs()
+
+	second := agent.NewSession("a", cfg.Agents["a"], "")
+	m.replaceAgentsWithTranscripts([]*agent.Session{second}, nil)
+	m.appendOutput(m.Agents[0], "second session output\n")
+	m.flushUsageOutputs()
+	defer second.Terminate()
+
+	events, err := usage.LoadEvents(store.RunDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var outputs int
+	for _, event := range events {
+		if event.Source == usage.SourceTranscript {
+			outputs++
+		}
+	}
+	if outputs != 2 {
+		t.Fatalf("transcript events = %d, want one per replaced session: %+v", outputs, events)
+	}
+}
+
+func TestUsageOutputSurvivesScrollbackTrimming(t *testing.T) {
+	cfg := config.Config{
+		Usage: usageConfigOn(),
+		UI:    config.UIConfig{MaxScrollbackLines: 1},
+		Agents: map[string]config.AgentConfig{
+			"a": {Command: []string{"tool"}},
+		},
+	}
+	cfg.Normalize()
+	store := runstore.NewDeferred(t.TempDir(), nil, nil)
+	if err := store.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	session := agent.NewSession("a", cfg.Agents["a"], "")
+	m := NewModelWithConfig([]*agent.Session{session}, store, cfg, "", nil, 0, nil, nil)
+	defer session.Terminate()
+
+	m.appendOutput(m.Agents[0], "first output line that will be trimmed\n")
+	m.flushUsageOutputs()
+	m.appendOutput(m.Agents[0], "second output line replacing the first\n")
+	m.flushUsageOutputs()
+
+	events, err := usage.LoadEvents(store.RunDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var outputs int
+	for _, event := range events {
+		if event.Source == usage.SourceTranscript {
+			outputs++
+		}
+	}
+	if outputs != 2 {
+		t.Fatalf("transcript events = %d, want both sides of a scrollback trim: %+v", outputs, events)
+	}
+}
+
+func TestUsageWriteFailureKeepsOutputRetryable(t *testing.T) {
+	cfg := config.Config{
+		Usage:  usageConfigOn(),
+		Agents: map[string]config.AgentConfig{"a": {Command: []string{"tool"}}},
+	}
+	cfg.Normalize()
+	store := runstore.NewDeferred(t.TempDir(), nil, nil)
+	if err := store.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	session := agent.NewSession("a", cfg.Agents["a"], "")
+	m := NewModelWithConfig([]*agent.Session{session}, store, cfg, "", nil, 0, nil, nil)
+	defer session.Terminate()
+	m.appendOutput(m.Agents[0], "retryable output after a ledger failure\n")
+
+	eventsPath := filepath.Join(store.RunDir, "usage", "events.jsonl")
+	if err := os.MkdirAll(eventsPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	m.flushUsageOutputs()
+	if got := m.usageOutputSeen[session]; got != 0 {
+		t.Fatalf("failed write advanced watermark to %d", got)
+	}
+	if got := m.usageTally["a"].Output; got != 0 {
+		t.Fatalf("failed write advanced live tally to %d", got)
+	}
+	if err := os.Remove(eventsPath); err != nil {
+		t.Fatal(err)
+	}
+	m.flushUsageOutputs()
+
+	events, err := usage.LoadEvents(store.RunDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Source != usage.SourceTranscript {
+		t.Fatalf("retry events = %+v, want one transcript event", events)
+	}
+}
+
+func TestLoadedTranscriptHistoryIsNotBilledAsLiveOutput(t *testing.T) {
+	cfg := config.Config{
+		Usage:  usageConfigOn(),
+		Agents: map[string]config.AgentConfig{"a": {Command: []string{"tool"}}},
+	}
+	cfg.Normalize()
+	store := runstore.NewDeferred(t.TempDir(), nil, nil)
+	if err := store.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	session := agent.NewSession("a", cfg.Agents["a"], "")
+	m := NewModelWithConfig([]*agent.Session{session}, store, cfg, "", nil, 0, nil, nil)
+	defer session.Terminate()
+
+	m.LoadTranscripts(map[string]string{"a": "persisted history from an earlier process"})
+	m.flushUsageOutputs()
+
+	events, err := usage.LoadEvents(store.RunDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("loaded transcript history was billed as new output: %+v", events)
 	}
 }
 
 func TestStaleCostResultDoesNotReplaceLiveEstimate(t *testing.T) {
 	cfg := config.Config{Usage: usageConfigOn()}
 	cfg.Normalize()
-	m := Model{Config: cfg, Store: runstore.NewDeferred(t.TempDir(), nil, nil)}
+	store := runstore.NewDeferred(t.TempDir(), nil, nil)
+	if err := store.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	m := Model{Config: cfg, Store: store, usageRunDir: store.RunDir}
 	requestRevision := m.usageRevision
 	m.recordUsageEvent(usage.Event{Agent: "a", Source: usage.SourcePrompt, Confidence: usage.Estimated, InputTokens: 4})
 	if m.usageRevision != requestRevision+1 {
@@ -180,6 +411,8 @@ func TestStaleCostResultDoesNotReplaceLiveEstimate(t *testing.T) {
 	}
 	updated, _ := m.update(costViewMsg{
 		stamp:    "run",
+		runDir:   m.Store.RunDir,
+		request:  m.usageCostRequest,
 		body:     "snapshot",
 		revision: requestRevision,
 		rollup: map[string]reconciledCost{
@@ -188,6 +421,55 @@ func TestStaleCostResultDoesNotReplaceLiveEstimate(t *testing.T) {
 	})
 	if got := updated.(Model).usageReconciled; len(got) != 0 {
 		t.Fatalf("stale /cost result replaced newer live state: %+v", got)
+	}
+	if got := updated.(Model).artifactView; got != "" {
+		t.Fatalf("stale /cost result opened an artifact: %q", got)
+	}
+}
+
+func TestCostResultFromAnotherRunIsDiscarded(t *testing.T) {
+	store, err := runstore.OpenAt(t.TempDir(), "current")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := Model{Store: store, usageRevision: 7}
+	updated, _ := m.update(costViewMsg{
+		stamp:    "old",
+		runDir:   t.TempDir(),
+		request:  m.usageCostRequest,
+		body:     "old run snapshot",
+		revision: 7,
+		rollup: map[string]reconciledCost{
+			"a": {cost: 1, currency: "USD", confidence: usage.Reported, priced: true},
+		},
+	})
+	next := updated.(Model)
+	if len(next.usageReconciled) != 0 || next.artifactView != "" {
+		t.Fatalf("cross-run result leaked into current run: rollup=%+v artifact=%q", next.usageReconciled, next.artifactView)
+	}
+}
+
+func TestObsoleteCostResultDoesNotClearNewRequest(t *testing.T) {
+	store, err := runstore.OpenAt(t.TempDir(), "current")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := Model{
+		Store:              store,
+		usageRevision:      7,
+		usageCostRequest:   2,
+		usageReconcileBusy: true,
+		Status:             "cost -- reconciling...",
+	}
+	updated, _ := m.update(costViewMsg{
+		runDir:   store.RunDir,
+		request:  1,
+		revision: 7,
+		body:     "obsolete snapshot",
+	})
+	next := updated.(Model)
+	if !next.usageReconcileBusy || next.Status != "cost -- reconciling..." {
+		t.Fatalf("obsolete result changed active request: busy=%v status=%q", next.usageReconcileBusy, next.Status)
 	}
 }
 
