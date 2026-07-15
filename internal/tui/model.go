@@ -70,17 +70,16 @@ type initialPromptMsg string
 type initialAgentPromptsMsg map[string]string
 type phasePromptsMsg map[string]string
 
-// usageTickMsg drives the periodic live reconcile while agents are producing
-// output; usageReconciledMsg carries the result back to the Update goroutine.
+// usageTickMsg drives the TUI heartbeat.
 type usageTickMsg struct{}
-type usageReconciledMsg struct{ rollup map[string]reconciledCost }
 
 // costViewMsg is the /cost view rendered off-thread (empty body = no usage yet).
 type costViewMsg struct {
-	stamp  string
-	body   string
-	rollup map[string]reconciledCost
-	err    error
+	stamp    string
+	body     string
+	rollup   map[string]reconciledCost
+	err      error
+	revision uint64
 }
 
 type pollArtifactsMsg struct{}
@@ -250,18 +249,15 @@ type Model struct {
 	// recorded output.
 	usageOutputSeen map[string]int
 	usagePricer     *usage.Pricer
-	// usageReconciled holds per-agent priced totals from the last reconcile
-	// (the 1s tick or /cost), so the header/badge show reported cost (real
-	// session tokens) instead of only the estimated floor. Nil until then.
+	// usageReconciled holds per-agent priced totals from /cost, so the header/badge
+	// can show reported cost instead of only the estimated floor. A new local event
+	// invalidates the affected snapshot.
 	usageReconciled map[string]reconciledCost
-	// usageDirty is set when an agent produced output since the last reconcile;
-	// the tick only reconciles when dirty, so idle panes cost no disk I/O.
-	usageDirty bool
-	// usageReconcileBusy guards against overlapping off-thread reconciles.
+	// usageRevision changes whenever a local event advances the live estimate;
+	// an older /cost result cannot replace a newer header/badge value.
+	usageRevision uint64
+	// usageReconcileBusy guards against overlapping explicit /cost requests.
 	usageReconcileBusy bool
-	// usageLastReconcile is when the last sweep was armed; sweeps are throttled
-	// to usageReconcileMinGap even though the tick stays at 1s.
-	usageLastReconcile time.Time
 	// directTyped accumulates printable direct-mode keystrokes per session,
 	// metered as an estimate event when Enter submits. Update-goroutine only.
 	directTyped  map[string]string
@@ -482,9 +478,8 @@ func (m Model) Init() tea.Cmd {
 			return initialPromptMsg(m.initialPrompt)
 		}))
 	}
-	// The 1s tick runs unconditionally: besides driving cost reconcile (which
-	// self-guards on usage.enabled), it expires status toasts and refreshes
-	// per-pane idle ages even when usage is off.
+	// The 1s tick runs unconditionally to expire status toasts and refresh
+	// per-pane idle ages, even when usage is off.
 	cmds = append(cmds, usageTickCmd())
 	return tea.Batch(cmds...)
 }
@@ -563,7 +558,6 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if view := m.findAgentForMessage(msg.Name, msg.Session); view != nil {
 			m.appendOutput(view, string(msg.Data))
-			m.usageDirty = true // agent is doing stuff → let the tick reconcile
 			if m.noteAttentionOutput(view) {
 				return m, m.scheduleAttentionCheck()
 			}
@@ -572,17 +566,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case attentionCheckMsg:
 		return m, m.runAttentionCheck()
 	case usageTickMsg:
-		cmds := []tea.Cmd{usageTickCmd()} // always re-arm
-		if c := m.maybeReconcileCmd(); c != nil {
-			cmds = append(cmds, c)
-		}
-		return m, tea.Batch(cmds...)
-	case usageReconciledMsg:
-		m.usageReconcileBusy = false
-		if msg.rollup != nil {
-			m.usageReconciled = msg.rollup
-		}
-		return m, nil
+		return m, usageTickCmd()
 	case costViewMsg:
 		m.usageReconcileBusy = false
 		switch {
@@ -591,7 +575,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case msg.body == "":
 			m.Status = "cost -- no usage recorded yet"
 		default:
-			if msg.rollup != nil {
+			if msg.rollup != nil && msg.revision == m.usageRevision {
 				m.usageReconciled = msg.rollup
 			}
 			m.openArtifactText("cost: "+msg.stamp, msg.body)
@@ -632,7 +616,6 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.Err != nil {
 				m.appendOutput(view, "exit error: "+msg.Err.Error()+"\n")
 			}
-			m.usageDirty = true // capture the agent's final session write
 		}
 		return m, nil
 	case AgentStartErrorMsg:
@@ -1000,7 +983,7 @@ func (m Model) agentExists(name string) bool {
 
 // ---- in-chat orchestration ----
 
-func (m Model) saveTranscripts() error {
+func (m *Model) saveTranscripts() error {
 	if m.Store == nil {
 		return nil
 	}
@@ -1023,7 +1006,7 @@ func (v *agentView) transcript() string {
 	return strings.Join(lines, "\n")
 }
 
-func (m Model) terminateAgents() {
+func (m *Model) terminateAgents() {
 	for _, view := range m.Agents {
 		// Flush the final transcript delta before the pane dies so exit-time
 		// output isn't lost — reader-less tools have no provider store for

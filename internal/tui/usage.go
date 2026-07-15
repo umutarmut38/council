@@ -13,50 +13,12 @@ import (
 	"github.com/umutarmut38/council/internal/usage"
 )
 
-// usageReconcileInterval is how often the live header/badge refresh while agents
-// are producing output. ponytail: a flat 1s poll — only fires when usageDirty,
-// so idle panes cost nothing; no staleness bookkeeping needed.
-const usageReconcileInterval = time.Second
+// usageTickInterval drives toast expiry and pane idle ages.
+const usageTickInterval = time.Second
 
-// usageReconcileMinGap throttles the actual reconcile sweep: each pass re-reads
-// events.jsonl and stats the provider stores, so during continuous agent output
-// a 1s cadence is pure churn. 3s is imperceptible for a header cost figure. The
-// 1s tick itself must stay — it also expires toasts and refreshes idle ages.
-const usageReconcileMinGap = 3 * time.Second
-
-// usageTickCmd schedules the next live-usage tick.
+// usageTickCmd schedules the next TUI heartbeat.
 func usageTickCmd() tea.Cmd {
-	return tea.Tick(usageReconcileInterval, func(time.Time) tea.Msg { return usageTickMsg{} })
-}
-
-// maybeReconcileCmd returns a command that reconciles + reprices the active run
-// off-thread, but only when an agent has produced output since the last pass and
-// none is already running. It captures the run dir and the read-only pricer so
-// the closure never touches the model.
-func (m *Model) maybeReconcileCmd() tea.Cmd {
-	if !m.Config.Usage.Enabled || m.usageReconcileBusy || !m.usageDirty {
-		return nil
-	}
-	if m.now.Sub(m.usageLastReconcile) < usageReconcileMinGap {
-		return nil // usageDirty stays set; a later tick picks it up
-	}
-	runDir := ""
-	if m.orch != nil && m.orch.Run() != nil {
-		runDir = m.orch.Run().Dir
-	} else if m.Store != nil {
-		runDir = m.Store.RunDir
-	}
-	if runDir == "" {
-		return nil
-	}
-	pricer := m.usagePricer
-	if pricer == nil {
-		pricer = m.buildPricer()
-	}
-	m.usageDirty = false
-	m.usageReconcileBusy = true
-	m.usageLastReconcile = m.now
-	return reconcileRollupCmd(runDir, pricer)
+	return tea.Tick(usageTickInterval, func(time.Time) tea.Msg { return usageTickMsg{} })
 }
 
 // usageFinalizeGrace lets a CLI that flushes its usage only on exit (notably
@@ -91,22 +53,6 @@ func (m Model) FinalizeUsage() {
 	}
 	time.Sleep(usageFinalizeGrace) // let a shutdown-only reporter finish writing
 	_, _, _ = usage.ReconcileAndAppend(runDir, events)
-}
-
-// reconcileRollupCmd reads the run's events, reconciles provider sessions, prices
-// the result, and returns a per-agent rollup for the header/badge. Runs in a
-// tea.Cmd goroutine: it only reads the model's captured runDir + read-only pricer.
-func reconcileRollupCmd(runDir string, pricer *usage.Pricer) tea.Cmd {
-	return func() tea.Msg {
-		events, err := usage.LoadEvents(runDir)
-		if err != nil || len(events) == 0 {
-			return usageReconciledMsg{} // nil rollup → just clears the busy flag
-		}
-		events, _, _ = usage.ReconcileAndAppend(runDir, events)
-		summary := usage.Aggregate(events)
-		summary.Price(pricer)
-		return usageReconciledMsg{rollup: rollupReconciled(summary)}
-	}
 }
 
 // initUsage allocates live usage state. No-op when usage is disabled.
@@ -155,7 +101,7 @@ func agentCWD(a config.AgentConfig) string {
 
 // recordUsageEvent appends one usage event for the active run and bumps the live
 // tally. No-op when usage is disabled. Runs on the Update goroutine.
-func (m Model) recordUsageEvent(e usage.Event) {
+func (m *Model) recordUsageEvent(e usage.Event) {
 	if !m.Config.Usage.Enabled || m.Store == nil {
 		return
 	}
@@ -168,6 +114,13 @@ func (m Model) recordUsageEvent(e usage.Event) {
 	}
 	e.RunID = filepath.Base(dir)
 	m.enrichUsageEvent(&e)
+	m.usageRevision++
+	// A reconciled row is a snapshot. Once this agent records more local usage,
+	// fall back to its live estimate until the next explicit /cost scan.
+	delete(m.usageReconciled, e.Agent)
+	if tool := m.Config.Agents[e.Agent].Usage.Tool; tool != "" {
+		delete(m.usageReconciled, tool)
+	}
 	if m.usageTally != nil {
 		t := m.usageTally[e.Agent]
 		t.AddEvent(e)
@@ -249,7 +202,7 @@ func sessionCWD(s *agent.Session) string {
 }
 
 // recordPhaseInputs meters the phase's prompts for every live agent.
-func (m Model) recordPhaseInputs(prompts map[string]string) {
+func (m *Model) recordPhaseInputs(prompts map[string]string) {
 	if !m.Config.Usage.Enabled {
 		return
 	}
@@ -266,7 +219,7 @@ func (m Model) recordPhaseInputs(prompts map[string]string) {
 // recordUsageInput meters a composer send: council wraps userText with the
 // agent's personality prefix and paste/submit transport before writing it to
 // the PTY, so that wrapped prompt is what the model sees and gets billed.
-func (m Model) recordUsageInput(s *agent.Session, phase, userText string) {
+func (m *Model) recordUsageInput(s *agent.Session, phase, userText string) {
 	prompt := m.Config.PromptForAgent(s.Name, userText)
 	m.recordUsageInputAs(s, phase, userText, prompt, linePayload(s.Config.Terminal, prompt))
 }
@@ -277,7 +230,7 @@ func (m Model) recordUsageInput(s *agent.Session, phase, userText string) {
 // direct mode sends raw keystrokes with no council wrapping, so it passes the
 // typed text for both — otherwise it would bill a personality prefix and
 // bracketed-paste bytes it never transmitted.
-func (m Model) recordUsageInputAs(s *agent.Session, phase, userText, agentPrompt, wire string) {
+func (m *Model) recordUsageInputAs(s *agent.Session, phase, userText, agentPrompt, wire string) {
 	if !m.Config.Usage.Enabled {
 		return
 	}
@@ -316,7 +269,7 @@ func (m Model) recordUsageInputAs(s *agent.Session, phase, userText, agentPrompt
 // recorded by THIS process (see usageOutputSeen). Flushed at turn boundaries
 // (before each new prompt), on manual /save, and when the panes terminate — so
 // reader-less tools get an output floor without anyone pressing save.
-func (m Model) recordUsageOutput(s *agent.Session, content string) {
+func (m *Model) recordUsageOutput(s *agent.Session, content string) {
 	if !m.Config.Usage.Enabled || m.Store == nil || m.Store.RunDir == "" || m.usageOutputSeen == nil {
 		return
 	}
@@ -603,16 +556,21 @@ func (m Model) composerTokenLabel() string {
 
 // buildPricer constructs a Pricer from the active config + on-disk price cache.
 func (m Model) buildPricer() *usage.Pricer {
+	return usage.NewPricer(m.pricerOptions())
+}
+
+// pricerOptions captures the immutable pricing config without reading disk.
+func (m Model) pricerOptions() usage.PricerOptions {
 	cacheDir := ""
 	if m.Store != nil && m.Store.RootDir != "" {
 		cacheDir = filepath.Join(filepath.Dir(m.Store.RootDir), "usage")
 	}
-	return usage.NewPricer(usage.PricerOptions{
+	return usage.PricerOptions{
 		CacheDir:       cacheDir,
 		ModelAliases:   m.Config.Usage.ModelAliases,
 		Prices:         toPriceProfiles(m.Config.Usage.Prices),
 		StaleAfterDays: m.Config.Usage.StalePriceAfterDays,
-	})
+	}
 }
 
 func toPriceProfiles(prices map[string]config.PriceProfile) map[string]usage.PriceProfile {
@@ -639,6 +597,10 @@ func toPriceProfiles(prices map[string]config.PriceProfile) map[string]usage.Pri
 // tea.Cmd goroutine (synchronous reconciliation here froze the whole TUI on
 // large stores); costViewMsg carries the rendered view back to Update.
 func (m *Model) cmdCost() tea.Cmd {
+	if m.usageReconcileBusy {
+		m.Status = "cost -- already reconciling"
+		return nil
+	}
 	runDir, stamp := "", ""
 	if m.orch != nil && m.orch.Run() != nil {
 		runDir, stamp = m.orch.Run().Dir, m.orch.Run().Stamp
@@ -650,13 +612,15 @@ func (m *Model) cmdCost() tea.Cmd {
 		return nil
 	}
 	pricer := m.usagePricer
+	var pricerOptions usage.PricerOptions
 	if pricer == nil {
-		pricer = m.buildPricer()
+		pricerOptions = m.pricerOptions()
 	}
+	revision := m.usageRevision
 	m.usageReconcileBusy = true
 	m.Status = "cost -- reconciling..."
 	return func() tea.Msg {
-		out := costViewMsg{stamp: stamp}
+		out := costViewMsg{stamp: stamp, revision: revision}
 		events, err := usage.LoadEvents(runDir)
 		if err != nil {
 			out.err = err
@@ -665,11 +629,11 @@ func (m *Model) cmdCost() tea.Cmd {
 		if len(events) == 0 {
 			return out // empty body → "no usage recorded yet"
 		}
-		events, rec, err := usage.ReconcileAndAppend(runDir, events)
-		if err != nil {
-			out.err = fmt.Errorf("reconcile: %w", err)
-			return out
+		if pricer == nil {
+			pricer = usage.NewPricer(pricerOptions)
 		}
+		rec := usage.ReconcileDetailed(events)
+		events = append(events, rec.Events...)
 		summary := usage.Aggregate(events)
 		summary.Price(pricer)
 		summary.Hints = append(summary.Hints, rec.Notes...)

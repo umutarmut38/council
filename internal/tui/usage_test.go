@@ -86,39 +86,129 @@ func usageConfigOn() config.UsageConfig {
 	return config.UsageConfig{Enabled: true, Estimator: usage.EstimatorBytes4}
 }
 
-// The reconcile sweep is throttled to usageReconcileMinGap even though the
-// tick fires every second; usageDirty stays set so a later tick catches up.
-func TestMaybeReconcileThrottle(t *testing.T) {
+func TestUsageTickOnlyRearmsHeartbeat(t *testing.T) {
+	m := Model{Config: config.Config{Usage: usageConfigOn()}}
+	updated, cmd := m.update(usageTickMsg{})
+	if cmd == nil {
+		t.Fatal("usage tick must re-arm the TUI heartbeat")
+	}
+	if updated.(Model).usageReconcileBusy {
+		t.Fatal("heartbeat must not start provider reconciliation")
+	}
+}
+
+func TestRecordUsageEventInvalidatesAffectedReconciledRows(t *testing.T) {
 	cfg := config.Config{
-		Usage:  usageConfigOn(),
-		Agents: map[string]config.AgentConfig{"a": {Command: []string{"tool"}}},
+		Usage: usageConfigOn(),
+		Agents: map[string]config.AgentConfig{
+			"a": {Command: []string{"tool"}, Usage: config.AgentUsageConfig{Tool: "claude"}},
+			"b": {Command: []string{"tool"}, Usage: config.AgentUsageConfig{Tool: "codex"}},
+		},
 	}
 	cfg.Normalize()
 	store := runstore.NewDeferred(t.TempDir(), nil, nil)
-	session := agent.NewSession("a", cfg.Agents["a"], "")
-	defer session.Terminate()
-	m := NewModelWithConfig([]*agent.Session{session}, store, cfg, "", nil, time.Millisecond, nil, nil)
-	if err := m.ensureRun(); err != nil {
-		t.Fatal(err)
+	m := Model{
+		Config:     cfg,
+		Store:      store,
+		usageTally: map[string]usage.TokenPair{},
+		usageRate: map[string]usage.Rate{
+			"a": {InputPerToken: 0.001, Currency: "USD", Found: true},
+		},
+		usageReconciled: map[string]reconciledCost{
+			"a":      {cost: 1, currency: "USD", confidence: usage.Reported, priced: true},
+			"claude": {cost: 2, currency: "USD", confidence: usage.Reported, priced: true},
+			"b":      {cost: 3, currency: "USD", confidence: usage.Reported, priced: true},
+		},
 	}
-	t0 := time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC)
-	arm := func(now time.Time) bool {
-		m.now = now
-		m.usageDirty = true
-		m.usageReconcileBusy = false
-		return m.maybeReconcileCmd() != nil // only returns the closure; no IO runs
+	m.recordUsageEvent(usage.Event{Agent: "a", Source: usage.SourcePrompt, Confidence: usage.Estimated, InputTokens: 4})
+
+	if _, ok := m.usageReconciled["a"]; ok {
+		t.Fatal("new local usage must invalidate the agent's reconciled row")
 	}
-	if !arm(t0) {
-		t.Fatal("first sweep should arm immediately")
+	if _, ok := m.usageReconciled["claude"]; ok {
+		t.Fatal("new local usage must invalidate the shared tool row")
 	}
-	if arm(t0.Add(time.Second)) {
-		t.Fatal("sweep within min gap should be throttled")
+	if _, ok := m.usageReconciled["b"]; !ok {
+		t.Fatal("another agent's reconciled row should remain valid")
 	}
-	if !m.usageDirty {
-		t.Fatal("throttled tick must keep usageDirty set")
+	if got := m.usageBorderSuffix("a"); got != " | ~$0.0040" {
+		t.Fatalf("badge = %q, want live estimate after invalidation", got)
 	}
-	if !arm(t0.Add(4 * time.Second)) {
-		t.Fatal("sweep after min gap should arm")
+}
+
+func TestStaleCostResultDoesNotReplaceLiveEstimate(t *testing.T) {
+	cfg := config.Config{Usage: usageConfigOn()}
+	cfg.Normalize()
+	m := Model{Config: cfg, Store: runstore.NewDeferred(t.TempDir(), nil, nil)}
+	requestRevision := m.usageRevision
+	m.recordUsageEvent(usage.Event{Agent: "a", Source: usage.SourcePrompt, Confidence: usage.Estimated, InputTokens: 4})
+	if m.usageRevision != requestRevision+1 {
+		t.Fatalf("usage revision = %d, want %d after local event", m.usageRevision, requestRevision+1)
+	}
+	updated, _ := m.update(costViewMsg{
+		stamp:    "run",
+		body:     "snapshot",
+		revision: requestRevision,
+		rollup: map[string]reconciledCost{
+			"a": {cost: 1, currency: "USD", confidence: usage.Reported, priced: true},
+		},
+	})
+	if got := updated.(Model).usageReconciled; len(got) != 0 {
+		t.Fatalf("stale /cost result replaced newer live state: %+v", got)
+	}
+}
+
+func TestCostRequestDoesNotOverlap(t *testing.T) {
+	m := Model{usageReconcileBusy: true}
+	if cmd := m.cmdCost(); cmd != nil {
+		t.Fatal("a second /cost request must not start another provider scan")
+	}
+	if m.Status != "cost -- already reconciling" {
+		t.Fatalf("status = %q, want already reconciling", m.Status)
+	}
+}
+
+func TestCostCommandBuildsRollupWithoutPersisting(t *testing.T) {
+	cfg := config.Config{
+		Usage: config.UsageConfig{
+			Enabled:   true,
+			Estimator: usage.EstimatorBytes4,
+			Prices: map[string]config.PriceProfile{
+				"local": {InputPerMillion: 1, OutputPerMillion: 2, Currency: "USD", Source: "test"},
+			},
+		},
+		Agents: map[string]config.AgentConfig{
+			"a": {Command: []string{"tool"}, Usage: config.AgentUsageConfig{Model: "custom", PriceProfile: "local"}},
+		},
+	}
+	cfg.Normalize()
+	m := Model{Config: cfg, Store: runstore.NewDeferred(t.TempDir(), nil, nil)}
+	m.recordUsageEvent(usage.Event{Agent: "a", Source: usage.SourcePrompt, Confidence: usage.Estimated, InputTokens: 1000})
+
+	before, err := usage.LoadEvents(m.Store.RunDir)
+	if err != nil || len(before) != 1 {
+		t.Fatalf("initial events: %v (%d)", err, len(before))
+	}
+	cmd := m.cmdCost()
+	if cmd == nil || !m.usageReconcileBusy {
+		t.Fatal("/cost must start one background command and mark it busy")
+	}
+	msg, ok := cmd().(costViewMsg)
+	if !ok || msg.err != nil || msg.body == "" {
+		t.Fatalf("cost result = %#v, want rendered success", msg)
+	}
+	if rc := msg.rollup["a"]; !rc.priced || rc.cost <= 0 {
+		t.Fatalf("rollup = %+v, want priced agent", msg.rollup)
+	}
+	after, err := usage.LoadEvents(m.Store.RunDir)
+	if err != nil || len(after) != len(before) {
+		t.Fatalf("/cost persisted ledger rows: before=%d after=%d err=%v", len(before), len(after), err)
+	}
+
+	updated, _ := m.update(msg)
+	next := updated.(Model)
+	if next.usageReconcileBusy || !next.usageReconciled["a"].priced {
+		t.Fatalf("completed cost state: busy=%v rollup=%+v", next.usageReconcileBusy, next.usageReconciled)
 	}
 }
 
