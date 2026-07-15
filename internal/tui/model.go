@@ -567,6 +567,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if view := m.findAgentForMessage(msg.Name, msg.Session); view != nil {
 			m.appendOutput(view, string(msg.Data))
+			m.usageRevision++
 			if m.noteAttentionOutput(view) {
 				return m, m.scheduleAttentionCheck()
 			}

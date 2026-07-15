@@ -545,6 +545,42 @@ func TestCostRequestDoesNotOverlap(t *testing.T) {
 	}
 }
 
+func TestCostSnapshotFlushesPendingOutputAndStalesOnNewOutput(t *testing.T) {
+	cfg := config.Config{
+		Usage:  usageConfigOn(),
+		Agents: map[string]config.AgentConfig{"a": {Command: []string{"tool"}}},
+	}
+	cfg.Normalize()
+	store := runstore.NewDeferred(t.TempDir(), nil, nil)
+	if err := store.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	session := agent.NewSession("a", cfg.Agents["a"], "")
+	m := NewModelWithConfig([]*agent.Session{session}, store, cfg, "", nil, 0, nil, nil)
+	defer session.Terminate()
+	m.appendOutput(m.Agents[0], "visible before cost\n")
+
+	cmd := m.cmdCost()
+	if cmd == nil {
+		t.Fatal("/cost did not start")
+	}
+	events, err := usage.LoadEvents(store.RunDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Source != usage.SourceTranscript {
+		t.Fatalf("pending output was not flushed at cost boundary: %+v", events)
+	}
+	result := cmd().(costViewMsg)
+	updated, _ := m.update(AgentOutputMsg{Name: "a", Session: session, Data: []byte("arrived during cost\n")})
+	afterOutput := updated.(Model)
+	updated, _ = afterOutput.update(result)
+	final := updated.(Model)
+	if final.artifactView != "" || !strings.Contains(final.Status, "result stale") {
+		t.Fatalf("new output did not stale cost result: status=%q artifact=%q", final.Status, final.artifactView)
+	}
+}
+
 func TestCostCommandBuildsRollupWithoutPersisting(t *testing.T) {
 	cfg := config.Config{
 		Usage: config.UsageConfig{

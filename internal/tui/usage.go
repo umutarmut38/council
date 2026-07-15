@@ -699,6 +699,10 @@ func (m *Model) cmdCost() tea.Cmd {
 		m.Status = "cost -- no run yet (send a prompt first)"
 		return nil
 	}
+	// Establish the snapshot boundary before capturing the revision: output
+	// already visible in panes belongs in this scan, while output arriving after
+	// this point increments usageRevision in AgentOutputMsg and stales the result.
+	m.flushUsageOutputs()
 	pricer := m.usagePricer
 	var pricerOptions usage.PricerOptions
 	if pricer == nil {
