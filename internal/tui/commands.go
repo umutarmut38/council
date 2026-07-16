@@ -453,6 +453,9 @@ func (m *Model) cmdRestart(rest string) {
 	}
 	old := view.Session
 	_ = m.flushUsageOutputs()
+	if len(view.usageUTF8Tail) > 0 {
+		view.usageOutputUnits++
+	}
 	pendingOutput := view.usageOutputUnits - m.usageOutputSeen[old]*4
 	if pendingOutput < 0 {
 		pendingOutput = 0

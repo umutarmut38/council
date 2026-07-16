@@ -113,6 +113,26 @@ func TestRunes4OutputCountsSplitUTF8Once(t *testing.T) {
 	}
 }
 
+func TestRestartCountsIncompleteUTF8Tail(t *testing.T) {
+	cfg := config.Config{
+		Usage:  config.UsageConfig{Enabled: true, Estimator: usage.EstimatorRunes4},
+		Agents: map[string]config.AgentConfig{"a": {Command: []string{"tool"}}},
+	}
+	cfg.Normalize()
+	store := runstore.NewDeferred(t.TempDir(), nil, nil)
+	if err := store.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	old := agent.NewSession("a", cfg.Agents["a"], "")
+	m := NewModelWithConfig([]*agent.Session{old}, store, cfg, "", nil, 0, nil, nil)
+	m.appendOutput(m.Agents[0], string([]byte("€")[:2]))
+	m.cmdRestart("a")
+	defer m.Agents[0].Session.Terminate()
+	if got := m.Agents[0].usageOutputUnits; got != 1 {
+		t.Fatalf("restart carryover units = %d, want one replacement rune", got)
+	}
+}
+
 func TestRestartClearsDirectInputForOldSession(t *testing.T) {
 	cfg := config.Config{
 		Usage:  usageConfigOn(),
@@ -470,6 +490,35 @@ func TestUsageWriteFailureKeepsOutputRetryable(t *testing.T) {
 	}
 	if len(events) != 1 || events[0].Source != usage.SourceTranscript {
 		t.Fatalf("retry events = %+v, want one transcript event", events)
+	}
+}
+
+func TestTurnBoundaryFlushFailureIsSurfaced(t *testing.T) {
+	cfg := config.Config{
+		Usage:  usageConfigOn(),
+		Agents: map[string]config.AgentConfig{"a": {Command: []string{"tool"}}},
+	}
+	cfg.Normalize()
+	store := runstore.NewDeferred(t.TempDir(), nil, nil)
+	if err := store.Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	session := agent.NewSession("a", cfg.Agents["a"], "")
+	m := NewModelWithConfig([]*agent.Session{session}, store, cfg, "", nil, 0, nil, nil)
+	defer session.Terminate()
+	m.appendOutput(m.Agents[0], "pending turn output\n")
+	eventsPath := filepath.Join(store.RunDir, "usage", "events.jsonl")
+	if err := os.MkdirAll(eventsPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	m.recordUsageInput(session, "plan", "next prompt")
+
+	if !strings.HasPrefix(m.Status, "usage: ") {
+		t.Fatalf("status = %q, want surfaced usage error", m.Status)
+	}
+	if got := m.usageOutputSeen[session]; got != 0 {
+		t.Fatalf("failed turn flush advanced watermark to %d", got)
 	}
 }
 

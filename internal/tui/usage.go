@@ -316,7 +316,10 @@ func (m *Model) recordUsageInputAs(s *agent.Session, phase, userText, agentPromp
 	// A new prompt is a turn boundary: flush the previous turn's transcript
 	// delta first, so output cost accrues per turn instead of only on /save.
 	if view := m.findAgentForMessage(s.Name, s); view != nil {
-		m.recordUsageOutput(view)
+		if err := m.recordUsageOutput(view); err != nil {
+			m.Status = "usage: " + err.Error()
+			return
+		}
 	}
 	prompt := agentPrompt
 	est := usage.EstimatorFor(m.Config.Usage.Estimator)
