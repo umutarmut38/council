@@ -171,15 +171,17 @@ func TestRestartPreservesOutputAfterLedgerFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	m.cmdRestart("a")
-	fresh := m.Agents[0].Session
-	defer fresh.Terminate()
-	if m.Agents[0].usageOutputUnits == 0 {
-		t.Fatal("restart discarded output after failed ledger append")
+	if m.Agents[0].Session != old {
+		t.Fatal("restart replaced the session after failed ledger append")
+	}
+	if !strings.HasPrefix(m.Status, "restart: usage: ") {
+		t.Fatalf("status = %q, want surfaced restart usage error", m.Status)
 	}
 	if err := os.Remove(eventsPath); err != nil {
 		t.Fatal(err)
 	}
 	m.flushUsageOutputs()
+	defer old.Terminate()
 
 	events, err := usage.LoadEvents(store.RunDir)
 	if err != nil {

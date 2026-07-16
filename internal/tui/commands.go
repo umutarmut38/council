@@ -452,7 +452,10 @@ func (m *Model) cmdRestart(rest string) {
 		return
 	}
 	old := view.Session
-	_ = m.flushUsageOutputs()
+	if err := m.flushUsageOutputs(); err != nil {
+		m.Status = "restart: usage: " + err.Error()
+		return
+	}
 	if len(view.usageUTF8Tail) > 0 {
 		view.usageOutputUnits++
 	}
