@@ -370,6 +370,10 @@ func TestPaneReplacementFlushesEachSessionOutput(t *testing.T) {
 	m := NewModelWithConfig([]*agent.Session{first}, store, cfg, "", nil, 0, nil, nil)
 	m.appendOutput(m.Agents[0], "first session output\n")
 	m.flushUsageOutputs()
+	first.TrackOutput([]byte("queued before replacement\n"))
+	if err := m.flushUsageOutputs(); err != nil {
+		t.Fatal(err)
+	}
 
 	second := agent.NewSession("a", cfg.Agents["a"], "")
 	m.replaceAgentsWithTranscripts([]*agent.Session{second}, nil)
@@ -387,8 +391,8 @@ func TestPaneReplacementFlushesEachSessionOutput(t *testing.T) {
 			outputs++
 		}
 	}
-	if outputs != 2 {
-		t.Fatalf("transcript events = %d, want one per replaced session: %+v", outputs, events)
+	if outputs != 3 {
+		t.Fatalf("transcript events = %d, want live + queued old output and new output: %+v", outputs, events)
 	}
 }
 

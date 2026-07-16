@@ -389,6 +389,7 @@ func (m *Model) recordUsageOutput(view *agentView) error {
 }
 
 func (m *Model) flushUsageOutputs() error {
+	m.recoverPendingOutput()
 	for _, view := range m.Agents {
 		if err := m.recordUsageOutput(view); err != nil {
 			return err
@@ -707,7 +708,6 @@ func (m *Model) cmdCost() tea.Cmd {
 	// still queued. Those messages are acknowledged here and become no-ops when
 	// dequeued; output emitted afterward increments the revision and stales the
 	// result.
-	m.recoverPendingOutput()
 	if err := m.flushUsageOutputs(); err != nil {
 		m.Status = "cost: pending usage: " + err.Error()
 		return nil

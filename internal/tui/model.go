@@ -1047,6 +1047,7 @@ func (m *Model) saveTranscripts() error {
 	if m.Store == nil {
 		return nil
 	}
+	m.recoverPendingOutput()
 	for _, view := range m.Agents {
 		content := view.transcript()
 		if err := m.Store.SaveTranscript(view.Session.Name, content); err != nil {
@@ -1077,7 +1078,6 @@ func (m *Model) FlushUsage() {
 // RecoverFinalOutput ingests session output emitted after Program.Run stopped
 // accepting messages, then persists the corresponding usage delta.
 func (m *Model) RecoverFinalOutput() {
-	m.recoverPendingOutput()
 	_ = m.flushUsageOutputs()
 }
 
