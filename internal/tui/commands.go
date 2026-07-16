@@ -174,6 +174,7 @@ func (m *Model) ensureRun() error {
 	if err := m.Store.Ensure(); err != nil {
 		return err
 	}
+	m.setUsageRun(m.Store.RunDir)
 	for _, view := range m.Agents {
 		// Best-effort: a raw-log failure shouldn't block the prompt, but surface
 		// it in the affected pane rather than swallowing it.
@@ -406,7 +407,6 @@ func (m *Model) handleCommand(text string) (bool, tea.Cmd) {
 	case "clear":
 		m.clearScreens(rest)
 	case "quit":
-		m.terminateAgents()
 		return true, tea.Quit
 	case "help":
 		m.openCommandHelp()
@@ -452,9 +452,24 @@ func (m *Model) cmdRestart(rest string) {
 		return
 	}
 	old := view.Session
+	if err := m.flushUsageOutputs(); err != nil {
+		m.Status = "restart: usage: " + err.Error()
+		return
+	}
+	if len(view.usageUTF8Tail) > 0 {
+		view.usageOutputUnits++
+	}
+	pendingOutput := view.usageOutputUnits - m.usageOutputSeen[old]*4
+	if pendingOutput < 0 {
+		pendingOutput = 0
+	}
 	_ = old.Terminate()
+	delete(m.usageOutputSeen, old)
+	delete(m.directTyped, old)
 	fresh := agent.NewSession(old.Name, old.Config, old.RawLogPath)
 	view.Session = fresh
+	view.usageOutputUnits = pendingOutput
+	view.usageUTF8Tail = nil
 	view.PhaseDone = false
 	view.clearAttention()
 	if m.launch != nil {

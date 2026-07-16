@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# tui-reconcile-badge: proves the live pane badge auto-upgrades from the
-# estimated floor ($…e) to the reported total ($…r) within ~1s of the agent
-# producing output — via the live usage tick, with NO /cost needed. The fix for
-# "the /cost view shows a price but the window badge stays $0.00". Uses a fake
-# agent + a local fixture claude session stamped now (so it lands inside the
+# tui-reconcile-badge: proves the live pane badge uses the cheap estimated floor
+# until an explicit /cost scan upgrades it to the reported total. Uses a fake
+# agent + a local fixture Claude session stamped now (so it lands inside the
 # reconcile window). No real CLI, no network.
 set -euo pipefail
 source "$(dirname "$0")/lib.sh"

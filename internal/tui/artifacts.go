@@ -228,7 +228,6 @@ func (m *Model) handleArtifactsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.openInEditor(m.Artifacts[m.ArtifactIndex].Path)
 		}
 	case "ctrl+c", "ctrl+x":
-		m.terminateAgents()
 		return m, tea.Quit
 	}
 	return m, nil
@@ -281,7 +280,6 @@ func (m *Model) handleArtifactViewerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.Status = "adopt cancelled"
 		}
 	case "ctrl+c", "ctrl+x":
-		m.terminateAgents()
 		return m, tea.Quit
 	}
 	return m, nil

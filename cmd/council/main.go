@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -188,20 +189,62 @@ func launchTUIWithTranscripts(sessions []*agent.Session, store *runstore.Store, 
 	// termination would miss exactly the exit-only totals FinalizeUsage exists to
 	// capture. Both live in one defer so the order holds on every return path.
 	var final tea.Model
+	var sessionsMu sync.Mutex
+	allSessions := append([]*agent.Session(nil), sessions...)
+	shuttingDown := false
 	defer func() {
-		for _, session := range sessions {
-			_ = session.Terminate()
+		if fm, ok := final.(tui.Model); ok {
+			fm.FlushUsage()
+		}
+		sessionsMu.Lock()
+		shuttingDown = true
+		owned := append([]*agent.Session(nil), allSessions...)
+		sessionsMu.Unlock()
+		var terminateWG sync.WaitGroup
+		for _, session := range owned {
+			terminateWG.Add(1)
+			go func(session *agent.Session) {
+				defer terminateWG.Done()
+				_ = session.Terminate()
+			}(session)
+		}
+		terminateWG.Wait()
+		deadline := time.Now().Add(2 * time.Second)
+		for _, session := range owned {
+			remaining := time.Until(deadline)
+			if remaining <= 0 {
+				break
+			}
+			session.WaitDone(remaining)
 		}
 		if fm, ok := final.(tui.Model); ok {
+			fm.RecoverFinalOutput()
 			fm.FinalizeUsage()
 		}
 	}()
 
 	var program *tea.Program
 	launch := func(s *agent.Session) {
+		sessionsMu.Lock()
+		if shuttingDown {
+			sessionsMu.Unlock()
+			_ = s.Terminate()
+			return
+		}
+		seen := false
+		for _, existing := range allSessions {
+			if existing == s {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			allSessions = append(allSessions, s)
+		}
+		sessionsMu.Unlock()
 		if err := s.Start(
-			func(name string, data []byte) {
-				program.Send(tui.AgentOutputMsg{Name: name, Session: s, Data: data})
+			func(name string, data []byte, end int64) {
+				program.Send(tui.AgentOutputMsg{Name: name, Session: s, Data: data, End: end})
 			},
 			func(name string, exitCode *int, err error) {
 				program.Send(tui.AgentExitMsg{Name: name, Session: s, ExitCode: exitCode, Err: err})

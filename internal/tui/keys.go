@@ -23,7 +23,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// quits, so the user is never trapped waiting out the intro.
 	if m.retroActive && !m.retroIntroDone {
 		if msg.String() == "ctrl+x" {
-			m.terminateAgents()
 			return m, tea.Quit
 		}
 		m.retroIntroDone = true
@@ -116,7 +115,6 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.Status = "mouse off (text selection enabled)"
 		return m, tea.DisableMouse
 	case "ctrl+x":
-		m.terminateAgents()
 		return m, tea.Quit
 	case "ctrl+q":
 		m.Status = "quit is Ctrl+X"
@@ -230,7 +228,6 @@ func (m Model) handleDirectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.Status = "composer mode"
 		return m, nil
 	case "ctrl+x":
-		m.terminateAgents()
 		return m, tea.Quit
 	}
 
@@ -249,9 +246,9 @@ func (m Model) handleDirectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.Config.Usage.Enabled && m.directTyped != nil {
 		switch {
 		case len(msg.Runes) > 0: // printable input, incl. pasted text (mirrors keyToPTY)
-			m.directTyped[session.Name] += string(msg.Runes)
+			m.directTyped[session] += string(msg.Runes)
 		case msg.String() == "enter":
-			if text := strings.TrimSpace(m.directTyped[session.Name]); text != "" {
+			if text := strings.TrimSpace(m.directTyped[session]); text != "" {
 				// Direct mode sends the raw keystrokes — no personality prefix or
 				// paste wrapping — so meter the typed text verbatim, not the
 				// composer's wrapped prompt. ensureRun mirrors the composer's send
@@ -263,11 +260,11 @@ func (m Model) handleDirectKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					m.recordUsageInputAs(session, m.phase, text, text, text)
 				}
 			}
-			delete(m.directTyped, session.Name)
+			delete(m.directTyped, session)
 		case msg.String() == "backspace":
-			m.directTyped[session.Name] = dropLastRune(m.directTyped[session.Name])
+			m.directTyped[session] = dropLastRune(m.directTyped[session])
 		case msg.String() == "ctrl+u", msg.String() == "ctrl+c":
-			delete(m.directTyped, session.Name) // the pane clears its line; mirror it
+			delete(m.directTyped, session) // the pane clears its line; mirror it
 		}
 	}
 

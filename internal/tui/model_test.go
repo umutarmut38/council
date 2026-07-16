@@ -14,6 +14,7 @@ import (
 	"github.com/umutarmut38/council/internal/agent"
 	"github.com/umutarmut38/council/internal/config"
 	"github.com/umutarmut38/council/internal/orchestrate"
+	runstore "github.com/umutarmut38/council/internal/session"
 )
 
 var ansiRE = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
@@ -929,6 +930,52 @@ func TestResumedRefineFinishClearsStaleVote(t *testing.T) {
 	}
 	if string(anon) != "refined plan a" {
 		t.Fatalf("revote anonymized a = %q, want the refined plan content", string(anon))
+	}
+}
+
+func TestResumeFailureRestoresPreviousRun(t *testing.T) {
+	root := initTUITestRepo(t)
+	chdirTUI(t, root)
+	cfg := config.Config{
+		Agents: map[string]config.AgentConfig{
+			"a": {Enabled: true, Command: []string{"true"}},
+		},
+		Sessions: config.SessionConfig{RootDir: filepath.Join(root, ".council", "runs")},
+	}
+	cfg.Normalize()
+	ctrl, err := orchestrate.NewController(cfg, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.StartRun("old run"); err != nil {
+		t.Fatal(err)
+	}
+	oldRun := ctrl.Run()
+	oldStore, err := runstore.OpenAt(oldRun.Dir, "session")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	broken, err := orchestrate.NewRun(cfg.Sessions.RootDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := broken.SaveState(string(config.PhasePlan), []string{"a"}, true); err != nil {
+		t.Fatal(err)
+	}
+	// No issue file: ResumeTarget reaches PlanPrompts and fails after UseRun
+	// selected this run, exercising transaction rollback.
+	m := NewModelWithConfig([]*agent.Session{agent.NewSession("a", cfg.Agents["a"], "")}, oldStore, cfg, "", nil, 0, nil, ctrl)
+	m.resumeRun(broken.Stamp)
+
+	if ctrl.Run() == nil || ctrl.Run().Stamp != oldRun.Stamp {
+		t.Fatalf("controller run = %+v, want restored %s", ctrl.Run(), oldRun.Stamp)
+	}
+	if m.Store != oldStore {
+		t.Fatal("failed resume replaced the model store")
+	}
+	if !strings.Contains(m.Status, "resume:") {
+		t.Fatalf("status = %q, want resume error", m.Status)
 	}
 }
 

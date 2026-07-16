@@ -513,8 +513,8 @@ func Aggregate(events []Event) Summary {
 	// a (tool, cwd, model) group from the provider's session files, so a later
 	// sweep supersedes an earlier one rather than adding to it. Its identity
 	// (reportedID) embeds the Replaces set, which grows every time a new estimate
-	// appears (a new prompt, amplified by the periodic auto-reconcile), so each
-	// sweep is persisted as a distinct event. Without collapsing them here,
+	// appears (for example, a new prompt between explicit reconciles), so each
+	// persisted sweep is a distinct event. Without collapsing them here,
 	// Aggregate would SUM N sweeps for the same group and multiply the reported
 	// Input/Output/Cost by N. Keep only the richest (max-token) provider event
 	// per group; because cumulative session totals only grow, richest == latest.

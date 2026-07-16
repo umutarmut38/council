@@ -72,8 +72,7 @@ EOF
     [[ -d "$ws/claude-a" && -d "$ws/claude-b" ]] || { echo "expected two distinct freestyle worktrees under $ws" >&2; ls -la "$ws" >&2 2>/dev/null || true; exit 1; }
     events="$(latest_events)"
     assert_file "$events"
-    # Reconcile idempotently in case the live tick hadn't fired at capture time.
-    "$COUNCIL_BIN" cost "$(basename "$(latest_run)")" >"$CASE_DIR/cost.out" 2>&1 || true
+    # Final reconciliation persists the provider rows after the TUI exits.
     # Distinct worktree cwds → PER-PANE reported rows (100 vs 200), not combined.
     assert_grep '"agent":"claude-a".*"source":"provider.session".*"input_tokens":100' "$events"
     assert_grep '"agent":"claude-b".*"source":"provider.session".*"input_tokens":200' "$events"

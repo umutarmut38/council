@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -51,6 +52,7 @@ type AgentOutputMsg struct {
 	Name    string
 	Session *agent.Session
 	Data    []byte
+	End     int64
 }
 
 type AgentExitMsg struct {
@@ -70,17 +72,18 @@ type initialPromptMsg string
 type initialAgentPromptsMsg map[string]string
 type phasePromptsMsg map[string]string
 
-// usageTickMsg drives the periodic live reconcile while agents are producing
-// output; usageReconciledMsg carries the result back to the Update goroutine.
+// usageTickMsg drives the TUI heartbeat.
 type usageTickMsg struct{}
-type usageReconciledMsg struct{ rollup map[string]reconciledCost }
 
 // costViewMsg is the /cost view rendered off-thread (empty body = no usage yet).
 type costViewMsg struct {
-	stamp  string
-	body   string
-	rollup map[string]reconciledCost
-	err    error
+	stamp    string
+	runDir   string
+	request  uint64
+	body     string
+	rollup   map[string]reconciledCost
+	err      error
+	revision uint64
 }
 
 type pollArtifactsMsg struct{}
@@ -122,6 +125,10 @@ type agentView struct {
 
 	Lines   []string
 	Partial string
+	// usageOutputUnits is cumulative cleaned output observed from this PTY.
+	// Unlike Lines/Partial it is never trimmed with the display scrollback.
+	usageOutputUnits int
+	usageUTF8Tail    []byte
 
 	Screen    [][]screenCell
 	Width     int
@@ -244,27 +251,26 @@ type Model struct {
 	// in View.
 	usageTally map[string]usage.TokenPair
 	usageRate  map[string]usage.Rate
-	// usageOutputSeen is the transcript-token total already recorded per agent,
-	// so each flush appends only the delta. In-memory only: every TUI process
-	// starts with fresh PTY transcripts, so its deltas are relative to its own
-	// recorded output.
-	usageOutputSeen map[string]int
+	// usageOutputSeen is the transcript-token total already recorded per PTY
+	// session, so replacements of the same named agent get an independent
+	// watermark and each flush appends only that session's delta.
+	usageOutputSeen map[*agent.Session]int
 	usagePricer     *usage.Pricer
-	// usageReconciled holds per-agent priced totals from the last reconcile
-	// (the 1s tick or /cost), so the header/badge show reported cost (real
-	// session tokens) instead of only the estimated floor. Nil until then.
+	// usageReconciled holds per-agent priced totals from /cost, so the header/badge
+	// can show reported cost instead of only the estimated floor. A new local event
+	// invalidates the affected snapshot.
 	usageReconciled map[string]reconciledCost
-	// usageDirty is set when an agent produced output since the last reconcile;
-	// the tick only reconciles when dirty, so idle panes cost no disk I/O.
-	usageDirty bool
-	// usageReconcileBusy guards against overlapping off-thread reconciles.
+	// usageRevision changes whenever a local event advances the live estimate;
+	// an older /cost result cannot replace a newer header/badge value.
+	usageRevision uint64
+	// usageRunDir identifies the ledger represented by the live tally/snapshot.
+	usageRunDir string
+	// usageReconcileBusy guards against overlapping explicit /cost requests.
 	usageReconcileBusy bool
-	// usageLastReconcile is when the last sweep was armed; sweeps are throttled
-	// to usageReconcileMinGap even though the tick stays at 1s.
-	usageLastReconcile time.Time
-	// directTyped accumulates printable direct-mode keystrokes per session,
+	usageCostRequest   uint64
+	// directTyped accumulates printable direct-mode keystrokes per PTY session,
 	// metered as an estimate event when Enter submits. Update-goroutine only.
-	directTyped  map[string]string
+	directTyped  map[*agent.Session]string
 	buildActive  int  // cached live build activity; updated off-thread by buildProgressResultMsg
 	buildTotal   int  // cached worktree count from the same probe
 	layoutLocked bool // user adjusted rows/cols in settings: adaptive off
@@ -482,9 +488,8 @@ func (m Model) Init() tea.Cmd {
 			return initialPromptMsg(m.initialPrompt)
 		}))
 	}
-	// The 1s tick runs unconditionally: besides driving cost reconcile (which
-	// self-guards on usage.enabled), it expires status toasts and refreshes
-	// per-pane idle ages even when usage is off.
+	// The 1s tick runs unconditionally to expire status toasts and refresh
+	// per-pane idle ages, even when usage is off.
 	cmds = append(cmds, usageTickCmd())
 	return tea.Batch(cmds...)
 }
@@ -556,35 +561,41 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case AgentOutputMsg:
+		if msg.End > 0 && msg.Session.OutputAcknowledged(msg.End) {
+			return m, nil
+		}
 		// The integrated editor's PTY is not in m.Agents, so route it explicitly.
 		if m.editorView != nil && msg.Session == m.editorView.Session {
 			m.appendOutput(m.editorView, string(msg.Data))
+			msg.Session.AckOutput(msg.End)
 			return m, nil
 		}
 		if view := m.findAgentForMessage(msg.Name, msg.Session); view != nil {
 			m.appendOutput(view, string(msg.Data))
-			m.usageDirty = true // agent is doing stuff → let the tick reconcile
+			if m.Config.Usage.Enabled {
+				m.usageRevision++
+			}
+			msg.Session.AckOutput(msg.End)
 			if m.noteAttentionOutput(view) {
 				return m, m.scheduleAttentionCheck()
 			}
+		} else {
+			msg.Session.AckOutput(msg.End)
 		}
 		return m, nil
 	case attentionCheckMsg:
 		return m, m.runAttentionCheck()
 	case usageTickMsg:
-		cmds := []tea.Cmd{usageTickCmd()} // always re-arm
-		if c := m.maybeReconcileCmd(); c != nil {
-			cmds = append(cmds, c)
-		}
-		return m, tea.Batch(cmds...)
-	case usageReconciledMsg:
-		m.usageReconcileBusy = false
-		if msg.rollup != nil {
-			m.usageReconciled = msg.rollup
-		}
-		return m, nil
+		return m, usageTickCmd()
 	case costViewMsg:
+		if msg.request != m.usageCostRequest {
+			return m, nil
+		}
 		m.usageReconcileBusy = false
+		if msg.runDir != m.activeUsageRunDir() || msg.revision != m.usageRevision {
+			m.Status = "cost -- result stale; run /cost again"
+			return m, nil
+		}
 		switch {
 		case msg.err != nil:
 			m.Status = "cost: " + msg.err.Error()
@@ -621,24 +632,26 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if view := m.findAgentForMessage(msg.Name, msg.Session); view != nil {
+			if err := m.recordUsageOutput(view); err != nil {
+				m.Status = "usage: " + err.Error()
+			}
 			if msg.ExitCode != nil {
 				view.Session.ExitCode = msg.ExitCode
 				view.Session.Done = true
-				m.appendOutput(view, fmt.Sprintf("\n[%s exited with code %d]\n", msg.Name, *msg.ExitCode))
+				m.appendSystemOutput(view, fmt.Sprintf("\n[%s exited with code %d]\n", msg.Name, *msg.ExitCode))
 			} else {
 				view.Session.Done = true
-				m.appendOutput(view, fmt.Sprintf("\n[%s exited]\n", msg.Name))
+				m.appendSystemOutput(view, fmt.Sprintf("\n[%s exited]\n", msg.Name))
 			}
 			if msg.Err != nil {
-				m.appendOutput(view, "exit error: "+msg.Err.Error()+"\n")
+				m.appendSystemOutput(view, "exit error: "+msg.Err.Error()+"\n")
 			}
-			m.usageDirty = true // capture the agent's final session write
 		}
 		return m, nil
 	case AgentStartErrorMsg:
 		if view := m.findAgentForMessage(msg.Name, msg.Session); view != nil {
 			view.Session.MarkStartError(msg.Err)
-			m.appendOutput(view, "start error: "+msg.Err.Error()+"\n")
+			m.appendSystemOutput(view, "start error: "+msg.Err.Error()+"\n")
 			m.Status = msg.Name + " failed to start"
 		}
 		return m, nil
@@ -839,12 +852,42 @@ func (m Model) View() string {
 }
 
 func (m *Model) appendOutput(view *agentView, chunk string) {
-	view.appendTranscript(chunk, m.MaxScrollback)
+	text := cleanTranscriptOutput(chunk)
+	if m.Config.Usage.Enabled {
+		view.addUsageOutput(text, m.Config.Usage.Estimator)
+	}
+	view.appendCleanTranscript(text, m.MaxScrollback)
 	view.applyTerminal(chunk)
 }
 
+func (m *Model) appendSystemOutput(view *agentView, chunk string) {
+	view.appendCleanTranscript(cleanTranscriptOutput(chunk), m.MaxScrollback)
+	view.applyTerminal(chunk)
+}
+
+func (v *agentView) addUsageOutput(text, estimator string) {
+	if estimator != usage.EstimatorRunes4 {
+		v.usageOutputUnits += len(text)
+		return
+	}
+	data := append(v.usageUTF8Tail, []byte(text)...)
+	v.usageUTF8Tail = nil
+	for len(data) > 0 {
+		if !utf8.FullRune(data) {
+			v.usageUTF8Tail = append([]byte(nil), data...)
+			return
+		}
+		_, size := utf8.DecodeRune(data)
+		v.usageOutputUnits++
+		data = data[size:]
+	}
+}
+
 func (v *agentView) appendTranscript(chunk string, maxScrollback int) {
-	text := cleanTranscriptOutput(chunk)
+	v.appendCleanTranscript(cleanTranscriptOutput(chunk), maxScrollback)
+}
+
+func (v *agentView) appendCleanTranscript(text string, maxScrollback int) {
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
 
@@ -1000,16 +1043,19 @@ func (m Model) agentExists(name string) bool {
 
 // ---- in-chat orchestration ----
 
-func (m Model) saveTranscripts() error {
+func (m *Model) saveTranscripts() error {
 	if m.Store == nil {
 		return nil
 	}
+	m.recoverPendingOutput()
 	for _, view := range m.Agents {
 		content := view.transcript()
 		if err := m.Store.SaveTranscript(view.Session.Name, content); err != nil {
 			return err
 		}
-		m.recordUsageOutput(view.Session, content)
+		if err := m.recordUsageOutput(view); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1023,18 +1069,29 @@ func (v *agentView) transcript() string {
 	return strings.Join(lines, "\n")
 }
 
-func (m Model) terminateAgents() {
+// FlushUsage persists transcript deltas from the final model before the launch
+// layer terminates every session it has registered.
+func (m *Model) FlushUsage() {
+	_ = m.flushUsageOutputs()
+}
+
+// RecoverFinalOutput ingests session output emitted after Program.Run stopped
+// accepting messages, then persists the corresponding usage delta.
+func (m *Model) RecoverFinalOutput() {
+	_ = m.flushUsageOutputs()
+}
+
+func (m *Model) recoverPendingOutput() {
 	for _, view := range m.Agents {
-		// Flush the final transcript delta before the pane dies so exit-time
-		// output isn't lost — reader-less tools have no provider store for
-		// FinalizeUsage to recover it from.
-		m.recordUsageOutput(view.Session, view.transcript())
-		_ = view.Session.Terminate()
-	}
-	// The integrated editor session is not in m.Agents; tear it down too so no
-	// editor process is leaked on quit.
-	if m.editorView != nil {
-		_ = m.editorView.Session.Terminate()
+		data, end := view.Session.PendingOutput()
+		if len(data) == 0 {
+			continue
+		}
+		m.appendOutput(view, string(data))
+		view.Session.AckOutput(end)
+		if m.Config.Usage.Enabled {
+			m.usageRevision++
+		}
 	}
 }
 

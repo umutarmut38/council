@@ -361,7 +361,6 @@ func (m *Model) handleEditorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc", "q":
 		m.closeEditor()
 	case "ctrl+x":
-		m.terminateAgents()
 		return m, tea.Quit
 	case "up", "k":
 		if m.editorTreeIndex > 0 {
@@ -403,7 +402,6 @@ func (m *Model) routeEditorPaneKey(msg tea.KeyMsg, backLabel string) (tea.Model,
 		m.Status = backLabel
 		return m, nil, true
 	case "ctrl+x":
-		m.terminateAgents()
 		return m, tea.Quit, true
 	}
 	m.sendKeyToSession(m.editorView.Session, msg)

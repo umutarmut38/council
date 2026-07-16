@@ -74,7 +74,7 @@ func TestSessionRunsCommand(t *testing.T) {
 	var exitErr error
 
 	err := s.Start(
-		func(name string, data []byte) {
+		func(name string, data []byte, _ int64) {
 			mu.Lock()
 			captured.Write(data)
 			mu.Unlock()

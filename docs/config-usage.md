@@ -28,18 +28,18 @@ agents:
 council only knows what it can observe locally, so cost is built in two layers,
 and every number carries a **confidence**:
 
-1. **Estimated floor.** As council sends a prompt and the pane streams output, it
-   counts the characters with a local estimator (`bytes4` — roughly 4 bytes per
-   token — or `runes4`) and prices them immediately. Input is measured from the
-   prompt the model actually sees (personality prefix + your text), *not* the
-   terminal control bytes on the wire; output is the transcript delta. This is a
-   live lower bound, shown as **estimated**.
-2. **Reported totals.** When an agent declares a `usage.tool`, council reads that
-   CLI's *own* session files (Claude Code, Codex, Copilot, opencode; cursor-agent
-   records no token counts) and reconciles the real numbers over the estimate,
-   shown as **reported**. Cached/reused context is kept in its own column and
-   priced at the cheaper cache-read rate rather than double-charged as fresh
-   input.
+1. **Estimated floor.** Council prices each prompt immediately with a local
+   estimator (`bytes4` — roughly 4 bytes per token — or `runes4`). Input is
+   measured from the prompt the model actually sees (personality prefix + your
+   text), *not* the terminal control bytes on the wire. Output is the transcript
+   delta, flushed at the next prompt, `/save`, or pane termination. This lower
+   bound is shown as **estimated**.
+2. **Reported totals.** When you request `/cost`, or after the TUI exits, council
+   reads each declared `usage.tool` CLI's *own* session files (Claude Code,
+   Codex, Copilot, opencode; cursor-agent records no token counts) and reconciles
+   the real numbers over the estimate, shown as **reported**. Cached/reused
+   context is kept in its own column and priced at the cheaper cache-read rate
+   rather than double-charged as fresh input.
 
 council never guesses an agent's tool or model from its `command` — set
 `usage.tool` and `usage.model` explicitly, or the row stays an estimate. An
@@ -63,20 +63,21 @@ sub-cent costs show extra decimals (`~$0.0047`) instead of rounding to `$0.00`.
 table and a share bar of where the run's spend went:
 
 ```text
-Agent          Phase    Tool   Model         Input  Cache  Output  Cost     Source           Confidence
-codex-builder  session  codex  gpt-5.4-mini  8.8k   4.5k   36      $0.01    litellm-bundled  exact
-codex-planner  session  codex  gpt-5.4-mini  5.3k   8.1k   36      $0.0047  litellm-bundled  exact
-Total                                         14.1k  12.6k  72      $0.0147
+Agent          Phase    Tool   Model         Input  CacheW  CacheR  Output  Cost     Source           Confidence
+codex-builder  session  codex  gpt-5.4-mini  8.8k   -       4.5k    36      $0.01    litellm-bundled  exact
+codex-planner  session  codex  gpt-5.4-mini  5.3k   -       8.1k    36      $0.0047  litellm-bundled  exact
+Total                                         14.1k  -       12.6k   72      $0.0147
 
 Share:
 codex-builder  ███████████░░░░░░░░░  68%  $0.01
 codex-planner  ██████░░░░░░░░░░░░░░░  32%  $0.0047
 ```
 
-**Input** is *fresh* input only; **Cache** is the reused context, priced at the
-cache-read rate. That split is why two panes that sent nearly the same context can
-cost different amounts — above, the planner sent less fresh input and hit cache
-more, so it is cheaper despite the near-identical total. **Source** and
+**Input** is *fresh* input only; **CacheW** is context written for later reuse,
+and **CacheR** is reused context read at the cheaper cache rate. That split is why
+two panes that sent nearly the same context can cost different amounts — above,
+the planner sent less fresh input and hit cache more, so it is cheaper despite the
+near-identical total. **Source** and
 **Confidence** describe the *price* (where the rate came from and whether it was
 an exact table match), not the token counts. The header carries the run total
 (right-pinned), and while you type, the composer shows a live `~N tok` estimate of
@@ -89,8 +90,9 @@ credits only sessions whose activity overlaps the run. Two same-tool panes shari
 one directory can't be told apart, so they report as a single combined row; give
 them distinct directories with [`worktrees.freestyle`](config-worktrees.md) for a
 per-pane breakdown. A few CLIs (notably Copilot) write their totals only when the
-process exits, so their input shows the estimate live and upgrades to the reported
-number once the pane — or council — exits.
+process exits, so their input stays estimated while the pane is running. After the
+pane exits, request `/cost` to see its reported total, or quit council and let the
+final reconciliation update persisted history automatically.
 
 **Pricing** resolves a model in order: a user `usage.prices` profile → a user or
 built-in `usage.model_aliases` → a fresh LiteLLM cache → the bundled LiteLLM

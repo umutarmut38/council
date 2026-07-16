@@ -14,7 +14,7 @@ import (
 	"github.com/umutarmut38/council/internal/config"
 )
 
-type OutputFunc func(name string, data []byte)
+type OutputFunc func(name string, data []byte, end int64)
 type ExitFunc func(name string, exitCode *int, err error)
 
 // ptyConn is the platform-specific pseudo-terminal backing a Session. Unix
@@ -51,6 +51,16 @@ type Session struct {
 	desiredCols int
 	desiredRows int
 	mu          sync.Mutex
+	doneCh      chan struct{}
+	doneOnce    sync.Once
+	started     bool
+	stopping    bool
+	processDone bool
+
+	outputMu      sync.Mutex
+	outputBase    int64
+	outputEnd     int64
+	outputPending []byte
 
 	// Until EnableRawLog attaches a file (the interactive run dir is created
 	// lazily on the first prompt), pre-prompt PTY output — banners, auth
@@ -83,6 +93,7 @@ func NewSession(name string, cfg config.AgentConfig, rawLogPath string) *Session
 		Name:       name,
 		Config:     cfg,
 		RawLogPath: rawLogPath,
+		doneCh:     make(chan struct{}),
 	}
 }
 
@@ -97,16 +108,23 @@ func (s *Session) Start(onOutput OutputFunc, onExit ExitFunc) error {
 	// the lock because EnableRawLog may set it concurrently, so a /restart after
 	// the first prompt relaunches with logging from process start.
 	s.mu.Lock()
+	if s.stopping || s.processDone || s.started {
+		s.mu.Unlock()
+		return errors.New("agent session is stopping or already started")
+	}
+	s.started = true
 	rawPath := s.RawLogPath
 	s.mu.Unlock()
 
 	var rawLog *os.File
 	if rawPath != "" {
 		if err := os.MkdirAll(filepath.Dir(rawPath), 0o755); err != nil {
+			s.failStart()
 			return err
 		}
 		f, err := os.OpenFile(rawPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 		if err != nil {
+			s.failStart()
 			return err
 		}
 		rawLog = f
@@ -115,6 +133,7 @@ func (s *Session) Start(onOutput OutputFunc, onExit ExitFunc) error {
 	cwd, err := expandPath(s.Config.CWD)
 	if err != nil {
 		closeFile(rawLog)
+		s.failStart()
 		return err
 	}
 
@@ -123,10 +142,19 @@ func (s *Session) Start(onOutput OutputFunc, onExit ExitFunc) error {
 	conn, err := startPTY(s.Config, cwd, terminalEnv(s.Config), cols, rows)
 	if err != nil {
 		closeFile(rawLog)
+		s.failStart()
 		return err
 	}
 
 	s.mu.Lock()
+	if s.stopping {
+		s.mu.Unlock()
+		closeFile(rawLog)
+		_ = conn.Close()
+		s.finish(nil)
+		s.doneOnce.Do(func() { close(s.doneCh) })
+		return errors.New("agent session stopped during start")
+	}
 	s.conn = conn
 	s.mu.Unlock()
 	if rawLog != nil {
@@ -135,6 +163,62 @@ func (s *Session) Start(onOutput OutputFunc, onExit ExitFunc) error {
 
 	go s.run(onOutput, onExit)
 	return nil
+}
+
+func (s *Session) failStart() {
+	s.finish(nil)
+	s.doneOnce.Do(func() { close(s.doneCh) })
+}
+
+// AckOutput releases emitted bytes through end after Bubble Tea has applied
+// the corresponding output message to the model.
+func (s *Session) AckOutput(end int64) {
+	s.outputMu.Lock()
+	defer s.outputMu.Unlock()
+	if end <= s.outputBase {
+		return
+	}
+	if end > s.outputEnd {
+		end = s.outputEnd
+	}
+	drop := end - s.outputBase
+	if drop >= int64(len(s.outputPending)) {
+		s.outputPending = nil
+	} else {
+		s.outputPending = append([]byte(nil), s.outputPending[drop:]...)
+	}
+	s.outputBase = end
+}
+
+func (s *Session) OutputAcknowledged(end int64) bool {
+	s.outputMu.Lock()
+	defer s.outputMu.Unlock()
+	return end <= s.outputBase
+}
+
+// PendingOutput returns the emitted suffix Bubble Tea has not acknowledged.
+func (s *Session) PendingOutput() (data []byte, end int64) {
+	s.outputMu.Lock()
+	defer s.outputMu.Unlock()
+	return append([]byte(nil), s.outputPending...), s.outputEnd
+}
+
+// TrackOutput retains output until the consumer acknowledges the returned end
+// offset. Session.run uses this before invoking its output callback.
+func (s *Session) TrackOutput(data []byte) int64 {
+	s.outputMu.Lock()
+	defer s.outputMu.Unlock()
+	s.outputPending = append(s.outputPending, data...)
+	s.outputEnd += int64(len(data))
+	return s.outputEnd
+}
+
+func (s *Session) emitOutput(onOutput OutputFunc, data []byte) {
+	if onOutput == nil || len(data) == 0 {
+		return
+	}
+	end := s.TrackOutput(data)
+	onOutput(s.Name, data, end)
 }
 
 // EnableRawLog opens the raw PTY log once the run directory exists, turning on
@@ -177,7 +261,7 @@ func (s *Session) EnableRawLog(path string) error {
 	// goroutine already swapped nil out and won't close ours, so reclaim it.
 	s.mu.Lock()
 	s.RawLogPath = path
-	done := s.Done
+	done := s.processDone
 	s.mu.Unlock()
 	if done {
 		if rl := s.rawLog.Swap(nil); rl != nil {
@@ -237,17 +321,39 @@ func (s *Session) startupSize() (int, int) {
 
 func (s *Session) MarkStartError(err error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	s.StartError = err
 	s.Done = true
+	s.processDone = true
+	s.mu.Unlock()
+	s.doneOnce.Do(func() { close(s.doneCh) })
+}
+
+// WaitDone waits up to timeout for a started session's reader, forwarder, and
+// process waiter to finish. It is intended for post-Program cleanup; waiting
+// inside Bubble Tea Update could deadlock an output callback in Program.Send.
+func (s *Session) WaitDone(timeout time.Duration) bool {
+	s.mu.Lock()
+	started := s.started
+	doneCh := s.doneCh
+	s.mu.Unlock()
+	if !started {
+		return true
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-doneCh:
+		return true
+	case <-timer.C:
+		return false
+	}
 }
 
 func (s *Session) WriteString(value string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.Done {
+	if s.processDone {
 		return errors.New("agent has exited")
 	}
 	if s.conn == nil {
@@ -267,7 +373,7 @@ func (s *Session) Resize(cols, rows int) error {
 		s.desiredRows = rows
 	}
 	conn := s.conn
-	done := s.Done
+	done := s.processDone
 	s.mu.Unlock()
 
 	if done || conn == nil || cols <= 0 || rows <= 0 || !resizeEnabled(s.Config) {
@@ -278,8 +384,10 @@ func (s *Session) Resize(cols, rows int) error {
 
 func (s *Session) Terminate() error {
 	s.mu.Lock()
+	s.stopping = true
 	conn := s.conn
-	done := s.Done
+	done := s.processDone
+	started := s.started
 	s.mu.Unlock()
 
 	// Release the raw log even when the session never started (conn == nil) or
@@ -298,6 +406,10 @@ func (s *Session) Terminate() error {
 	s.rawMu.Unlock()
 
 	if done || conn == nil {
+		if !started {
+			s.finish(nil)
+			s.doneOnce.Do(func() { close(s.doneCh) })
+		}
 		return nil
 	}
 
@@ -311,6 +423,7 @@ func (s *Session) Terminate() error {
 // concurrently because a ConPTY output pipe does not reach EOF when the child
 // exits — the waiter has to release the reader once the process is gone.
 func (s *Session) run(onOutput OutputFunc, onExit ExitFunc) {
+	defer s.doneOnce.Do(func() { close(s.doneCh) })
 	readDone := make(chan struct{})
 	procDone := make(chan struct{})
 	fwdDone := make(chan struct{})
@@ -332,9 +445,7 @@ func (s *Session) run(onOutput OutputFunc, onExit ExitFunc) {
 	go func() {
 		defer close(fwdDone)
 		coalesceOutput(chunks, maxCoalesceBytes, func(b []byte) {
-			if onOutput != nil {
-				onOutput(s.Name, b)
-			}
+			s.emitOutput(onOutput, b)
 		})
 	}()
 
@@ -412,10 +523,8 @@ func coalesceOutput(in <-chan []byte, maxBytes int, emit func([]byte)) {
 
 func (s *Session) finish(exitCode *int) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	s.Done = true
-	s.ExitCode = exitCode
+	s.processDone = true
+	s.mu.Unlock()
 }
 
 func normalizeReadExitError(readErr error, waitErr error) error {
